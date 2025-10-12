@@ -426,11 +426,6 @@ class ApiService {
     return this.request('/grading/queue');
   }
 
-  // Dashboard Stats
-  async getDashboardStats() {
-    return this.request('/dashboard/stats');
-  }
-
   // Health check
   async checkHealth() {
     return this.request('/health');
