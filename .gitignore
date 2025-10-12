@@ -1,0 +1,40 @@
+# ===== Node =====
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+
+# ===== Build =====
+dist/
+build/
+.cache/
+.temp/
+
+# ===== Ambiente =====
+.env
+.env.*        # ignora todos os .env (como .env.local, .env.production, etc)
+
+# ===== Logs =====
+logs/
+*.log
+*.log.*
+log.txt
+
+# ===== Editor / Sistema =====
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===== Testes =====
+coverage/
+*.lcov
+
+# ===== TypeScript =====
+*.tsbuildinfo
+
+# ===== Outros =====
+*.bak
+*.tmp
