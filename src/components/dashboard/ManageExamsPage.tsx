@@ -204,12 +204,13 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               font-weight: normal;
             }
             .info-section {
-              display: flex;
-              justify-content: space-between;
               margin-bottom: 20px;
               padding: 15px;
               background: #f1f5f9;
               border-radius: 8px;
+              display: grid;
+              grid-template-columns: 1fr 1fr 1fr;
+              gap: 15px;
             }
             .info-item {
               display: flex;
@@ -230,25 +231,27 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               min-width: 200px;
             }
             .qr-section {
-              position: absolute;
-              top: 20px;
-              right: 20px;
+              margin: 20px auto;
               text-align: center;
-              padding: 10px;
+              padding: 15px;
               border: 2px solid #1e40af;
               border-radius: 8px;
+              max-width: 180px;
+              background: white;
             }
             .qr-code {
-              width: 100px;
-              height: 100px;
+              width: 120px;
+              height: 120px;
               margin: 10px auto;
               background: white;
               border: 1px solid #cbd5e1;
+              padding: 5px;
             }
             .qr-label {
-              font-size: 10px;
+              font-size: 11px;
               color: #64748b;
-              margin-top: 5px;
+              margin-top: 8px;
+              font-weight: 600;
             }
             .answer-grid {
               margin-top: 20px;
@@ -325,14 +328,6 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </style>
         </head>
         <body>
-          <div class="qr-section">
-            <div style="font-size: 11px; font-weight: 600; color: #1e40af;">CÓDIGO DO SIMULADO</div>
-            <div class="qr-code">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
-            </div>
-            <div class="qr-label">ID: ${examId}</div>
-          </div>
-          
           <div class="header">
             <h1>CARTÃO RESPOSTA</h1>
             <h2>${examTitle}</h2>
@@ -354,6 +349,14 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               <div class="info-label">Turma</div>
               <div class="info-value">&nbsp;</div>
             </div>
+          </div>
+          
+          <div class="qr-section">
+            <div style="font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 8px;">CÓDIGO DO SIMULADO</div>
+            <div class="qr-code">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
+            </div>
+            <div class="qr-label">ID: ${examId.substring(0, 8)}...</div>
           </div>
           
           <div class="answer-grid">
