@@ -126,14 +126,52 @@ export function ApplyExamsPage() {
           return;
         }
         
-        const examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title);
+        const examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title).map((exam: any) => {
+          // Log completo do exam para debug
+          console.log('Raw exam data:', {
+            id: exam.id,
+            title: exam.title,
+            subjects: exam.subjects,
+            questionsPerSubject: exam.questionsPerSubject,
+            totalQuestions: exam.totalQuestions
+          });
+          
+          // Calcula o total de questões de múltiplas formas
+          let calculatedTotal = 0;
+          
+          // Método 1: subjects array × questionsPerSubject
+          if (exam.subjects && Array.isArray(exam.subjects) && exam.subjects.length > 0) {
+            calculatedTotal = exam.subjects.length * (exam.questionsPerSubject || 0);
+            console.log(`Method 1: ${exam.subjects.length} subjects × ${exam.questionsPerSubject} = ${calculatedTotal}`);
+          }
+          
+          // Método 2: Usar totalQuestions se existir
+          if (!calculatedTotal && exam.totalQuestions) {
+            calculatedTotal = exam.totalQuestions;
+            console.log(`Method 2: Using existing totalQuestions = ${calculatedTotal}`);
+          }
+          
+          // Método 3: Contar questões reais se existirem
+          if (!calculatedTotal && exam.questions && Array.isArray(exam.questions)) {
+            calculatedTotal = exam.questions.length;
+            console.log(`Method 3: Counting actual questions = ${calculatedTotal}`);
+          }
+          
+          console.log(`Final calculated total for ${exam.title}: ${calculatedTotal} questions`);
+          
+          return {
+            ...exam,
+            totalQuestions: calculatedTotal
+          };
+        });
+        
         console.log(`✓ ApplyExamsPage: Loaded ${examsList.length} valid exams out of ${examsRes.exams?.length || 0} total`);
         
         if (examsList.length === 0 && examsRes.exams?.length > 0) {
           console.warn('⚠️ ApplyExamsPage: Some exams were filtered out. Raw exams:', examsRes.exams);
         }
         
-        console.log('ApplyExamsPage: Final exams list:', examsList);
+        console.log('ApplyExamsPage: Final exams list with calculated totals:', examsList);
         setExams(examsList);
         
         if (examsList.length === 0) {
@@ -393,7 +431,8 @@ export function ApplyExamsPage() {
                             console.log('Rendering exam option:', exam.id, exam.title, exam.status);
                             return (
                               <SelectItem key={exam.id} value={exam.id}>
-                                {exam.title} ({exam.totalQuestions || 0} questões, {exam.timeLimit}min)
+                                {exam.title} (
+                                {exam.totalQuestions || (exam.subjects?.length || 0) * (exam.questionsPerSubject || 0)} questões, {exam.timeLimit}min)
                               </SelectItem>
                             );
                           })
@@ -424,7 +463,10 @@ export function ApplyExamsPage() {
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div className="flex items-center">
                           <Target className="w-4 h-4 mr-2 text-blue-600" />
-                          <span>{getSelectedExam()?.totalQuestions} questões</span>
+                          <span>
+                            {getSelectedExam()?.totalQuestions || 
+                             (getSelectedExam()?.subjects?.length || 0) * (getSelectedExam()?.questionsPerSubject || 0)} questões
+                          </span>
                         </div>
                         <div className="flex items-center">
                           <Clock className="w-4 h-4 mr-2 text-green-600" />
@@ -797,7 +839,10 @@ export function ApplyExamsPage() {
                       
                       <div className="flex justify-between">
                         <span className="text-muted-foreground">Total de questões:</span>
-                        <span className="font-medium">{getSelectedExam()?.totalQuestions}</span>
+                        <span className="font-medium">
+                          {getSelectedExam()?.totalQuestions || 
+                           (getSelectedExam()?.subjects?.length || 0) * (getSelectedExam()?.questionsPerSubject || 0)}
+                        </span>
                       </div>
                       
                       <div className="flex justify-between">
