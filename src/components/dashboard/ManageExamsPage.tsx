@@ -141,9 +141,22 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
   const handleDownloadAnswerSheet = async (exam: any) => {
     try {
       // Gera o cartão resposta em PDF ou abre em nova aba para impressão
-      const totalQuestions = exam.totalQuestions || 0;
+      const totalQuestions = exam.questions?.length || 0;
       const examTitle = exam.title || 'Simulado';
       const examId = exam.id || '';
+      
+      // Validação: não gerar cartão vazio
+      if (totalQuestions === 0) {
+        toast.error('Este simulado não possui questões cadastradas');
+        return;
+      }
+      
+      console.log('📄 Gerando cartão resposta:', {
+        examId,
+        examTitle,
+        totalQuestions,
+        questionsArray: exam.questions
+      });
       
       // URL do QR Code - pode ser um link para o sistema de correção
       const qrCodeUrl = `${window.location.origin}/correcao?exam=${examId}`;
@@ -323,6 +336,9 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           <div class="header">
             <h1>CARTÃO RESPOSTA</h1>
             <h2>${examTitle}</h2>
+            <div style="color: #64748b; font-size: 13px; margin-top: 5px;">
+              Total de questões: ${totalQuestions}
+            </div>
           </div>
           
           <div class="info-section">
