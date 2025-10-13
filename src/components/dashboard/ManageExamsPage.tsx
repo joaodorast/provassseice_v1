@@ -176,7 +176,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           <style>
             @page { 
               size: A4;
-              margin: 10mm;
+              margin: 12mm;
             }
             * {
               margin: 0;
@@ -184,126 +184,187 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               box-sizing: border-box;
             }
             body {
-              font-family: Arial, sans-serif;
-              padding: 20px;
+              font-family: 'Segoe UI', Arial, sans-serif;
+              padding: 15px;
+              background: white;
+            }
+            .container {
+              max-width: 100%;
+              margin: 0 auto;
             }
             .header {
               text-align: center;
-              margin-bottom: 20px;
-              padding-bottom: 10px;
-              border-bottom: 2px solid #1e40af;
+              margin-bottom: 15px;
+              padding-bottom: 12px;
+              border-bottom: 3px solid #1e40af;
+              background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+              padding: 15px;
+              border-radius: 8px;
             }
             .header h1 {
               color: #1e40af;
-              font-size: 24px;
-              margin-bottom: 5px;
+              font-size: 26px;
+              margin-bottom: 6px;
+              font-weight: 700;
+              letter-spacing: 1px;
             }
             .header h2 {
               color: #334155;
-              font-size: 16px;
-              font-weight: normal;
+              font-size: 17px;
+              font-weight: 600;
+              margin-bottom: 4px;
+            }
+            .header .meta {
+              color: #64748b;
+              font-size: 12px;
+              margin-top: 6px;
+              font-weight: 500;
+            }
+            .top-section {
+              display: flex;
+              gap: 15px;
+              margin-bottom: 15px;
             }
             .info-section {
-              margin-bottom: 20px;
-              padding: 15px;
-              background: #f1f5f9;
+              flex: 1;
+              padding: 12px;
+              background: #f8fafc;
               border-radius: 8px;
-              display: grid;
-              grid-template-columns: 1fr 1fr 1fr;
-              gap: 15px;
+              border: 1px solid #e2e8f0;
+            }
+            .info-row {
+              display: flex;
+              gap: 12px;
+              margin-bottom: 10px;
+            }
+            .info-row:last-child {
+              margin-bottom: 0;
             }
             .info-item {
-              display: flex;
-              flex-direction: column;
+              flex: 1;
             }
             .info-label {
-              font-size: 11px;
+              font-size: 10px;
               color: #64748b;
               text-transform: uppercase;
-              margin-bottom: 3px;
+              margin-bottom: 4px;
+              font-weight: 600;
+              letter-spacing: 0.5px;
             }
             .info-value {
-              font-size: 14px;
+              font-size: 13px;
               color: #1e293b;
               font-weight: 600;
-              border-bottom: 1px solid #cbd5e1;
-              padding-bottom: 3px;
-              min-width: 200px;
+              border-bottom: 1.5px solid #cbd5e1;
+              padding-bottom: 4px;
+              min-height: 24px;
             }
             .qr-section {
-              margin: 20px auto;
+              width: 160px;
               text-align: center;
-              padding: 15px;
+              padding: 12px;
               border: 2px solid #1e40af;
               border-radius: 8px;
-              max-width: 180px;
               background: white;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            }
+            .qr-title {
+              font-size: 11px;
+              font-weight: 700;
+              color: #1e40af;
+              margin-bottom: 8px;
+              text-transform: uppercase;
+              letter-spacing: 0.5px;
             }
             .qr-code {
-              width: 120px;
-              height: 120px;
-              margin: 10px auto;
+              width: 100px;
+              height: 100px;
+              margin: 8px auto;
               background: white;
               border: 1px solid #cbd5e1;
-              padding: 5px;
+              padding: 4px;
+              border-radius: 4px;
             }
             .qr-label {
-              font-size: 11px;
+              font-size: 10px;
               color: #64748b;
-              margin-top: 8px;
+              margin-top: 6px;
               font-weight: 600;
             }
             .answer-grid {
-              margin-top: 20px;
+              margin-top: 15px;
+              border: 1px solid #e2e8f0;
+              border-radius: 8px;
+              overflow: hidden;
+            }
+            .grid-header {
+              background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+              color: white;
+              padding: 8px 12px;
+              font-size: 13px;
+              font-weight: 600;
+              letter-spacing: 0.5px;
             }
             .question-row {
               display: flex;
               align-items: center;
-              padding: 8px 10px;
+              padding: 6px 12px;
               border-bottom: 1px solid #e2e8f0;
+              page-break-inside: avoid;
             }
             .question-row:nth-child(even) {
               background: #f8fafc;
             }
+            .question-row:last-child {
+              border-bottom: none;
+            }
             .question-number {
-              width: 40px;
-              font-weight: 600;
+              width: 35px;
+              font-weight: 700;
               color: #1e40af;
-              font-size: 14px;
+              font-size: 13px;
+              flex-shrink: 0;
             }
             .options {
               display: flex;
-              gap: 15px;
+              gap: 18px;
               flex: 1;
+              align-items: center;
             }
             .option {
               display: flex;
               align-items: center;
-              gap: 5px;
+              gap: 4px;
             }
             .bubble {
-              width: 20px;
-              height: 20px;
-              border: 2px solid #1e40af;
+              width: 18px;
+              height: 18px;
+              border: 2.5px solid #1e40af;
               border-radius: 50%;
               display: inline-block;
+              flex-shrink: 0;
             }
             .option-label {
-              font-weight: 600;
+              font-weight: 700;
               color: #334155;
-              font-size: 13px;
+              font-size: 12px;
             }
             .instructions {
-              margin-top: 20px;
-              padding: 15px;
-              background: #fef3c7;
+              margin-top: 15px;
+              padding: 12px 15px;
+              background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
               border-left: 4px solid #f59e0b;
-              border-radius: 4px;
+              border-radius: 6px;
+              page-break-inside: avoid;
             }
             .instructions h3 {
               color: #92400e;
-              font-size: 14px;
+              font-size: 13px;
               margin-bottom: 8px;
+              font-weight: 700;
+              display: flex;
+              align-items: center;
+              gap: 6px;
             }
             .instructions ul {
               list-style: none;
@@ -311,93 +372,111 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             }
             .instructions li {
               color: #78350f;
-              font-size: 12px;
+              font-size: 11px;
               margin-bottom: 4px;
-              padding-left: 15px;
+              padding-left: 16px;
               position: relative;
+              line-height: 1.4;
             }
             .instructions li:before {
-              content: "•";
+              content: "✓";
               position: absolute;
               left: 0;
+              color: #f59e0b;
+              font-weight: bold;
             }
             @media print {
               .no-print { display: none; }
-              body { padding: 0; }
+              body { 
+                padding: 0;
+                background: white;
+              }
+              .container {
+                padding: 0;
+              }
             }
           </style>
         </head>
         <body>
-          <div class="header">
-            <h1>CARTÃO RESPOSTA</h1>
-            <h2>${examTitle}</h2>
-            <div style="color: #64748b; font-size: 13px; margin-top: 5px;">
-              Total de questões: ${totalQuestions}
+          <div class="container">
+            <div class="header">
+              <h1>CARTÃO RESPOSTA</h1>
+              <h2>${examTitle}</h2>
+              <div class="meta">
+                Total de questões: ${totalQuestions} | Data: ${new Date().toLocaleDateString('pt-BR')}
+              </div>
             </div>
-          </div>
-          
-          <div class="info-section">
-            <div class="info-item">
-              <div class="info-label">Nome do Aluno</div>
-              <div class="info-value">&nbsp;</div>
-            </div>
-            <div class="info-item">
-              <div class="info-label">Matrícula</div>
-              <div class="info-value">&nbsp;</div>
-            </div>
-            <div class="info-item">
-              <div class="info-label">Turma</div>
-              <div class="info-value">&nbsp;</div>
-            </div>
-          </div>
-          
-          <div class="qr-section">
-            <div style="font-size: 12px; font-weight: 700; color: #1e40af; margin-bottom: 8px;">CÓDIGO DO SIMULADO</div>
-            <div class="qr-code">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=120x120&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
-            </div>
-            <div class="qr-label">ID: ${examId.substring(0, 8)}...</div>
-          </div>
-          
-          <div class="answer-grid">
-            ${Array.from({ length: totalQuestions }, (_, i) => `
-              <div class="question-row">
-                <div class="question-number">${String(i + 1).padStart(2, '0')}</div>
-                <div class="options">
-                  <div class="option">
-                    <span class="bubble"></span>
-                    <span class="option-label">A</span>
+            
+            <div class="top-section">
+              <div class="info-section">
+                <div class="info-row">
+                  <div class="info-item">
+                    <div class="info-label">Nome do Aluno</div>
+                    <div class="info-value">&nbsp;</div>
                   </div>
-                  <div class="option">
-                    <span class="bubble"></span>
-                    <span class="option-label">B</span>
+                </div>
+                <div class="info-row">
+                  <div class="info-item">
+                    <div class="info-label">Matrícula</div>
+                    <div class="info-value">&nbsp;</div>
                   </div>
-                  <div class="option">
-                    <span class="bubble"></span>
-                    <span class="option-label">C</span>
-                  </div>
-                  <div class="option">
-                    <span class="bubble"></span>
-                    <span class="option-label">D</span>
-                  </div>
-                  <div class="option">
-                    <span class="bubble"></span>
-                    <span class="option-label">E</span>
+                  <div class="info-item">
+                    <div class="info-label">Turma</div>
+                    <div class="info-value">&nbsp;</div>
                   </div>
                 </div>
               </div>
-            `).join('')}
-          </div>
-          
-          <div class="instructions">
-            <h3>📋 INSTRUÇÕES DE PREENCHIMENTO</h3>
-            <ul>
-              <li>Preencha completamente o círculo correspondente à resposta escolhida</li>
-              <li>Use caneta esferográfica azul ou preta</li>
-              <li>Não rasure ou amasse o cartão</li>
-              <li>Marque apenas uma alternativa por questão</li>
-              <li>Escaneie ou fotografe o QR Code para submeter as respostas digitalmente</li>
-            </ul>
+              
+              <div class="qr-section">
+                <div class="qr-title">Código do Simulado</div>
+                <div class="qr-code">
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
+                </div>
+                <div class="qr-label">ID: ${examId.substring(0, 8)}...</div>
+              </div>
+            </div>
+            
+            <div class="answer-grid">
+              <div class="grid-header">GABARITO - Marque a alternativa correta</div>
+              ${Array.from({ length: totalQuestions }, (_, i) => `
+                <div class="question-row">
+                  <div class="question-number">${String(i + 1).padStart(2, '0')}</div>
+                  <div class="options">
+                    <div class="option">
+                      <span class="bubble"></span>
+                      <span class="option-label">A</span>
+                    </div>
+                    <div class="option">
+                      <span class="bubble"></span>
+                      <span class="option-label">B</span>
+                    </div>
+                    <div class="option">
+                      <span class="bubble"></span>
+                      <span class="option-label">C</span>
+                    </div>
+                    <div class="option">
+                      <span class="bubble"></span>
+                      <span class="option-label">D</span>
+                    </div>
+                    <div class="option">
+                      <span class="bubble"></span>
+                      <span class="option-label">E</span>
+                    </div>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+            
+            <div class="instructions">
+              <h3>📋 INSTRUÇÕES DE PREENCHIMENTO</h3>
+              <ul>
+                <li>Preencha completamente o círculo correspondente à resposta escolhida</li>
+                <li>Use caneta esferográfica azul ou preta para melhor leitura</li>
+                <li>Não rasure, não amasse e não dobre o cartão resposta</li>
+                <li>Marque apenas UMA alternativa por questão</li>
+                <li>Escaneie ou fotografe o QR Code para correção digital automática</li>
+              </ul>
+            </div>
           </div>
           
           <script>
