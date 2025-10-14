@@ -835,7 +835,7 @@ Após completar todos os testes, você estará pronto para:
 
 ---
 
-**Sistema SEICE - Versão 1.0**
+**Sistema SEICE - Versão 1.0.0**
 *Última atualização: Outubro 2025*
 
 **Links Rápidos:** [Índice](INDEX.md) | [Início Rápido](QUICK_START.md) | [FAQ](FAQ.md) | [Arquitetura](ARCHITECTURE.md) | [Changelog](CHANGELOG.md)
