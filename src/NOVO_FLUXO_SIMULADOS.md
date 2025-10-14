@@ -24,7 +24,7 @@ O sistema **Provas SEICE** agora possui um fluxo completo e intuitivo para cria�
    - **Peso**: Valor da questão (padrão: 1.0)
 
 #### Dicas:
-- ✅ Crie pelo menos 10 questões por matéria para ter variedade
+- ✅ Crie pelo menos 5 questões por matéria para ter variedade
 - ✅ Use tags para organizar (ex: "algebra", "interpretação", "segunda-guerra")
 - ✅ Varie as dificuldades para ter um banco balanceado
 
