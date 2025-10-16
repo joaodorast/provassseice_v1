@@ -138,37 +138,40 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
     }
   };
 
-  const handleDownloadAnswerSheet = async (exam: any) => {
-    try {
-      // Gera o cartão resposta em PDF ou abre em nova aba para impressão
-      const totalQuestions = exam.questions?.length || 0;
-      const examTitle = exam.title || 'Simulado';
-      const examId = exam.id || '';
-      
-      // Validação: não gerar cartão vazio
-      if (totalQuestions === 0) {
-        toast.error('Este simulado não possui questões cadastradas');
-        return;
-      }
-      
-      console.log('📄 Gerando cartão resposta:', {
-        examId,
-        examTitle,
-        totalQuestions,
-        questionsArray: exam.questions
-      });
-      
-      // URL do QR Code - pode ser um link para o sistema de correção
-      const qrCodeUrl = `${window.location.origin}/correcao?exam=${examId}`;
-      
-      // Cria uma nova janela com o cartão resposta
-      const printWindow = window.open('', '_blank');
-      if (!printWindow) {
-        toast.error('Bloqueador de pop-ups impediu a abertura. Por favor, permita pop-ups para este site.');
-        return;
-      }
-      
-      printWindow.document.write(`
+ const handleDownloadAnswerSheet = async (exam: any) => {
+  try {
+    // Gera o cartão resposta em PDF ou abre em nova aba para impressão
+    const totalQuestions = exam.questions?.length || 0;
+    const examTitle = exam.title || 'Simulado';
+    const examId = exam.id || '';
+    
+    // Validação: não gerar cartão vazio
+    if (totalQuestions === 0) {
+      toast.error('Este simulado não possui questões cadastradas');
+      return;
+    }
+    
+    console.log('📄 Gerando cartão resposta:', {
+      examId,
+      examTitle,
+      totalQuestions,
+      questionsArray: exam.questions
+    });
+    
+    // URL do QR Code - pode ser um link para o sistema de correção
+    const qrCodeUrl = `${window.location.origin}/correcao?exam=${examId}`;
+    
+    // Cria uma nova janela com o cartão resposta
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      toast.error('Bloqueador de pop-ups impediu a abertura. Por favor, permita pop-ups para este site.');
+      return;
+    }
+    
+ // Calcula quantas questões cabem em 2 colunas em uma página A4
+          const questionsPerColumn = Math.ceil(totalQuestions / 2);
+          
+          printWindow.document.write(`
         <!DOCTYPE html>
         <html>
         <head>
@@ -176,7 +179,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           <style>
             @page { 
               size: A4;
-              margin: 12mm;
+              margin: 8mm;
             }
             * {
               margin: 0;
@@ -185,7 +188,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             }
             body {
               font-family: 'Segoe UI', Arial, sans-serif;
-              padding: 15px;
+              padding: 8px;
               background: white;
             }
             .container {
@@ -194,48 +197,44 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             }
             .header {
               text-align: center;
-              margin-bottom: 15px;
-              padding-bottom: 12px;
-              border-bottom: 3px solid #1e40af;
+              margin-bottom: 8px;
+              padding: 8px;
+              border-bottom: 2px solid #1e40af;
               background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-              padding: 15px;
-              border-radius: 8px;
+              border-radius: 4px;
             }
             .header h1 {
               color: #1e40af;
-              font-size: 26px;
-              margin-bottom: 6px;
+              font-size: 18px;
+              margin-bottom: 2px;
               font-weight: 700;
-              letter-spacing: 1px;
             }
             .header h2 {
               color: #334155;
-              font-size: 17px;
+              font-size: 13px;
               font-weight: 600;
-              margin-bottom: 4px;
             }
             .header .meta {
               color: #64748b;
-              font-size: 12px;
-              margin-top: 6px;
-              font-weight: 500;
+              font-size: 9px;
+              margin-top: 2px;
             }
             .top-section {
               display: flex;
-              gap: 15px;
-              margin-bottom: 15px;
+              gap: 8px;
+              margin-bottom: 8px;
             }
             .info-section {
               flex: 1;
-              padding: 12px;
+              padding: 6px;
               background: #f8fafc;
-              border-radius: 8px;
+              border-radius: 4px;
               border: 1px solid #e2e8f0;
             }
             .info-row {
               display: flex;
-              gap: 12px;
-              margin-bottom: 10px;
+              gap: 8px;
+              margin-bottom: 4px;
             }
             .info-row:last-child {
               margin-bottom: 0;
@@ -244,73 +243,73 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               flex: 1;
             }
             .info-label {
-              font-size: 10px;
+              font-size: 7px;
               color: #64748b;
               text-transform: uppercase;
-              margin-bottom: 4px;
+              margin-bottom: 2px;
               font-weight: 600;
-              letter-spacing: 0.5px;
             }
             .info-value {
-              font-size: 13px;
+              font-size: 10px;
               color: #1e293b;
               font-weight: 600;
-              border-bottom: 1.5px solid #cbd5e1;
-              padding-bottom: 4px;
-              min-height: 24px;
+              border-bottom: 1px solid #cbd5e1;
+              padding-bottom: 2px;
+              min-height: 16px;
             }
             .qr-section {
-              width: 160px;
+              width: 90px;
               text-align: center;
-              padding: 12px;
-              border: 2px solid #1e40af;
-              border-radius: 8px;
+              padding: 6px;
+              border: 1.5px solid #1e40af;
+              border-radius: 4px;
               background: white;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }
             .qr-title {
-              font-size: 11px;
+              font-size: 7px;
               font-weight: 700;
               color: #1e40af;
-              margin-bottom: 8px;
+              margin-bottom: 4px;
               text-transform: uppercase;
-              letter-spacing: 0.5px;
             }
             .qr-code {
-              width: 100px;
-              height: 100px;
-              margin: 8px auto;
+              width: 60px;
+              height: 60px;
+              margin: 4px auto;
               background: white;
               border: 1px solid #cbd5e1;
-              padding: 4px;
-              border-radius: 4px;
+              padding: 2px;
             }
             .qr-label {
-              font-size: 10px;
+              font-size: 7px;
               color: #64748b;
-              margin-top: 6px;
+              margin-top: 2px;
               font-weight: 600;
             }
-            .answer-grid {
-              margin-top: 15px;
+            .answer-section {
+              display: flex;
+              gap: 8px;
+              margin-bottom: 8px;
+            }
+            .answer-column {
+              flex: 1;
               border: 1px solid #e2e8f0;
-              border-radius: 8px;
+              border-radius: 4px;
               overflow: hidden;
             }
             .grid-header {
               background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
               color: white;
-              padding: 8px 12px;
-              font-size: 13px;
+              padding: 4px 6px;
+              font-size: 9px;
               font-weight: 600;
-              letter-spacing: 0.5px;
+              text-align: center;
             }
             .question-row {
               display: flex;
               align-items: center;
-              padding: 6px 12px;
+              padding: 3px 6px;
               border-bottom: 1px solid #e2e8f0;
-              page-break-inside: avoid;
             }
             .question-row:nth-child(even) {
               background: #f8fafc;
@@ -319,27 +318,27 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               border-bottom: none;
             }
             .question-number {
-              width: 35px;
+              width: 20px;
               font-weight: 700;
               color: #1e40af;
-              font-size: 13px;
+              font-size: 9px;
               flex-shrink: 0;
             }
             .options {
               display: flex;
-              gap: 18px;
+              gap: 8px;
               flex: 1;
               align-items: center;
             }
             .option {
               display: flex;
               align-items: center;
-              gap: 4px;
+              gap: 2px;
             }
             .bubble {
-              width: 18px;
-              height: 18px;
-              border: 2.5px solid #1e40af;
+              width: 12px;
+              height: 12px;
+              border: 1.5px solid #1e40af;
               border-radius: 50%;
               display: inline-block;
               flex-shrink: 0;
@@ -347,36 +346,34 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             .option-label {
               font-weight: 700;
               color: #334155;
-              font-size: 12px;
+              font-size: 8px;
             }
             .instructions {
-              margin-top: 15px;
-              padding: 12px 15px;
+              padding: 6px 8px;
               background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-              border-left: 4px solid #f59e0b;
-              border-radius: 6px;
-              page-break-inside: avoid;
+              border-left: 3px solid #f59e0b;
+              border-radius: 4px;
             }
             .instructions h3 {
               color: #92400e;
-              font-size: 13px;
-              margin-bottom: 8px;
+              font-size: 9px;
+              margin-bottom: 4px;
               font-weight: 700;
-              display: flex;
-              align-items: center;
-              gap: 6px;
             }
             .instructions ul {
               list-style: none;
               padding-left: 0;
+              columns: 2;
+              column-gap: 12px;
             }
             .instructions li {
               color: #78350f;
-              font-size: 11px;
-              margin-bottom: 4px;
-              padding-left: 16px;
+              font-size: 7px;
+              margin-bottom: 2px;
+              padding-left: 10px;
               position: relative;
-              line-height: 1.4;
+              line-height: 1.3;
+              break-inside: avoid;
             }
             .instructions li:before {
               content: "✓";
@@ -384,6 +381,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               left: 0;
               color: #f59e0b;
               font-weight: bold;
+              font-size: 8px;
             }
             @media print {
               .no-print { display: none; }
@@ -428,53 +426,86 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               </div>
               
               <div class="qr-section">
-                <div class="qr-title">Código do Simulado</div>
+                <div class="qr-title">Código</div>
                 <div class="qr-code">
-                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=100x100&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
+                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=60x60&data=${encodeURIComponent(qrCodeUrl)}" alt="QR Code" style="width: 100%; height: 100%;" />
                 </div>
                 <div class="qr-label">ID: ${examId.substring(0, 8)}...</div>
               </div>
             </div>
             
-            <div class="answer-grid">
-              <div class="grid-header">GABARITO - Marque a alternativa correta</div>
-              ${Array.from({ length: totalQuestions }, (_, i) => `
-                <div class="question-row">
-                  <div class="question-number">${String(i + 1).padStart(2, '0')}</div>
-                  <div class="options">
-                    <div class="option">
-                      <span class="bubble"></span>
-                      <span class="option-label">A</span>
-                    </div>
-                    <div class="option">
-                      <span class="bubble"></span>
-                      <span class="option-label">B</span>
-                    </div>
-                    <div class="option">
-                      <span class="bubble"></span>
-                      <span class="option-label">C</span>
-                    </div>
-                    <div class="option">
-                      <span class="bubble"></span>
-                      <span class="option-label">D</span>
-                    </div>
-                    <div class="option">
-                      <span class="bubble"></span>
-                      <span class="option-label">E</span>
+            <div class="answer-section">
+              <div class="answer-column">
+                <div class="grid-header">GABARITO - Coluna 1</div>
+                ${Array.from({ length: questionsPerColumn }, (_, i) => `
+                  <div class="question-row">
+                    <div class="question-number">${String(i + 1).padStart(2, '0')}</div>
+                    <div class="options">
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">A</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">B</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">C</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">D</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">E</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              `).join('')}
+                `).join('')}
+              </div>
+              
+              <div class="answer-column">
+                <div class="grid-header">GABARITO - Coluna 2</div>
+                ${Array.from({ length: totalQuestions - questionsPerColumn }, (_, i) => `
+                  <div class="question-row">
+                    <div class="question-number">${String(questionsPerColumn + i + 1).padStart(2, '0')}</div>
+                    <div class="options">
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">A</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">B</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">C</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">D</span>
+                      </div>
+                      <div class="option">
+                        <span class="bubble"></span>
+                        <span class="option-label">E</span>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
             </div>
             
             <div class="instructions">
               <h3>📋 INSTRUÇÕES DE PREENCHIMENTO</h3>
               <ul>
-                <li>Preencha completamente o círculo correspondente à resposta escolhida</li>
-                <li>Use caneta esferográfica azul ou preta para melhor leitura</li>
-                <li>Não rasure, não amasse e não dobre o cartão resposta</li>
-                <li>Marque apenas UMA alternativa por questão</li>
-                <li>Escaneie ou fotografe o QR Code para correção digital automática</li>
+                <li>Preencha completamente o círculo da resposta escolhida</li>
+                <li>Use caneta azul ou preta</li>
+                <li>Não rasure ou dobre o cartão</li>
+                <li>Marque apenas UMA alternativa</li>
+                <li>Escaneie o QR Code para correção automática</li>
               </ul>
             </div>
           </div>
@@ -489,14 +520,15 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         </body>
         </html>
       `);
+    
+    printWindow.document.close();
+    toast.success('Cartão resposta gerado! Uma nova janela foi aberta.');
+  } catch (error) {
+    console.error('Error generating answer sheet:', error);
+    toast.error('Erro ao gerar cartão resposta');
+  }
+};
       
-      printWindow.document.close();
-      toast.success('Cartão resposta gerado! Uma nova janela foi aberta.');
-    } catch (error) {
-      console.error('Error generating answer sheet:', error);
-      toast.error('Erro ao gerar cartão resposta');
-    }
-  };
 
   const filteredExams = exams.filter(exam => {
     const matchesSearch = exam.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
