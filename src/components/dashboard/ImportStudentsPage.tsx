@@ -37,6 +37,7 @@ export function ManageStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   
   const [showAddForm, setShowAddForm] = useState(false);
+  const [editingStudent, setEditingStudent] = useState<Student | null>(null);
   const [newStudent, setNewStudent] = useState({
     name: '',
     email: '',
@@ -186,6 +187,48 @@ export function ManageStudentsPage() {
     }
   };
 
+  const handleEditStudent = (student: Student) => {
+    setEditingStudent(student);
+    setNewStudent({
+      name: student.name,
+      email: student.email,
+      class: student.class,
+      grade: student.grade,
+      registration: student.registration
+    });
+    setShowAddForm(true);
+  };
+
+  const handleUpdateStudent = async () => {
+    if (!editingStudent) return;
+    
+    if (!newStudent.name || !newStudent.email) {
+      toast.error('Nome e email são obrigatórios');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await apiService.updateStudent(editingStudent.id, newStudent);
+      await loadStudents();
+      setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
+      setEditingStudent(null);
+      setShowAddForm(false);
+      toast.success('Aluno atualizado com sucesso!');
+    } catch (error) {
+      console.error('Error updating student:', error);
+      toast.error('Erro ao atualizar aluno');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingStudent(null);
+    setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
+    setShowAddForm(false);
+  };
+
   const exportToCSV = () => {
     const csvContent = [
       'Nome,Email,Turma,Turno,Matrícula,Status',
@@ -324,11 +367,13 @@ export function ManageStudentsPage() {
         </Card>
       </div>
 
-      {/* Add Student Form */}
+      {/* Add/Edit Student Form */}
       {showAddForm && (
         <Card className="seice-card">
           <CardHeader>
-            <CardTitle>Adicionar Novo Aluno</CardTitle>
+            <CardTitle>
+              {editingStudent ? 'Editar Aluno' : 'Adicionar Novo Aluno'}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -384,10 +429,16 @@ export function ManageStudentsPage() {
               </div>
             </div>
             <div className="flex space-x-2 mt-6">
-              <Button onClick={handleAddStudent} disabled={loading}>
-                {loading ? 'Adicionando...' : 'Adicionar Aluno'}
+              <Button 
+                onClick={editingStudent ? handleUpdateStudent : handleAddStudent} 
+                disabled={loading}
+              >
+                {loading 
+                  ? (editingStudent ? 'Atualizando...' : 'Adicionando...') 
+                  : (editingStudent ? 'Atualizar Aluno' : 'Adicionar Aluno')
+                }
               </Button>
-              <Button variant="outline" onClick={() => setShowAddForm(false)}>
+              <Button variant="outline" onClick={handleCancelEdit}>
                 Cancelar
               </Button>
             </div>
@@ -458,13 +509,19 @@ export function ManageStudentsPage() {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end space-x-2">
-                        <Button variant="outline" size="sm">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => handleEditStudent(student)}
+                          disabled={loading}
+                        >
                           <Edit className="w-4 h-4" />
                         </Button>
                         <Button 
                           variant="outline" 
                           size="sm" 
                           onClick={() => handleDeleteStudent(student.id)}
+                          disabled={loading}
                         >
                           <Trash2 className="w-4 h-4" />
                         </Button>
