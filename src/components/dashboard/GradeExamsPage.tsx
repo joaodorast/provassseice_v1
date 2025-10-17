@@ -622,7 +622,7 @@ export function GradeExamsPage() {
                 </div>
 
                 <div className="text-center">
-                  <div className="flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mx-auto mb-3">
+                  <div className="flex items-center justify-center w-16 h-16 bg-red-100 rounded-full mx-auto mb-3">   
                     <XCircle className="w-8 h-8 text-red-600" />
                   </div>
                   <div className="text-2xl font-bold text-red-600">
@@ -635,7 +635,7 @@ export function GradeExamsPage() {
           </Card>
         </TabsContent>
 
-        {/* Submissions Tab */}	
+      
         <TabsContent value="submissions" className="space-y-6">
           <Card>
             <CardHeader>
@@ -645,7 +645,7 @@ export function GradeExamsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              {/* Filters */}
+             
               <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4 mb-6">
                 <div className="flex-1">
                   <div className="relative">
@@ -799,7 +799,7 @@ export function GradeExamsPage() {
                                 
                                 {selectedSubmission && (
                                   <div className="space-y-6">
-                                    {/* Student Info */}
+                                
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                       <div>
                                         <Label className="text-sm font-medium">Pontuação</Label>
@@ -823,7 +823,7 @@ export function GradeExamsPage() {
 
                                     <Separator />
 
-                                    {/* Subject Performance */}
+
                                     <div>
                                       <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
                                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

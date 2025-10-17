@@ -394,7 +394,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               }
             }
           </style>
-        </head>
+        </head>  
         <body>
           <div class="container">
             <div class="header">
@@ -424,7 +424,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                   </div>
                 </div>
               </div>
-              
+                  
               <div class="qr-section">
                 <div class="qr-title">Código</div>
                 <div class="qr-code">
@@ -433,7 +433,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                 <div class="qr-label">ID: ${examId.substring(0, 8)}...</div>
               </div>
             </div>
-            
+                
             <div class="answer-section">
               <div class="answer-column">
                 <div class="grid-header">GABARITO - Coluna 1</div>
