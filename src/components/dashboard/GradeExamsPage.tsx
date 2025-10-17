@@ -846,7 +846,7 @@ export function GradeExamsPage() {
 
                                     <Separator />
 
-                                    {/* Answer Sheet Images Section */}
+                                    {/* Seção de Imagens da Folha de Respostas */}
                                     <div className="space-y-4">
                                       <div>
                                         <Label className="text-sm font-medium mb-2 block">Cartões Resposta</Label>
