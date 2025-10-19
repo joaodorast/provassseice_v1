@@ -42,7 +42,7 @@ import {
   Clipboard,
   Send
 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 
 type GradingStatus = 'pending' | 'graded' | 'reviewed';
@@ -52,6 +52,12 @@ type SubjectPerformance = {
   totalQuestions: number;
   correctAnswers: number;
   percentage: number;
+};
+
+type QuestionWeight = {
+  questionIndex: number;
+  weight: number;
+  subject: string;
 };
 
 type DetailedSubmission = {
@@ -64,6 +70,7 @@ type DetailedSubmission = {
   studentClass: string;
   studentGrade: string;
   answers: number[];
+  correctAnswers: number[];
   score: number;
   totalQuestions: number;
   percentage: number;
@@ -73,6 +80,7 @@ type DetailedSubmission = {
   gradingStatus: GradingStatus;
   feedback?: string;
   reviewNotes?: string;
+  questionWeights?: QuestionWeight[];
 };
 
 type Exam = {
@@ -104,32 +112,106 @@ export function GradeExamsPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [answerSheetImages, setAnswerSheetImages] = useState<any[]>([]);
 
-  // Load data on component mount with progressive loading
   useEffect(() => {
     loadDataProgressively();
   }, []);
+
+  const calculateSubjectPerformances = (
+    studentAnswers: number[],
+    correctAnswers: number[],
+    questionWeights: QuestionWeight[],
+    subjects: string[]
+  ): SubjectPerformance[] => {
+    const performanceBySubject: { [key: string]: { correct: number; total: number; weighted: number; totalWeight: number } } = {};
+    
+    questionWeights.forEach((qw, idx) => {
+      const subject = qw.subject;
+      
+      if (!performanceBySubject[subject]) {
+        performanceBySubject[subject] = { correct: 0, total: 0, weighted: 0, totalWeight: 0 };
+      }
+      
+      performanceBySubject[subject].total += 1;
+      performanceBySubject[subject].totalWeight += qw.weight;
+      
+      if (studentAnswers[idx] === correctAnswers[idx]) {
+        performanceBySubject[subject].correct += 1;
+        performanceBySubject[subject].weighted += qw.weight;
+      }
+    });
+    
+    return Object.entries(performanceBySubject).map(([subject, data]) => ({
+      subject,
+      totalQuestions: data.total,
+      correctAnswers: data.correct,
+      percentage: data.total > 0 ? Math.round((data.correct / data.total) * 100) : 0
+    }));
+  };
+
+  const transformSubmissions = (rawSubmissions: any[], examsList: Exam[]): DetailedSubmission[] => {
+    return rawSubmissions.map(sub => {
+      const exam = examsList.find(e => e.id === sub.examId);
+      const correctAnswers = exam?.questions?.map((q: any) => q.correctAnswer) || [];
+      const questionWeights = exam?.questions?.map((q: any, idx: number) => ({
+        questionIndex: idx,
+        weight: q.weight || 1,
+        subject: q.subject || 'Geral'
+      })) || [];
+      
+      const subjectPerformances = calculateSubjectPerformances(
+        sub.answers || [],
+        correctAnswers,
+        questionWeights,
+        exam?.subjects || []
+      );
+      
+      return {
+        id: sub.id,
+        examId: sub.examId,
+        examTitle: sub.examTitle || exam?.title || 'Simulado',
+        studentId: sub.studentId,
+        studentName: sub.studentName,
+        studentEmail: sub.studentEmail,
+        studentClass: sub.studentClass,
+        studentGrade: sub.studentGrade,
+        answers: sub.answers || [],
+        correctAnswers,
+        score: sub.score || 0,
+        totalQuestions: sub.totalQuestions || correctAnswers.length,
+        percentage: sub.percentage || 0,
+        subjectPerformances,
+        timeSpent: sub.timeSpent || 0,
+        submittedAt: sub.submittedAt || new Date().toISOString(),
+        gradingStatus: 'graded' as GradingStatus,
+        feedback: sub.feedback,
+        reviewNotes: sub.reviewNotes,
+        questionWeights
+      };
+    });
+  };
 
   const loadDataProgressively = async () => {
     try {
       setLoading(true);
       
-      // Load exams first (usually faster)
+      let examsList: Exam[] = [];
       try {
         const examsRes = await apiService.getExams();
-        const examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title);
+        examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title);
         console.log(`Loaded ${examsList.length} valid exams for grading`);
         setExams(examsList);
       } catch (error) {
         console.error('Error loading exams:', error);
         setExams([]);
+        toast.error('Erro ao carregar simulados');
       }
-
-      // Then load submissions
+      
       try {
         const submissionsRes = await apiService.getSubmissions();
         const submissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
         console.log(`Loaded ${submissionsList.length} valid submissions`);
-        setSubmissions(transformSubmissions(submissionsList));
+        
+        setSubmissions(transformSubmissions(submissionsList, examsList));
       } catch (error) {
         console.error('Error loading submissions:', error);
         setSubmissions([]);
@@ -145,42 +227,6 @@ export function GradeExamsPage() {
   };
 
   const loadData = loadDataProgressively;
-
-  const transformSubmissions = (rawSubmissions: any[]): DetailedSubmission[] => {
-    return rawSubmissions.map(sub => ({
-      id: sub.id,
-      examId: sub.examId,
-      examTitle: sub.examTitle || 'Simulado',
-      studentId: sub.studentId || crypto.randomUUID(),
-      studentName: sub.studentName || `Aluno ${Math.floor(Math.random() * 100) + 1}`,
-      studentEmail: sub.studentEmail || `aluno${Math.floor(Math.random() * 100)}@escola.com`,
-      studentClass: sub.studentClass || 'Turma A',
-      studentGrade: sub.studentGrade || '1° ANO',
-      answers: sub.answers || [],
-      score: sub.score || 0,
-      totalQuestions: sub.totalQuestions || 50,
-      percentage: sub.percentage || 0,
-      subjectPerformances: generateSubjectPerformances(sub),
-      timeSpent: sub.timeSpent || Math.floor(Math.random() * 60) + 40,
-      submittedAt: sub.submittedAt || new Date().toISOString(),
-      gradingStatus: 'graded' as GradingStatus,
-      feedback: sub.feedback,
-      reviewNotes: sub.reviewNotes
-    }));
-  };
-
-  const generateSubjectPerformances = (submission: any): SubjectPerformance[] => {
-    const subjects = ['Matemática', 'Português', 'História', 'Geografia', 'Ciências'];
-    return subjects.map(subject => {
-      const correctAnswers = Math.floor(Math.random() * 11);
-      return {
-        subject,
-        totalQuestions: 10,
-        correctAnswers,
-        percentage: Math.round((correctAnswers / 10) * 100)
-      };
-    });
-  };
 
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('pt-BR', {
@@ -248,7 +294,6 @@ export function GradeExamsPage() {
       });
       
       if (response.success) {
-        // Create a download link
         const dataStr = JSON.stringify(response.data, null, 2);
         const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
         const exportFileDefaultName = `resultados-${Date.now()}.json`;
@@ -290,7 +335,6 @@ export function GradeExamsPage() {
     setReviewNotes(submission.reviewNotes || '');
     setFeedback(submission.feedback || '');
     
-    // Load answer sheet images for this submission
     try {
       const response = await apiService.getAnswerSheets(submission.id);
       if (response.success && response.images) {
@@ -310,13 +354,11 @@ export function GradeExamsPage() {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    // Check file size (max 10MB)
     if (file.size > 10 * 1024 * 1024) {
       toast.error('Arquivo muito grande. Tamanho máximo: 10MB');
       return;
     }
 
-    // Check file type
     if (!file.type.startsWith('image/')) {
       toast.error('Apenas imagens são permitidas');
       return;
@@ -325,7 +367,6 @@ export function GradeExamsPage() {
     try {
       setUploadingImage(true);
 
-      // Convert to base64
       const reader = new FileReader();
       reader.onload = async (e) => {
         const base64Data = e.target?.result as string;
@@ -390,14 +431,12 @@ export function GradeExamsPage() {
     try {
       setReviewing(true);
       
-      // Save review to backend
       const response = await apiService.updateSubmissionReview(selectedSubmission.id, {
         reviewNotes,
         feedback
       });
 
       if (response.success) {
-        // Update local state with backend data
         setSubmissions(prev => 
           prev.map(sub => 
             sub.id === selectedSubmission.id ? {
@@ -428,7 +467,6 @@ export function GradeExamsPage() {
       const response = await apiService.exportGradingReport({ submissionIds: [submissionId] });
       
       if (response.success) {
-        // Create a download link
         const dataStr = JSON.stringify(response.data, null, 2);
         const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
         const exportFileDefaultName = `resultado-${submissionId}-${Date.now()}.json`;
@@ -474,10 +512,9 @@ export function GradeExamsPage() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1>Correção de Simulados</h1>
+          <h1 className="text-3xl font-bold">Correção de Simulados</h1>
           <p className="text-muted-foreground">
             Analise os resultados e performance dos alunos nos simulados multidisciplinares
           </p>
@@ -501,9 +538,7 @@ export function GradeExamsPage() {
           <TabsTrigger value="analysis">Análise Detalhada</TabsTrigger>
         </TabsList>
 
-        {/* Overview Tab */}
         <TabsContent value="overview" className="space-y-6">
-          {/* Statistics Cards */}
           <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -512,9 +547,7 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalSubmissions}</div>
-                <p className="text-xs text-muted-foreground">
-                  Simulados realizados
-                </p>
+                <p className="text-xs text-muted-foreground">Simulados realizados</p>
               </CardContent>
             </Card>
             
@@ -525,9 +558,7 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.gradedSubmissions}</div>
-                <p className="text-xs text-muted-foreground">
-                  Automática
-                </p>
+                <p className="text-xs text-muted-foreground">Automática</p>
               </CardContent>
             </Card>
 
@@ -538,9 +569,7 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.reviewedSubmissions}</div>
-                <p className="text-xs text-muted-foreground">
-                  Análise manual
-                </p>
+                <p className="text-xs text-muted-foreground">Análise manual</p>
               </CardContent>
             </Card>
             
@@ -551,9 +580,7 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.avgScore}%</div>
-                <p className="text-xs text-muted-foreground">
-                  Pontuação média
-                </p>
+                <p className="text-xs text-muted-foreground">Pontuação média</p>
               </CardContent>
             </Card>
             
@@ -564,14 +591,11 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.passRate}%</div>
-                <p className="text-xs text-muted-foreground">
-                  ≥ 60%
-                </p>
+                <p className="text-xs text-muted-foreground">≥ 60%</p>
               </CardContent>
             </Card>
           </div>
 
-          {/* Performance Distribution */}
           <Card>
             <CardHeader>
               <CardTitle>Distribuição de Performance</CardTitle>
@@ -635,7 +659,6 @@ export function GradeExamsPage() {
           </Card>
         </TabsContent>
 
-      
         <TabsContent value="submissions" className="space-y-6">
           <Card>
             <CardHeader>
@@ -645,7 +668,6 @@ export function GradeExamsPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-             
               <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4 mb-6">
                 <div className="flex-1">
                   <div className="relative">
@@ -686,7 +708,6 @@ export function GradeExamsPage() {
                 </Select>
               </div>
 
-              {/* Selection Actions */}
               {selectedSubmissions.length > 0 && (
                 <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg mb-6">
                   <span className="text-sm text-blue-800 font-medium">
@@ -799,7 +820,6 @@ export function GradeExamsPage() {
                                 
                                 {selectedSubmission && (
                                   <div className="space-y-6">
-                                
                                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                       <div>
                                         <Label className="text-sm font-medium">Pontuação</Label>
@@ -823,6 +843,69 @@ export function GradeExamsPage() {
 
                                     <Separator />
 
+                                    {selectedSubmission.questionWeights && selectedSubmission.questionWeights.length > 0 && (
+                                      <>
+                                        <div>
+                                          <Label className="text-sm font-medium mb-3 block">Pesos das Questões</Label>
+                                          <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                                            <Table>
+                                              <TableHeader>
+                                                <TableRow>
+                                                  <TableHead className="w-24">Questão</TableHead>
+                                                  <TableHead>Matéria</TableHead>
+                                                  <TableHead className="w-24">Peso</TableHead>
+                                                  <TableHead className="w-32">Resposta</TableHead>
+                                                  <TableHead className="w-32">Gabarito</TableHead>
+                                                  <TableHead className="w-24 text-center">Status</TableHead>
+                                                </TableRow>
+                                              </TableHeader>
+                                              <TableBody>
+                                                {selectedSubmission.questionWeights.map((qw) => {
+                                                  const studentAnswer = selectedSubmission.answers[qw.questionIndex];
+                                                  const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
+                                                  const isCorrect = studentAnswer === correctAnswer;
+                                                  
+                                                  return (
+                                                    <TableRow key={qw.questionIndex}>
+                                                      <TableCell className="font-medium">
+                                                        #{qw.questionIndex + 1}
+                                                      </TableCell>
+                                                      <TableCell>{qw.subject}</TableCell>
+                                                      <TableCell>
+                                                        <Badge variant="outline">{qw.weight}x</Badge>
+                                                      </TableCell>
+                                                      <TableCell className="text-center">
+                                                        {studentAnswer !== undefined ? (
+                                                          <span className={isCorrect ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                                            {String.fromCharCode(65 + studentAnswer)}
+                                                          </span>
+                                                        ) : (
+                                                          <span className="text-muted-foreground">-</span>
+                                                        )}
+                                                      </TableCell>
+                                                      <TableCell className="text-center">
+                                                        <span className="font-medium">
+                                                          {String.fromCharCode(65 + correctAnswer)}
+                                                        </span>
+                                                      </TableCell>
+                                                      <TableCell className="text-center">
+                                                        {isCorrect ? (
+                                                          <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
+                                                        ) : (
+                                                          <XCircle className="w-5 h-5 text-red-600 mx-auto" />
+                                                        )}
+                                                      </TableCell>
+                                                    </TableRow>
+                                                  );
+                                                })}
+                                              </TableBody>
+                                            </Table>
+                                          </div>
+                                        </div>
+
+                                        <Separator />
+                                      </>
+                                    )}
 
                                     <div>
                                       <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
@@ -846,7 +929,6 @@ export function GradeExamsPage() {
 
                                     <Separator />
 
-                                    {/* Seção de Imagens da Folha de Respostas */}
                                     <div className="space-y-4">
                                       <div>
                                         <Label className="text-sm font-medium mb-2 block">Cartões Resposta</Label>
@@ -884,7 +966,6 @@ export function GradeExamsPage() {
                                           </span>
                                         </div>
 
-                                        {/* Display uploaded images */}
                                         {answerSheetImages.length > 0 && (
                                           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                                             {answerSheetImages.map((image) => (
@@ -927,7 +1008,6 @@ export function GradeExamsPage() {
 
                                     <Separator />
 
-                                    {/* Review Section */}
                                     <div className="space-y-4">
                                       <div>
                                         <Label htmlFor="feedback">Feedback para o Aluno</Label>
@@ -951,7 +1031,6 @@ export function GradeExamsPage() {
                                       </div>
                                     </div>
 
-                                    {/* Actions */}
                                     <div className="flex justify-end space-x-2">
                                       <Button variant="outline" onClick={() => setSelectedSubmission(null)}>
                                         Cancelar
@@ -1006,7 +1085,6 @@ export function GradeExamsPage() {
           </Card>
         </TabsContent>
 
-        {/* Analysis Tab */}
         <TabsContent value="analysis" className="space-y-6">
           <Card>
             <CardHeader>
