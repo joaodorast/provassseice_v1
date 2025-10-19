@@ -22,7 +22,7 @@ import {
   Filter
 } from 'lucide-react';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
-import { toast } from 'sonner@2.0.3';
+import { toast } from 'sonner';
 
 interface Question {
   id: string;
@@ -47,7 +47,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
     title: '',
     description: '',
     grade: '',
-    timeLimit: 120
+    timeLimit: 120,
+    selectedClass: ''
   });
 
   const [subjects, setSubjects] = useState<Subject[]>([
@@ -70,10 +71,34 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
   const [currentSubject, setCurrentSubject] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
 
   useEffect(() => {
     loadQuestions();
+    loadClasses();
   }, []);
+
+  const loadClasses = async () => {
+    try {
+      const token = localStorage.getItem('access_token');
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/students`, {
+        headers: { 
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const students = data.students || [];
+        const classes = Array.from(new Set(students.map((s: any) => s.class).filter(Boolean)));
+        setAvailableClasses(classes as string[]);
+        console.log('✓ Loaded classes:', classes);
+      }
+    } catch (error) {
+      console.error('Error loading classes:', error);
+    }
+  };
 
   const loadQuestions = async () => {
     try {
@@ -128,7 +153,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         });
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Exception loading questions:', error);
       toast.error('Erro ao carregar questões: ' + (error.message || 'Erro desconhecido'));
       setQuestions([]);
@@ -177,7 +202,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
   const canCreateSimulado = () => {
     const selectedQuestions = getSelectedQuestions();
-    return selectedQuestions.length > 0 && simuladoData.title && simuladoData.grade;
+    return selectedQuestions.length > 0 && simuladoData.title && simuladoData.grade && simuladoData.selectedClass;
   };
 
   const handleCreateSimulado = async () => {
@@ -203,6 +228,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         title: simuladoData.title,
         description: simuladoData.description,
         grade: simuladoData.grade,
+        selectedClass: simuladoData.selectedClass,
         subjects: Object.keys(subjectGroups),
         questions: selectedQuestions.map(q => ({
           id: q.id,
@@ -227,7 +253,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       console.log('Creating simulado with data:', {
         title: examData.title,
         subjects: examData.subjects,
-        totalQuestions: examData.questions.length
+        totalQuestions: examData.questions.length,
+        selectedClass: examData.selectedClass
       });
       
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/exams`, {
@@ -249,7 +276,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       console.log('Simulado created successfully:', result.exam?.id);
       toast.success('Simulado criado com sucesso!');
       onBack();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating simulado:', error);
       toast.error('Erro ao criar simulado: ' + (error.message || 'Erro desconhecido'));
     } finally {
@@ -326,6 +353,41 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                 onChange={(e) => setSimuladoData(prev => ({ ...prev, timeLimit: parseInt(e.target.value) || 120 }))}
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-2">
+              Turma * (para quem será aplicada a prova)
+            </label>
+            <Select 
+              value={simuladoData.selectedClass} 
+              onValueChange={(value) => setSimuladoData(prev => ({ ...prev, selectedClass: value }))}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione a turma" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableClasses.length === 0 ? (
+                  <SelectItem value="none" disabled>Nenhuma turma cadastrada</SelectItem>
+                ) : (
+                  availableClasses.map(className => (
+                    <SelectItem key={className} value={className}>
+                      {className}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {availableClasses.length === 0 && (
+              <p className="text-sm text-orange-600 mt-1">
+                ⚠️ Cadastre turmas na seção "Gerenciar Alunos" primeiro
+              </p>
+            )}
+            {simuladoData.selectedClass && (
+              <p className="text-sm text-green-600 mt-1">
+                ✓ Os cartões resposta serão gerados automaticamente para todos os alunos desta turma
+              </p>
+            )}
           </div>
         </CardContent>
       </Card>
@@ -527,8 +589,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         <Button 
           onClick={() => {
             if (currentStep === 1) {
-              if (!simuladoData.title || !simuladoData.grade) {
-                toast.error('Preencha o título e a série antes de prosseguir');
+              if (!simuladoData.title || !simuladoData.grade || !simuladoData.selectedClass) {
+                toast.error('Preencha o título, série e turma antes de prosseguir');
                 return;
               }
             }
