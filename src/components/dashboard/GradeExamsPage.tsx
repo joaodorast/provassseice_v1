@@ -40,7 +40,9 @@ import {
   PieChart,
   Activity,
   Clipboard,
-  Send
+  Send,
+  Image as ImageIcon,
+  ZoomIn
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -81,6 +83,7 @@ type DetailedSubmission = {
   feedback?: string;
   reviewNotes?: string;
   questionWeights?: QuestionWeight[];
+  applicationId?: string;
 };
 
 type Exam = {
@@ -97,12 +100,26 @@ type Exam = {
   status: 'Rascunho' | 'Ativo' | 'Arquivado';
 };
 
+type Application = {
+  id: string;
+  examId: string;
+  examTitle: string;
+  studentIds: string[];
+  applicationMethod: string;
+  status: string;
+  createdAt: string;
+  appliedCount: number;
+  completedCount: number;
+};
+
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
   const [exams, setExams] = useState<Exam[]>([]);
+  const [applications, setApplications] = useState<Application[]>([]);
   const [submissions, setSubmissions] = useState<DetailedSubmission[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterExam, setFilterExam] = useState('all');
+  const [filterApplication, setFilterApplication] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [selectedSubmissions, setSelectedSubmissions] = useState<string[]>([]);
   const [selectedSubmission, setSelectedSubmission] = useState<DetailedSubmission | null>(null);
@@ -111,9 +128,21 @@ export function GradeExamsPage() {
   const [feedback, setFeedback] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [answerSheetImages, setAnswerSheetImages] = useState<any[]>([]);
+  const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
 
   useEffect(() => {
     loadDataProgressively();
+    
+    // Verificar se há parâmetros na URL para filtrar
+    const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
+    const appId = urlParams.get('app');
+    const examId = urlParams.get('exam');
+    
+    if (appId) {
+      setFilterApplication(appId);
+    } else if (examId) {
+      setFilterExam(examId);
+    }
   }, []);
 
   const calculateSubjectPerformances = (
@@ -182,10 +211,11 @@ export function GradeExamsPage() {
         subjectPerformances,
         timeSpent: sub.timeSpent || 0,
         submittedAt: sub.submittedAt || new Date().toISOString(),
-        gradingStatus: 'graded' as GradingStatus,
+        gradingStatus: sub.gradingStatus || 'graded' as GradingStatus,
         feedback: sub.feedback,
         reviewNotes: sub.reviewNotes,
-        questionWeights
+        questionWeights,
+        applicationId: sub.applicationId
       };
     });
   };
@@ -196,9 +226,10 @@ export function GradeExamsPage() {
       
       let examsList: Exam[] = [];
       try {
+        console.log('=== GradePage: Loading exams ===');
         const examsRes = await apiService.getExams();
         examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title);
-        console.log(`Loaded ${examsList.length} valid exams for grading`);
+        console.log(`✓ Loaded ${examsList.length} exams for grading`);
         setExams(examsList);
       } catch (error) {
         console.error('Error loading exams:', error);
@@ -207,9 +238,21 @@ export function GradeExamsPage() {
       }
       
       try {
+        console.log('=== GradePage: Loading applications ===');
+        const applicationsRes = await apiService.getApplications();
+        const appsList = (applicationsRes.applications || []).filter((a: any) => a && a.id);
+        console.log(`✓ Loaded ${appsList.length} applications`);
+        setApplications(appsList);
+      } catch (error) {
+        console.error('Error loading applications:', error);
+        setApplications([]);
+      }
+      
+      try {
+        console.log('=== GradePage: Loading submissions ===');
         const submissionsRes = await apiService.getSubmissions();
         const submissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
-        console.log(`Loaded ${submissionsList.length} valid submissions`);
+        console.log(`✓ Loaded ${submissionsList.length} submissions`);
         
         setSubmissions(transformSubmissions(submissionsList, examsList));
       } catch (error) {
@@ -288,26 +331,18 @@ export function GradeExamsPage() {
     }
     
     try {
-      const response = await apiService.exportGradingReport({ 
-        submissionIds: selectedSubmissions,
-        format: 'json'
-      });
+      const selectedData = submissions.filter(s => selectedSubmissions.includes(s.id));
+      const dataStr = JSON.stringify(selectedData, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      const exportFileDefaultName = `resultados-${Date.now()}.json`;
       
-      if (response.success) {
-        const dataStr = JSON.stringify(response.data, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        const exportFileDefaultName = `resultados-${Date.now()}.json`;
-        
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
-        
-        toast.success(`${selectedSubmissions.length} resultado(s) exportado(s) com sucesso!`);
-        setSelectedSubmissions([]);
-      } else {
-        throw new Error('Failed to export');
-      }
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+      
+      toast.success(`${selectedSubmissions.length} resultado(s) exportado(s) com sucesso!`);
+      setSelectedSubmissions([]);
     } catch (error) {
       console.error('Error exporting bulk results:', error);
       toast.error('Erro ao exportar resultados');
@@ -382,7 +417,7 @@ export function GradeExamsPage() {
 
           if (response.success && response.image) {
             setAnswerSheetImages(prev => [...prev, response.image]);
-            toast.success('Imagem do cartão resposta enviada com sucesso!');
+            toast.success('✅ Imagem do cartão resposta enviada com sucesso!');
           } else {
             throw new Error(response.error || 'Failed to upload image');
           }
@@ -433,7 +468,8 @@ export function GradeExamsPage() {
       
       const response = await apiService.updateSubmissionReview(selectedSubmission.id, {
         reviewNotes,
-        feedback
+        feedback,
+        gradingStatus: 'reviewed'
       });
 
       if (response.success) {
@@ -441,7 +477,6 @@ export function GradeExamsPage() {
           prev.map(sub => 
             sub.id === selectedSubmission.id ? {
               ...sub,
-              ...response.submission,
               reviewNotes,
               feedback,
               gradingStatus: 'reviewed' as GradingStatus
@@ -450,7 +485,7 @@ export function GradeExamsPage() {
         );
         
         setSelectedSubmission(null);
-        toast.success('Revisão salva com sucesso!');
+        toast.success('✅ Revisão salva com sucesso!');
       } else {
         throw new Error('Failed to save review');
       }
@@ -462,24 +497,18 @@ export function GradeExamsPage() {
     }
   };
 
-  const handleExportIndividual = async (submissionId: string) => {
+  const handleExportIndividual = async (submission: DetailedSubmission) => {
     try {
-      const response = await apiService.exportGradingReport({ submissionIds: [submissionId] });
+      const dataStr = JSON.stringify(submission, null, 2);
+      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+      const exportFileDefaultName = `resultado-${submission.studentName.replace(/\s/g, '-')}-${Date.now()}.json`;
       
-      if (response.success) {
-        const dataStr = JSON.stringify(response.data, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-        const exportFileDefaultName = `resultado-${submissionId}-${Date.now()}.json`;
-        
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
-        
-        toast.success('Resultado individual exportado!');
-      } else {
-        throw new Error('Failed to export');
-      }
+      const linkElement = document.createElement('a');
+      linkElement.setAttribute('href', dataUri);
+      linkElement.setAttribute('download', exportFileDefaultName);
+      linkElement.click();
+      
+      toast.success('Resultado individual exportado!');
     } catch (error) {
       console.error('Error exporting individual result:', error);
       toast.error('Erro ao exportar resultado');
@@ -490,13 +519,14 @@ export function GradeExamsPage() {
     const matchesSearch = submission.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          submission.examTitle.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesExam = filterExam === 'all' || submission.examId === filterExam;
+    const matchesApp = filterApplication === 'all' || submission.applicationId === filterApplication;
     const matchesStatus = filterStatus === 'all' || 
                          (filterStatus === 'excellent' && submission.percentage >= 80) ||
                          (filterStatus === 'very-good' && submission.percentage >= 70 && submission.percentage < 80) ||
                          (filterStatus === 'good' && submission.percentage >= 60 && submission.percentage < 70) ||
                          (filterStatus === 'regular' && submission.percentage >= 50 && submission.percentage < 60) ||
                          (filterStatus === 'insufficient' && submission.percentage < 50);
-    return matchesSearch && matchesExam && matchesStatus;
+    return matchesSearch && matchesExam && matchesApp && matchesStatus;
   });
 
   if (loading) {
@@ -534,7 +564,14 @@ export function GradeExamsPage() {
       <Tabs defaultValue="overview" className="space-y-6">
         <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
-          <TabsTrigger value="submissions">Submissões</TabsTrigger>
+          <TabsTrigger value="submissions">
+            Submissões
+            {submissions.length > 0 && (
+              <Badge variant="secondary" className="ml-2">
+                {submissions.length}
+              </Badge>
+            )}
+          </TabsTrigger>
           <TabsTrigger value="analysis">Análise Detalhada</TabsTrigger>
         </TabsList>
 
@@ -680,6 +717,19 @@ export function GradeExamsPage() {
                     />
                   </div>
                 </div>
+                <Select value={filterApplication} onValueChange={setFilterApplication}>
+                  <SelectTrigger className="w-full md:w-56">
+                    <SelectValue placeholder="Filtrar por aplicação" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as aplicações</SelectItem>
+                    {applications.map(app => (
+                      <SelectItem key={app.id} value={app.id}>
+                        {app.examTitle} ({formatDate(app.createdAt)})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <Select value={filterExam} onValueChange={setFilterExam}>
                   <SelectTrigger className="w-full md:w-48">
                     <SelectValue placeholder="Filtrar por simulado" />
@@ -726,7 +776,7 @@ export function GradeExamsPage() {
                 </div>
               )}
 
-              <div className="border rounded-lg">
+              <div className="border rounded-lg overflow-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
@@ -749,338 +799,359 @@ export function GradeExamsPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {filteredSubmissions.map((submission) => (
-                      <TableRow key={submission.id}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedSubmissions.includes(submission.id)}
-                            onCheckedChange={(checked) => 
-                              handleSelectSubmission(submission.id, checked as boolean)
+                    {filteredSubmissions.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={9} className="text-center py-12">
+                          <GraduationCap className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+                          <h3 className="text-lg font-medium mb-2">
+                            {searchTerm || filterExam !== 'all' || filterApplication !== 'all' || filterStatus !== 'all'
+                              ? 'Nenhuma submissão encontrada'
+                              : 'Nenhuma submissão para correção'
                             }
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <div>
-                            <div className="font-medium">{submission.studentName}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {submission.studentClass} • {submission.studentGrade}
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="font-medium">{submission.examTitle}</div>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          {formatDate(submission.submittedAt)}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center">
-                            <Clock className="w-4 h-4 mr-1 text-muted-foreground" />
-                            <span className="text-sm">{submission.timeSpent}min</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center space-x-2">
-                            <div className="w-20">
-                              <Progress value={submission.percentage} className="h-2" />
-                            </div>
-                            <div className="text-sm font-medium">
-                              {submission.score}/{submission.totalQuestions}
-                            </div>
-                            <div className="text-xs text-muted-foreground">
-                              ({submission.percentage}%)
-                            </div>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          {getPerformanceBadge(submission.percentage)}
-                        </TableCell>
-                        <TableCell>
-                          {getGradingStatusBadge(submission.gradingStatus)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end space-x-1">
-                            <Dialog>
-                              <DialogTrigger asChild>
-                                <Button 
-                                  variant="outline" 
-                                  size="sm"
-                                  onClick={() => handleReviewSubmission(submission)}
-                                >
-                                  <Eye className="w-4 h-4" />
-                                </Button>
-                              </DialogTrigger>
-                              <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-                                <DialogHeader>
-                                  <DialogTitle>Análise Detalhada - {submission.studentName}</DialogTitle>
-                                  <DialogDescription>
-                                    Revisão da submissão do simulado "{submission.examTitle}"
-                                  </DialogDescription>
-                                </DialogHeader>
-                                
-                                {selectedSubmission && (
-                                  <div className="space-y-6">
-                                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                      <div>
-                                        <Label className="text-sm font-medium">Pontuação</Label>
-                                        <p className="text-2xl font-bold">{selectedSubmission.score}/{selectedSubmission.totalQuestions}</p>
-                                      </div>
-                                      <div>
-                                        <Label className="text-sm font-medium">Percentual</Label>
-                                        <p className="text-2xl font-bold">{selectedSubmission.percentage}%</p>
-                                      </div>
-                                      <div>
-                                        <Label className="text-sm font-medium">Tempo Gasto</Label>
-                                        <p className="text-2xl font-bold">{selectedSubmission.timeSpent}min</p>
-                                      </div>
-                                      <div>
-                                        <Label className="text-sm font-medium">Performance</Label>
-                                        <div className="mt-1">
-                                          {getPerformanceBadge(selectedSubmission.percentage)}
-                                        </div>
-                                      </div>
-                                    </div>
-
-                                    <Separator />
-
-                                    {selectedSubmission.questionWeights && selectedSubmission.questionWeights.length > 0 && (
-                                      <>
-                                        <div>
-                                          <Label className="text-sm font-medium mb-3 block">Pesos das Questões</Label>
-                                          <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
-                                            <Table>
-                                              <TableHeader>
-                                                <TableRow>
-                                                  <TableHead className="w-24">Questão</TableHead>
-                                                  <TableHead>Matéria</TableHead>
-                                                  <TableHead className="w-24">Peso</TableHead>
-                                                  <TableHead className="w-32">Resposta</TableHead>
-                                                  <TableHead className="w-32">Gabarito</TableHead>
-                                                  <TableHead className="w-24 text-center">Status</TableHead>
-                                                </TableRow>
-                                              </TableHeader>
-                                              <TableBody>
-                                                {selectedSubmission.questionWeights.map((qw) => {
-                                                  const studentAnswer = selectedSubmission.answers[qw.questionIndex];
-                                                  const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
-                                                  const isCorrect = studentAnswer === correctAnswer;
-                                                  
-                                                  return (
-                                                    <TableRow key={qw.questionIndex}>
-                                                      <TableCell className="font-medium">
-                                                        #{qw.questionIndex + 1}
-                                                      </TableCell>
-                                                      <TableCell>{qw.subject}</TableCell>
-                                                      <TableCell>
-                                                        <Badge variant="outline">{qw.weight}x</Badge>
-                                                      </TableCell>
-                                                      <TableCell className="text-center">
-                                                        {studentAnswer !== undefined ? (
-                                                          <span className={isCorrect ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                                            {String.fromCharCode(65 + studentAnswer)}
-                                                          </span>
-                                                        ) : (
-                                                          <span className="text-muted-foreground">-</span>
-                                                        )}
-                                                      </TableCell>
-                                                      <TableCell className="text-center">
-                                                        <span className="font-medium">
-                                                          {String.fromCharCode(65 + correctAnswer)}
-                                                        </span>
-                                                      </TableCell>
-                                                      <TableCell className="text-center">
-                                                        {isCorrect ? (
-                                                          <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
-                                                        ) : (
-                                                          <XCircle className="w-5 h-5 text-red-600 mx-auto" />
-                                                        )}
-                                                      </TableCell>
-                                                    </TableRow>
-                                                  );
-                                                })}
-                                              </TableBody>
-                                            </Table>
-                                          </div>
-                                        </div>
-
-                                        <Separator />
-                                      </>
-                                    )}
-
-                                    <div>
-                                      <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
-                                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                        {selectedSubmission.subjectPerformances.map((subject) => (
-                                          <Card key={subject.subject} className="p-4">
-                                            <div className="flex items-center justify-between mb-2">
-                                              <h4 className="font-medium">{subject.subject}</h4>
-                                              <Badge variant="outline">
-                                                {subject.correctAnswers}/{subject.totalQuestions}
-                                              </Badge>
-                                            </div>
-                                            <Progress value={subject.percentage} className="h-2" />
-                                            <p className="text-sm text-muted-foreground mt-1">
-                                              {subject.percentage}%
-                                            </p>
-                                          </Card>
-                                        ))}
-                                      </div>
-                                    </div>
-
-                                    <Separator />
-
-                                    <div className="space-y-4">
-                                      <div>
-                                        <Label className="text-sm font-medium mb-2 block">Cartões Resposta</Label>
-                                        <p className="text-sm text-muted-foreground mb-4">
-                                          Faça upload das imagens dos cartões resposta escaneados
-                                        </p>
-                                        
-                                        <div className="flex items-center gap-4 mb-4">
-                                          <Button 
-                                            variant="outline" 
-                                            onClick={() => document.getElementById('answer-sheet-upload')?.click()}
-                                            disabled={uploadingImage}
-                                          >
-                                            {uploadingImage ? (
-                                              <>
-                                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                Enviando...
-                                              </>
-                                            ) : (
-                                              <>
-                                                <Send className="w-4 h-4 mr-2" />
-                                                Enviar Imagem
-                                              </>
-                                            )}
-                                          </Button>
-                                          <input
-                                            id="answer-sheet-upload"
-                                            type="file"
-                                            accept="image/*"
-                                            className="hidden"
-                                            onChange={handleUploadAnswerSheet}
-                                          />
-                                          <span className="text-sm text-muted-foreground">
-                                            Formatos aceitos: JPG, PNG (máx. 10MB)
-                                          </span>
-                                        </div>
-
-                                        {answerSheetImages.length > 0 && (
-                                          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                            {answerSheetImages.map((image) => (
-                                              <div key={image.id} className="relative group">
-                                                <div className="aspect-square rounded-lg overflow-hidden border border-slate-200">
-                                                  <img 
-                                                    src={image.signedUrl} 
-                                                    alt={image.fileName}
-                                                    className="w-full h-full object-cover"
-                                                  />
-                                                </div>
-                                                <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
-                                                  <Button
-                                                    variant="destructive"
-                                                    size="sm"
-                                                    onClick={() => handleDeleteAnswerSheet(image.id)}
-                                                  >
-                                                    <X className="w-4 h-4 mr-1" />
-                                                    Excluir
-                                                  </Button>
-                                                </div>
-                                                <p className="text-xs text-muted-foreground mt-1 truncate">
-                                                  {image.fileName}
-                                                </p>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
-
-                                        {answerSheetImages.length === 0 && (
-                                          <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center">
-                                            <Clipboard className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                                            <p className="text-sm text-muted-foreground">
-                                              Nenhuma imagem de cartão resposta enviada
-                                            </p>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-
-                                    <Separator />
-
-                                    <div className="space-y-4">
-                                      <div>
-                                        <Label htmlFor="feedback">Feedback para o Aluno</Label>
-                                        <Textarea
-                                          id="feedback"
-                                          placeholder="Digite o feedback que será enviado para o aluno..."
-                                          value={feedback}
-                                          onChange={(e) => setFeedback(e.target.value)}
-                                          rows={3}
-                                        />
-                                      </div>
-                                      <div>
-                                        <Label htmlFor="reviewNotes">Notas de Revisão (interno)</Label>
-                                        <Textarea
-                                          id="reviewNotes"
-                                          placeholder="Anotações internas sobre a performance do aluno..."
-                                          value={reviewNotes}
-                                          onChange={(e) => setReviewNotes(e.target.value)}
-                                          rows={3}
-                                        />
-                                      </div>
-                                    </div>
-
-                                    <div className="flex justify-end space-x-2">
-                                      <Button variant="outline" onClick={() => setSelectedSubmission(null)}>
-                                        Cancelar
-                                      </Button>
-                                      <Button onClick={handleSaveReview} disabled={reviewing}>
-                                        {reviewing ? (
-                                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                        ) : (
-                                          <Save className="w-4 h-4 mr-2" />
-                                        )}
-                                        Salvar Revisão
-                                      </Button>
-                                    </div>
-                                  </div>
-                                )}
-                              </DialogContent>
-                            </Dialog>
-                            
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => handleExportIndividual(submission.id)}
-                            >
-                              <Download className="w-4 h-4" />
-                            </Button>
-                          </div>
+                          </h3>
+                          <p className="text-muted-foreground">
+                            {searchTerm || filterExam !== 'all' || filterApplication !== 'all' || filterStatus !== 'all'
+                              ? 'Tente ajustar os filtros de busca'
+                              : 'As submissões aparecerão aqui conforme os alunos realizarem os simulados'
+                            }
+                          </p>
                         </TableCell>
                       </TableRow>
-                    ))}
+                    ) : (
+                      filteredSubmissions.map((submission) => (
+                        <TableRow key={submission.id}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedSubmissions.includes(submission.id)}
+                              onCheckedChange={(checked) => 
+                                handleSelectSubmission(submission.id, checked as boolean)
+                              }
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <div>
+                              <div className="font-medium">{submission.studentName}</div>
+                              <div className="text-sm text-muted-foreground">
+                                {submission.studentClass} • {submission.studentGrade}
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="font-medium">{submission.examTitle}</div>
+                          </TableCell>
+                          <TableCell className="text-sm">
+                            {formatDate(submission.submittedAt)}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center">
+                              <Clock className="w-4 h-4 mr-1 text-muted-foreground" />
+                              <span className="text-sm">{submission.timeSpent}min</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center space-x-2">
+                              <div className="w-20">
+                                <Progress value={submission.percentage} className="h-2" />
+                              </div>
+                              <div className="text-sm font-medium">
+                                {submission.score}/{submission.totalQuestions}
+                              </div>
+                              <div className="text-xs text-muted-foreground">
+                                ({submission.percentage}%)
+                              </div>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            {getPerformanceBadge(submission.percentage)}
+                          </TableCell>
+                          <TableCell>
+                            {getGradingStatusBadge(submission.gradingStatus)}
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <div className="flex justify-end space-x-1">
+                              <Dialog>
+                                <DialogTrigger asChild>
+                                  <Button 
+                                    variant="outline" 
+                                    size="sm"
+                                    onClick={() => handleReviewSubmission(submission)}
+                                  >
+                                    <Eye className="w-4 h-4" />
+                                  </Button>
+                                </DialogTrigger>
+                                <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+                                  <DialogHeader>
+                                    <DialogTitle>Análise Detalhada - {submission.studentName}</DialogTitle>
+                                    <DialogDescription>
+                                      Revisão da submissão do simulado "{submission.examTitle}"
+                                    </DialogDescription>
+                                  </DialogHeader>
+                                  
+                                  {selectedSubmission && selectedSubmission.id === submission.id && (
+                                    <div className="space-y-6">
+                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                        <div>
+                                          <Label className="text-sm font-medium">Pontuação</Label>
+                                          <p className="text-2xl font-bold">{selectedSubmission.score}/{selectedSubmission.totalQuestions}</p>
+                                        </div>
+                                        <div>
+                                          <Label className="text-sm font-medium">Percentual</Label>
+                                          <p className="text-2xl font-bold">{selectedSubmission.percentage}%</p>
+                                        </div>
+                                        <div>
+                                          <Label className="text-sm font-medium">Tempo Gasto</Label>
+                                          <p className="text-2xl font-bold">{selectedSubmission.timeSpent}min</p>
+                                        </div>
+                                        <div>
+                                          <Label className="text-sm font-medium">Performance</Label>
+                                          <div className="mt-1">
+                                            {getPerformanceBadge(selectedSubmission.percentage)}
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <Separator />
+
+                                      {selectedSubmission.questionWeights && selectedSubmission.questionWeights.length > 0 && (
+                                        <>
+                                          <div>
+                                            <Label className="text-sm font-medium mb-3 block">Respostas do Aluno</Label>
+                                            <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                                              <Table>
+                                                <TableHeader>
+                                                  <TableRow>
+                                                    <TableHead className="w-24">Questão</TableHead>
+                                                    <TableHead>Matéria</TableHead>
+                                                    <TableHead className="w-24">Peso</TableHead>
+                                                    <TableHead className="w-32">Resposta</TableHead>
+                                                    <TableHead className="w-32">Gabarito</TableHead>
+                                                    <TableHead className="w-24 text-center">Status</TableHead>
+                                                  </TableRow>
+                                                </TableHeader>
+                                                <TableBody>
+                                                  {selectedSubmission.questionWeights.map((qw) => {
+                                                    const studentAnswer = selectedSubmission.answers[qw.questionIndex];
+                                                    const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
+                                                    const isCorrect = studentAnswer === correctAnswer;
+                                                    
+                                                    return (
+                                                      <TableRow key={qw.questionIndex}>
+                                                        <TableCell className="font-medium">
+                                                          #{qw.questionIndex + 1}
+                                                        </TableCell>
+                                                        <TableCell>{qw.subject}</TableCell>
+                                                        <TableCell>
+                                                          <Badge variant="outline">{qw.weight}x</Badge>
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                          {studentAnswer !== undefined ? (
+                                                            <span className={isCorrect ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                                              {String.fromCharCode(65 + studentAnswer)}
+                                                            </span>
+                                                          ) : (
+                                                            <span className="text-muted-foreground">-</span>
+                                                          )}
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                          <span className="font-medium">
+                                                            {String.fromCharCode(65 + correctAnswer)}
+                                                          </span>
+                                                        </TableCell>
+                                                        <TableCell className="text-center">
+                                                          {isCorrect ? (
+                                                            <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
+                                                          ) : (
+                                                            <XCircle className="w-5 h-5 text-red-600 mx-auto" />
+                                                          )}
+                                                        </TableCell>
+                                                      </TableRow>
+                                                    );
+                                                  })}
+                                                </TableBody>
+                                              </Table>
+                                            </div>
+                                          </div>
+
+                                          <Separator />
+                                        </>
+                                      )}
+
+                                      <div>
+                                        <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
+                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                          {selectedSubmission.subjectPerformances.map((subject) => (
+                                            <Card key={subject.subject} className="p-4">
+                                              <div className="flex items-center justify-between mb-2">
+                                                <h4 className="font-medium">{subject.subject}</h4>
+                                                <Badge variant="outline">
+                                                  {subject.correctAnswers}/{subject.totalQuestions}
+                                                </Badge>
+                                              </div>
+                                              <Progress value={subject.percentage} className="h-2" />
+                                              <p className="text-sm text-muted-foreground mt-1">
+                                                {subject.percentage}%
+                                              </p>
+                                            </Card>
+                                          ))}
+                                        </div>
+                                      </div>
+
+                                      <Separator />
+
+                                      <div className="space-y-4">
+                                        <div>
+                                          <Label className="text-sm font-medium mb-2 block flex items-center">
+                                            <ImageIcon className="w-4 h-4 mr-2" />
+                                            Cartões Resposta / Imagens
+                                          </Label>
+                                          <p className="text-sm text-muted-foreground mb-4">
+                                            Faça upload das imagens dos cartões resposta escaneados ou fotos das provas
+                                          </p>
+                                          
+                                          <div className="flex items-center gap-4 mb-4">
+                                            <Button 
+                                              variant="outline" 
+                                              onClick={() => document.getElementById('answer-sheet-upload')?.click()}
+                                              disabled={uploadingImage}
+                                            >
+                                              {uploadingImage ? (
+                                                <>
+                                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                  Enviando...
+                                                </>
+                                              ) : (
+                                                <>
+                                                  <Send className="w-4 h-4 mr-2" />
+                                                  Enviar Imagem
+                                                </>
+                                              )}
+                                            </Button>
+                                            <input
+                                              id="answer-sheet-upload"
+                                              type="file"
+                                              accept="image/*"
+                                              className="hidden"
+                                              onChange={handleUploadAnswerSheet}
+                                            />
+                                            <span className="text-sm text-muted-foreground">
+                                              Formatos aceitos: JPG, PNG (máx. 10MB)
+                                            </span>
+                                          </div>
+
+                                          {answerSheetImages.length > 0 && (
+                                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                              {answerSheetImages.map((image) => (
+                                                <div key={image.id} className="relative group">
+                                                  <div className="aspect-square rounded-lg overflow-hidden border-2 border-slate-200 cursor-pointer"
+                                                       onClick={() => setSelectedImagePreview(image.signedUrl)}>
+                                                    <img 
+                                                      src={image.signedUrl} 
+                                                      alt={image.fileName}
+                                                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                                    />
+                                                  </div>
+                                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                                                    <Button
+                                                      variant="secondary"
+                                                      size="sm"
+                                                      onClick={() => setSelectedImagePreview(image.signedUrl)}
+                                                    >
+                                                      <ZoomIn className="w-4 h-4" />
+                                                    </Button>
+                                                    <Button
+                                                      variant="destructive"
+                                                      size="sm"
+                                                      onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleDeleteAnswerSheet(image.id);
+                                                      }}
+                                                    >
+                                                      <X className="w-4 h-4" />
+                                                    </Button>
+                                                  </div>
+                                                  <p className="text-xs text-muted-foreground mt-1 truncate">
+                                                    {image.fileName}
+                                                  </p>
+                                                  <p className="text-xs text-muted-foreground">
+                                                    {new Date(image.uploadedAt).toLocaleDateString('pt-BR')}
+                                                  </p>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          )}
+
+                                          {answerSheetImages.length === 0 && (
+                                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center">
+                                              <Clipboard className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                                              <p className="text-sm text-muted-foreground">
+                                                Nenhuma imagem enviada ainda
+                                              </p>
+                                              <p className="text-xs text-muted-foreground mt-1">
+                                                Clique no botão acima para fazer upload
+                                              </p>
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <Separator />
+
+                                      <div className="space-y-4">
+                                        <div>
+                                          <Label htmlFor="feedback">Feedback para o Aluno</Label>
+                                          <Textarea
+                                            id="feedback"
+                                            placeholder="Digite o feedback que será enviado para o aluno..."
+                                            value={feedback}
+                                            onChange={(e) => setFeedback(e.target.value)}
+                                            rows={3}
+                                          />
+                                        </div>
+                                        <div>
+                                          <Label htmlFor="reviewNotes">Notas de Revisão (interno)</Label>
+                                          <Textarea
+                                            id="reviewNotes"
+                                            placeholder="Anotações internas sobre a performance do aluno..."
+                                            value={reviewNotes}
+                                            onChange={(e) => setReviewNotes(e.target.value)}
+                                            rows={3}
+                                          />
+                                        </div>
+                                      </div>
+
+                                      <div className="flex justify-end space-x-2">
+                                        <Button variant="outline" onClick={() => setSelectedSubmission(null)}>
+                                          Cancelar
+                                        </Button>
+                                        <Button onClick={handleSaveReview} disabled={reviewing}>
+                                          {reviewing ? (
+                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                          ) : (
+                                            <Save className="w-4 h-4 mr-2" />
+                                          )}
+                                          Salvar Revisão
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </DialogContent>
+                              </Dialog>
+                              
+                              <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => handleExportIndividual(submission)}
+                              >
+                                <Download className="w-4 h-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
                   </TableBody>
                 </Table>
               </div>
-
-              {filteredSubmissions.length === 0 && (
-                <div className="text-center py-12">
-                  <GraduationCap className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-medium mb-2">
-                    {searchTerm || filterExam !== 'all' || filterStatus !== 'all'
-                      ? 'Nenhuma submissão encontrada'
-                      : 'Nenhuma submissão para correção'
-                    }
-                  </h3>
-                  <p className="text-muted-foreground">
-                    {searchTerm || filterExam !== 'all' || filterStatus !== 'all'
-                      ? 'Tente ajustar os filtros de busca'
-                      : 'As submissões aparecerão aqui conforme os alunos realizarem os simulados'
-                    }
-                  </p>
-                </div>
-              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -1105,6 +1176,32 @@ export function GradeExamsPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Image Preview Dialog */}
+      {selectedImagePreview && (
+        <Dialog open={!!selectedImagePreview} onOpenChange={() => setSelectedImagePreview(null)}>
+          <DialogContent className="max-w-7xl max-h-[95vh] p-2">
+            <DialogHeader>
+              <DialogTitle>Visualização da Imagem</DialogTitle>
+            </DialogHeader>
+            <div className="relative w-full h-[80vh] bg-black rounded-lg overflow-hidden">
+              <img 
+                src={selectedImagePreview} 
+                alt="Preview"
+                className="w-full h-full object-contain"
+              />
+              <Button
+                variant="secondary"
+                size="icon"
+                className="absolute top-4 right-4"
+                onClick={() => setSelectedImagePreview(null)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
