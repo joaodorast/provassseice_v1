@@ -527,26 +527,28 @@ export function QuestionBankPage() {
                 </Select>
               </div>
               
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Série/Ano</label>
-                <Select value={newQuestion.grade} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, grade: value }))}>
-                  <SelectTrigger className="text-sm">
-                    <SelectValue placeholder="Selecione a série" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {series.length === 0 ? (
-                      <div className="p-4 text-center text-sm text-slate-500">
-                        Nenhuma série cadastrada. Configure em Configurações → Acadêmico.
-                      </div>
-                    ) : (
-                      series.map(s => (
-                        <SelectItem key={s} value={s}>{s}</SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-              
+           {/* 
+<div>
+  <label className="block text-sm font-medium text-slate-700 mb-2">Série/Ano</label>
+  <Select value={newQuestion.grade} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, grade: value }))}>
+    <SelectTrigger className="text-sm">
+      <SelectValue placeholder="Selecione a série" />
+    </SelectTrigger>
+    <SelectContent>
+      {series.length === 0 ? (
+        <div className="p-4 text-center text-sm text-slate-500">
+          Nenhuma série cadastrada. Configure em Configurações → Acadêmico.
+        </div>
+      ) : (
+        series.map(s => (
+          <SelectItem key={s} value={s}>{s}</SelectItem>
+        ))
+      )}
+    </SelectContent>
+  </Select>
+</div>
+*/}
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Dificuldade</label>
                 <Select value={newQuestion.difficulty} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, difficulty: value }))}>

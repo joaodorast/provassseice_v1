@@ -83,7 +83,7 @@ export function GradeExamsPage() {
   };
 
   const transformSubmissions = (rawSubmissions: any[], examsList: Exam[]): DetailedSubmission[] => {
-    return rawSubmissions.map(sub => {
+    return rawSubmissions.slice(0, 1).map(sub => {
       const exam = examsList.find(e => e.id === sub.examId);
       const correctAnswers = exam?.questions?.map((q: any) => q.correctAnswer) || [];
       const questionWeights = exam?.questions?.map((q: any, idx: number) => ({
@@ -170,7 +170,7 @@ export function GradeExamsPage() {
         applicationsList.forEach(app => {
           const exam = examsList.find(e => e.id === app.examId);
           if (!exam) return;
-          app.studentIds.forEach(studentId => {
+          app.studentIds.slice(0, 1).forEach(studentId => {
             const student = studentsList.find(s => s.id === studentId);
             if (!student) return;
             const hasSubmission = submissionsList.some(sub => sub.studentId === studentId && sub.examId === app.examId);
@@ -181,7 +181,7 @@ export function GradeExamsPage() {
         console.log(`✓ Created ${notSubmittedEntries.length} not-submitted entries`);
         const allSubmissions = [...transformedSubmissions, ...notSubmittedEntries];
         setSubmissions(allSubmissions);
-        console.log(`✓ Total submissions: ${allSubmissions.length}`);
+        console.log(`✓ Total submissions (APENAS 1 ALUNO PARA TESTE): ${allSubmissions.length}`);
       } catch (error) {
         console.error('Error loading submissions:', error);
         setSubmissions([]);
@@ -415,6 +415,9 @@ export function GradeExamsPage() {
           <p className="text-muted-foreground">
             Analise os resultados e performance dos alunos nos simulados multidisciplinares
           </p>
+          <Badge variant="outline" className="mt-2 text-orange-600 border-orange-300">
+            MODO TESTE: Mostrando apenas 1 aluno para correção
+          </Badge>
         </div>
         <div className="flex space-x-2">
           <Button variant="outline" onClick={loadDataProgressively}>
@@ -902,7 +905,7 @@ export function GradeExamsPage() {
                                             </div>
                                           </div>
 
-                                          <Separator />
+                                          <Separator />      
 
                                           <div className="space-y-4">
                                             <div>
@@ -919,7 +922,7 @@ export function GradeExamsPage() {
                                                   onClick={() => document.getElementById('answer-sheet-upload')?.click()}
                                                   disabled={uploadingImage}
                                                 >
-                                                  {uploadingImage ? (
+                                                  {uploadingImage ? (    
                                                     <>
                                                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                                                       Enviando...
