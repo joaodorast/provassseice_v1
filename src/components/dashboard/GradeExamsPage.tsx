@@ -13,109 +13,38 @@ import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
 import { Checkbox } from '../ui/checkbox';
 import { 
-  CheckCircle, 
-  Clock, 
-  Search, 
-  Filter, 
-  Eye, 
-  Download,
-  BarChart3,
-  FileText,
-  Users,
-  Target,
-  TrendingUp,
-  Award,
-  XCircle,
-  AlertCircle,
-  Loader2,
-  RefreshCw,
-  BookOpen,
-  GraduationCap,
-  MessageSquare,
-  Star,
-  Edit,
-  Save,
-  X,
-  ChevronRight,
-  PieChart,
-  Activity,
-  Clipboard,
-  Send,
-  Image as ImageIcon,
-  ZoomIn
+  CheckCircle, Clock, Search, Eye, Download, FileText, Target, TrendingUp, Award, XCircle, AlertCircle,
+  Loader2, RefreshCw, GraduationCap, Star, Save, X, PieChart, Clipboard, Send, Image as ImageIcon, ZoomIn, UserX
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 
-type GradingStatus = 'pending' | 'graded' | 'reviewed';
-
-type SubjectPerformance = {
-  subject: string;
-  totalQuestions: number;
-  correctAnswers: number;
-  percentage: number;
-};
-
-type QuestionWeight = {
-  questionIndex: number;
-  weight: number;
-  subject: string;
-};
-
+type GradingStatus = 'pending' | 'graded' | 'reviewed' | 'not_submitted';
+type SubjectPerformance = { subject: string; totalQuestions: number; correctAnswers: number; percentage: number };
+type QuestionWeight = { questionIndex: number; weight: number; subject: string };
 type DetailedSubmission = {
-  id: string;
-  examId: string;
-  examTitle: string;
-  studentId: string;
-  studentName: string;
-  studentEmail: string;
-  studentClass: string;
-  studentGrade: string;
-  answers: number[];
-  correctAnswers: number[];
-  score: number;
-  totalQuestions: number;
-  percentage: number;
-  subjectPerformances: SubjectPerformance[];
-  timeSpent: number;
-  submittedAt: string;
-  gradingStatus: GradingStatus;
-  feedback?: string;
-  reviewNotes?: string;
-  questionWeights?: QuestionWeight[];
-  applicationId?: string;
+  id: string; examId: string; examTitle: string; studentId: string; studentName: string; studentEmail: string;
+  studentClass: string; studentGrade: string; answers: number[]; correctAnswers: number[]; score: number;
+  totalQuestions: number; percentage: number; subjectPerformances: SubjectPerformance[]; timeSpent: number;
+  submittedAt: string; gradingStatus: GradingStatus; feedback?: string; reviewNotes?: string;
+  questionWeights?: QuestionWeight[]; applicationId?: string;
 };
-
 type Exam = {
-  id: string;
-  title: string;
-  description: string;
-  questionsPerSubject: number;
-  timeLimit: number;
-  subjects: string[];
-  totalQuestions: number;
-  questions: any[];
-  userId: string;
-  createdAt: string;
+  id: string; title: string; description: string; questionsPerSubject: number; timeLimit: number;
+  subjects: string[]; totalQuestions: number; questions: any[]; userId: string; createdAt: string;
   status: 'Rascunho' | 'Ativo' | 'Arquivado';
 };
-
 type Application = {
-  id: string;
-  examId: string;
-  examTitle: string;
-  studentIds: string[];
-  applicationMethod: string;
-  status: string;
-  createdAt: string;
-  appliedCount: number;
-  completedCount: number;
+  id: string; examId: string; examTitle: string; studentIds: string[]; applicationMethod: string;
+  status: string; createdAt: string; appliedCount: number; completedCount: number;
 };
+type Student = { id: string; name: string; email: string; class: string; grade: string };
 
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
   const [exams, setExams] = useState<Exam[]>([]);
   const [applications, setApplications] = useState<Application[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [submissions, setSubmissions] = useState<DetailedSubmission[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterExam, setFilterExam] = useState('all');
@@ -132,47 +61,23 @@ export function GradeExamsPage() {
 
   useEffect(() => {
     loadDataProgressively();
-    
-    // Verificar se há parâmetros na URL para filtrar
     const urlParams = new URLSearchParams(window.location.hash.split('?')[1]);
     const appId = urlParams.get('app');
     const examId = urlParams.get('exam');
-    
-    if (appId) {
-      setFilterApplication(appId);
-    } else if (examId) {
-      setFilterExam(examId);
-    }
+    if (appId) setFilterApplication(appId);
+    else if (examId) setFilterExam(examId);
   }, []);
 
-  const calculateSubjectPerformances = (
-    studentAnswers: number[],
-    correctAnswers: number[],
-    questionWeights: QuestionWeight[],
-    subjects: string[]
-  ): SubjectPerformance[] => {
-    const performanceBySubject: { [key: string]: { correct: number; total: number; weighted: number; totalWeight: number } } = {};
-    
+  const calculateSubjectPerformances = (studentAnswers: number[], correctAnswers: number[], questionWeights: QuestionWeight[]): SubjectPerformance[] => {
+    const performanceBySubject: { [key: string]: { correct: number; total: number } } = {};
     questionWeights.forEach((qw, idx) => {
       const subject = qw.subject;
-      
-      if (!performanceBySubject[subject]) {
-        performanceBySubject[subject] = { correct: 0, total: 0, weighted: 0, totalWeight: 0 };
-      }
-      
+      if (!performanceBySubject[subject]) performanceBySubject[subject] = { correct: 0, total: 0 };
       performanceBySubject[subject].total += 1;
-      performanceBySubject[subject].totalWeight += qw.weight;
-      
-      if (studentAnswers[idx] === correctAnswers[idx]) {
-        performanceBySubject[subject].correct += 1;
-        performanceBySubject[subject].weighted += qw.weight;
-      }
+      if (studentAnswers[idx] === correctAnswers[idx]) performanceBySubject[subject].correct += 1;
     });
-    
     return Object.entries(performanceBySubject).map(([subject, data]) => ({
-      subject,
-      totalQuestions: data.total,
-      correctAnswers: data.correct,
+      subject, totalQuestions: data.total, correctAnswers: data.correct,
       percentage: data.total > 0 ? Math.round((data.correct / data.total) * 100) : 0
     }));
   };
@@ -182,48 +87,40 @@ export function GradeExamsPage() {
       const exam = examsList.find(e => e.id === sub.examId);
       const correctAnswers = exam?.questions?.map((q: any) => q.correctAnswer) || [];
       const questionWeights = exam?.questions?.map((q: any, idx: number) => ({
-        questionIndex: idx,
-        weight: q.weight || 1,
-        subject: q.subject || 'Geral'
+        questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
       })) || [];
-      
-      const subjectPerformances = calculateSubjectPerformances(
-        sub.answers || [],
-        correctAnswers,
-        questionWeights,
-        exam?.subjects || []
-      );
-      
+      const subjectPerformances = calculateSubjectPerformances(sub.answers || [], correctAnswers, questionWeights);
       return {
-        id: sub.id,
-        examId: sub.examId,
-        examTitle: sub.examTitle || exam?.title || 'Simulado',
-        studentId: sub.studentId,
-        studentName: sub.studentName,
-        studentEmail: sub.studentEmail,
-        studentClass: sub.studentClass,
-        studentGrade: sub.studentGrade,
-        answers: sub.answers || [],
-        correctAnswers,
-        score: sub.score || 0,
-        totalQuestions: sub.totalQuestions || correctAnswers.length,
-        percentage: sub.percentage || 0,
-        subjectPerformances,
-        timeSpent: sub.timeSpent || 0,
+        id: sub.id, examId: sub.examId, examTitle: sub.examTitle || exam?.title || 'Simulado',
+        studentId: sub.studentId, studentName: sub.studentName, studentEmail: sub.studentEmail,
+        studentClass: sub.studentClass, studentGrade: sub.studentGrade, answers: sub.answers || [],
+        correctAnswers, score: sub.score || 0, totalQuestions: sub.totalQuestions || correctAnswers.length,
+        percentage: sub.percentage || 0, subjectPerformances, timeSpent: sub.timeSpent || 0,
         submittedAt: sub.submittedAt || new Date().toISOString(),
         gradingStatus: sub.gradingStatus || 'graded' as GradingStatus,
-        feedback: sub.feedback,
-        reviewNotes: sub.reviewNotes,
-        questionWeights,
-        applicationId: sub.applicationId
+        feedback: sub.feedback, reviewNotes: sub.reviewNotes, questionWeights, applicationId: sub.applicationId
       };
     });
+  };
+
+  const createNotSubmittedEntry = (student: Student, exam: Exam, applicationId: string): DetailedSubmission => {
+    const correctAnswers = exam.questions?.map((q: any) => q.correctAnswer) || [];
+    const questionWeights = exam.questions?.map((q: any, idx: number) => ({
+      questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
+    })) || [];
+    return {
+      id: `not-submitted-${applicationId}-${student.id}`, examId: exam.id, examTitle: exam.title,
+      studentId: student.id, studentName: student.name, studentEmail: student.email,
+      studentClass: student.class, studentGrade: student.grade, answers: [], correctAnswers,
+      score: 0, totalQuestions: correctAnswers.length, percentage: 0, subjectPerformances: [],
+      timeSpent: 0, submittedAt: new Date().toISOString(), gradingStatus: 'not_submitted',
+      feedback: undefined, reviewNotes: undefined, questionWeights, applicationId
+    };
   };
 
   const loadDataProgressively = async () => {
     try {
       setLoading(true);
-      
       let examsList: Exam[] = [];
       try {
         console.log('=== GradePage: Loading exams ===');
@@ -236,13 +133,26 @@ export function GradeExamsPage() {
         setExams([]);
         toast.error('Erro ao carregar simulados');
       }
+
+      let studentsList: Student[] = [];
+      try {
+        console.log('=== GradePage: Loading students ===');
+        const studentsRes = await apiService.getStudents();
+        studentsList = (studentsRes.students || []).filter((s: any) => s && s.id);
+        console.log(`✓ Loaded ${studentsList.length} students`);
+        setStudents(studentsList);
+      } catch (error) {
+        console.error('Error loading students:', error);
+        setStudents([]);
+      }
       
+      let applicationsList: Application[] = [];
       try {
         console.log('=== GradePage: Loading applications ===');
         const applicationsRes = await apiService.getApplications();
-        const appsList = (applicationsRes.applications || []).filter((a: any) => a && a.id);
-        console.log(`✓ Loaded ${appsList.length} applications`);
-        setApplications(appsList);
+        applicationsList = (applicationsRes.applications || []).filter((a: any) => a && a.id);
+        console.log(`✓ Loaded ${applicationsList.length} applications`);
+        setApplications(applicationsList);
       } catch (error) {
         console.error('Error loading applications:', error);
         setApplications([]);
@@ -254,13 +164,29 @@ export function GradeExamsPage() {
         const submissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
         console.log(`✓ Loaded ${submissionsList.length} submissions`);
         
-        setSubmissions(transformSubmissions(submissionsList, examsList));
+        const transformedSubmissions = transformSubmissions(submissionsList, examsList);
+        const notSubmittedEntries: DetailedSubmission[] = [];
+        
+        applicationsList.forEach(app => {
+          const exam = examsList.find(e => e.id === app.examId);
+          if (!exam) return;
+          app.studentIds.forEach(studentId => {
+            const student = studentsList.find(s => s.id === studentId);
+            if (!student) return;
+            const hasSubmission = submissionsList.some(sub => sub.studentId === studentId && sub.examId === app.examId);
+            if (!hasSubmission) notSubmittedEntries.push(createNotSubmittedEntry(student, exam, app.id));
+          });
+        });
+        
+        console.log(`✓ Created ${notSubmittedEntries.length} not-submitted entries`);
+        const allSubmissions = [...transformedSubmissions, ...notSubmittedEntries];
+        setSubmissions(allSubmissions);
+        console.log(`✓ Total submissions: ${allSubmissions.length}`);
       } catch (error) {
         console.error('Error loading submissions:', error);
         setSubmissions([]);
         toast.error('Erro ao carregar submissões');
       }
-      
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Erro ao carregar dados');
@@ -269,58 +195,43 @@ export function GradeExamsPage() {
     }
   };
 
-  const loadData = loadDataProgressively;
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+      day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
   };
 
   const getGradingStats = () => {
     const totalSubmissions = submissions.length;
+    const actualSubmissions = submissions.filter(s => s.gradingStatus !== 'not_submitted');
+    const notSubmitted = submissions.filter(s => s.gradingStatus === 'not_submitted').length;
     const gradedSubmissions = submissions.filter(s => s.gradingStatus === 'graded').length;
     const reviewedSubmissions = submissions.filter(s => s.gradingStatus === 'reviewed').length;
-    const avgScore = submissions.length > 0 
-      ? Math.round(submissions.reduce((sum, sub) => sum + sub.percentage, 0) / submissions.length)
-      : 0;
-    const passRate = submissions.length > 0
-      ? Math.round((submissions.filter(s => s.percentage >= 60).length / submissions.length) * 100)
-      : 0;
-
-    return { totalSubmissions, gradedSubmissions, reviewedSubmissions, avgScore, passRate };
+    const avgScore = actualSubmissions.length > 0 
+      ? Math.round(actualSubmissions.reduce((sum, sub) => sum + sub.percentage, 0) / actualSubmissions.length) : 0;
+    const passRate = actualSubmissions.length > 0
+      ? Math.round((actualSubmissions.filter(s => s.percentage >= 60).length / actualSubmissions.length) * 100) : 0;
+    return { totalSubmissions, gradedSubmissions, reviewedSubmissions, avgScore, passRate, notSubmitted, actualSubmissions: actualSubmissions.length };
   };
 
   const stats = getGradingStats();
 
-  const getPerformanceBadge = (percentage: number) => {
-    if (percentage >= 80) {
-      return <Badge className="bg-emerald-100 text-emerald-800">Excelente</Badge>;
-    } else if (percentage >= 70) {
-      return <Badge className="bg-green-100 text-green-800">Muito Bom</Badge>;
-    } else if (percentage >= 60) {
-      return <Badge className="bg-blue-100 text-blue-800">Bom</Badge>;
-    } else if (percentage >= 50) {
-      return <Badge className="bg-yellow-100 text-yellow-800">Regular</Badge>;
-    } else {
-      return <Badge className="bg-red-100 text-red-800">Insuficiente</Badge>;
-    }
+  const getPerformanceBadge = (percentage: number, status: GradingStatus) => {
+    if (status === 'not_submitted') return <Badge className="bg-gray-100 text-gray-800">Não Realizado</Badge>;
+    if (percentage >= 80) return <Badge className="bg-emerald-100 text-emerald-800">Excelente</Badge>;
+    else if (percentage >= 70) return <Badge className="bg-green-100 text-green-800">Muito Bom</Badge>;
+    else if (percentage >= 60) return <Badge className="bg-blue-100 text-blue-800">Bom</Badge>;
+    else if (percentage >= 50) return <Badge className="bg-yellow-100 text-yellow-800">Regular</Badge>;
+    else return <Badge className="bg-red-100 text-red-800">Insuficiente</Badge>;
   };
 
   const getGradingStatusBadge = (status: GradingStatus) => {
     switch (status) {
-      case 'pending':
-        return <Badge variant="outline" className="text-orange-600 border-orange-300">Pendente</Badge>;
-      case 'graded':
-        return <Badge variant="outline" className="text-blue-600 border-blue-300">Corrigida</Badge>;
-      case 'reviewed':
-        return <Badge variant="outline" className="text-green-600 border-green-300">Revisada</Badge>;
-      default:
-        return <Badge variant="outline">Desconhecido</Badge>;
+      case 'not_submitted': return <Badge variant="outline" className="text-gray-600 border-gray-300">Não Submetido</Badge>;
+      case 'pending': return <Badge variant="outline" className="text-orange-600 border-orange-300">Pendente</Badge>;
+      case 'graded': return <Badge variant="outline" className="text-blue-600 border-blue-300">Corrigida</Badge>;
+      case 'reviewed': return <Badge variant="outline" className="text-green-600 border-green-300">Revisada</Badge>;
+      default: return <Badge variant="outline">Desconhecido</Badge>;
     }
   };
 
@@ -329,18 +240,15 @@ export function GradeExamsPage() {
       toast.error('Selecione pelo menos uma submissão para exportar');
       return;
     }
-    
     try {
       const selectedData = submissions.filter(s => selectedSubmissions.includes(s.id));
       const dataStr = JSON.stringify(selectedData, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
       const exportFileDefaultName = `resultados-${Date.now()}.json`;
-      
       const linkElement = document.createElement('a');
       linkElement.setAttribute('href', dataUri);
       linkElement.setAttribute('download', exportFileDefaultName);
       linkElement.click();
-      
       toast.success(`${selectedSubmissions.length} resultado(s) exportado(s) com sucesso!`);
       setSelectedSubmissions([]);
     } catch (error) {
@@ -350,33 +258,25 @@ export function GradeExamsPage() {
   };
 
   const handleSelectSubmission = (submissionId: string, checked: boolean) => {
-    if (checked) {
-      setSelectedSubmissions(prev => [...prev, submissionId]);
-    } else {
-      setSelectedSubmissions(prev => prev.filter(id => id !== submissionId));
-    }
+    if (checked) setSelectedSubmissions(prev => [...prev, submissionId]);
+    else setSelectedSubmissions(prev => prev.filter(id => id !== submissionId));
   };
 
-  const selectAllSubmissions = () => {
-    setSelectedSubmissions(filteredSubmissions.map(s => s.id));
-  };
-
-  const clearAllSubmissions = () => {
-    setSelectedSubmissions([]);
-  };
+  const selectAllSubmissions = () => setSelectedSubmissions(filteredSubmissions.map(s => s.id));
+  const clearAllSubmissions = () => setSelectedSubmissions([]);
 
   const handleReviewSubmission = async (submission: DetailedSubmission) => {
     setSelectedSubmission(submission);
     setReviewNotes(submission.reviewNotes || '');
     setFeedback(submission.feedback || '');
-    
+    if (submission.gradingStatus === 'not_submitted') {
+      setAnswerSheetImages([]);
+      return;
+    }
     try {
       const response = await apiService.getAnswerSheets(submission.id);
-      if (response.success && response.images) {
-        setAnswerSheetImages(response.images);
-      } else {
-        setAnswerSheetImages([]);
-      }
+      if (response.success && response.images) setAnswerSheetImages(response.images);
+      else setAnswerSheetImages([]);
     } catch (error) {
       console.error('Error loading answer sheets:', error);
       setAnswerSheetImages([]);
@@ -385,42 +285,27 @@ export function GradeExamsPage() {
 
   const handleUploadAnswerSheet = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedSubmission) return;
-    
     const file = event.target.files?.[0];
     if (!file) return;
-
     if (file.size > 10 * 1024 * 1024) {
       toast.error('Arquivo muito grande. Tamanho máximo: 10MB');
       return;
     }
-
     if (!file.type.startsWith('image/')) {
       toast.error('Apenas imagens são permitidas');
       return;
     }
-
     try {
       setUploadingImage(true);
-
       const reader = new FileReader();
       reader.onload = async (e) => {
         const base64Data = e.target?.result as string;
-        
         try {
-          const response = await apiService.uploadAnswerSheet(
-            selectedSubmission.id,
-            base64Data,
-            file.name,
-            selectedSubmission.studentName,
-            selectedSubmission.examId
-          );
-
+          const response = await apiService.uploadAnswerSheet(selectedSubmission.id, base64Data, file.name, selectedSubmission.studentName, selectedSubmission.examId);
           if (response.success && response.image) {
             setAnswerSheetImages(prev => [...prev, response.image]);
             toast.success('✅ Imagem do cartão resposta enviada com sucesso!');
-          } else {
-            throw new Error(response.error || 'Failed to upload image');
-          }
+          } else throw new Error(response.error || 'Failed to upload image');
         } catch (error) {
           console.error('Error uploading answer sheet:', error);
           toast.error('Erro ao enviar imagem');
@@ -428,12 +313,10 @@ export function GradeExamsPage() {
           setUploadingImage(false);
         }
       };
-
       reader.onerror = () => {
         toast.error('Erro ao ler arquivo');
         setUploadingImage(false);
       };
-
       reader.readAsDataURL(file);
     } catch (error) {
       console.error('Error processing file:', error);
@@ -444,16 +327,12 @@ export function GradeExamsPage() {
 
   const handleDeleteAnswerSheet = async (imageId: string) => {
     if (!window.confirm('Tem certeza que deseja excluir esta imagem?')) return;
-
     try {
       const response = await apiService.deleteAnswerSheet(imageId);
-      
       if (response.success) {
         setAnswerSheetImages(prev => prev.filter(img => img.id !== imageId));
         toast.success('Imagem excluída com sucesso!');
-      } else {
-        throw new Error(response.error || 'Failed to delete image');
-      }
+      } else throw new Error(response.error || 'Failed to delete image');
     } catch (error) {
       console.error('Error deleting answer sheet:', error);
       toast.error('Erro ao excluir imagem');
@@ -462,33 +341,22 @@ export function GradeExamsPage() {
 
   const handleSaveReview = async () => {
     if (!selectedSubmission) return;
-    
+    if (selectedSubmission.gradingStatus === 'not_submitted') {
+      toast.error('Não é possível revisar uma submissão não realizada');
+      return;
+    }
     try {
       setReviewing(true);
-      
       const response = await apiService.updateSubmissionReview(selectedSubmission.id, {
-        reviewNotes,
-        feedback,
-        gradingStatus: 'reviewed'
+        reviewNotes, feedback, gradingStatus: 'reviewed'
       });
-
       if (response.success) {
-        setSubmissions(prev => 
-          prev.map(sub => 
-            sub.id === selectedSubmission.id ? {
-              ...sub,
-              reviewNotes,
-              feedback,
-              gradingStatus: 'reviewed' as GradingStatus
-            } : sub
-          )
-        );
-        
+        setSubmissions(prev => prev.map(sub => sub.id === selectedSubmission.id ? 
+          { ...sub, reviewNotes, feedback, gradingStatus: 'reviewed' as GradingStatus } : sub
+        ));
         setSelectedSubmission(null);
         toast.success('✅ Revisão salva com sucesso!');
-      } else {
-        throw new Error('Failed to save review');
-      }
+      } else throw new Error('Failed to save review');
     } catch (error) {
       console.error('Error saving review:', error);
       toast.error('Erro ao salvar revisão');
@@ -502,12 +370,10 @@ export function GradeExamsPage() {
       const dataStr = JSON.stringify(submission, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
       const exportFileDefaultName = `resultado-${submission.studentName.replace(/\s/g, '-')}-${Date.now()}.json`;
-      
       const linkElement = document.createElement('a');
       linkElement.setAttribute('href', dataUri);
       linkElement.setAttribute('download', exportFileDefaultName);
       linkElement.click();
-      
       toast.success('Resultado individual exportado!');
     } catch (error) {
       console.error('Error exporting individual result:', error);
@@ -521,11 +387,12 @@ export function GradeExamsPage() {
     const matchesExam = filterExam === 'all' || submission.examId === filterExam;
     const matchesApp = filterApplication === 'all' || submission.applicationId === filterApplication;
     const matchesStatus = filterStatus === 'all' || 
-                         (filterStatus === 'excellent' && submission.percentage >= 80) ||
+                         (filterStatus === 'not-submitted' && submission.gradingStatus === 'not_submitted') ||
+                         (filterStatus === 'excellent' && submission.percentage >= 80 && submission.gradingStatus !== 'not_submitted') ||
                          (filterStatus === 'very-good' && submission.percentage >= 70 && submission.percentage < 80) ||
                          (filterStatus === 'good' && submission.percentage >= 60 && submission.percentage < 70) ||
                          (filterStatus === 'regular' && submission.percentage >= 50 && submission.percentage < 60) ||
-                         (filterStatus === 'insufficient' && submission.percentage < 50);
+                         (filterStatus === 'insufficient' && submission.percentage < 50 && submission.gradingStatus !== 'not_submitted');
     return matchesSearch && matchesExam && matchesApp && matchesStatus;
   });
 
@@ -550,7 +417,7 @@ export function GradeExamsPage() {
           </p>
         </div>
         <div className="flex space-x-2">
-          <Button variant="outline" onClick={loadData}>
+          <Button variant="outline" onClick={loadDataProgressively}>
             <RefreshCw className="w-4 h-4 mr-2" />
             Atualizar
           </Button>
@@ -566,39 +433,46 @@ export function GradeExamsPage() {
           <TabsTrigger value="overview">Visão Geral</TabsTrigger>
           <TabsTrigger value="submissions">
             Submissões
-            {submissions.length > 0 && (
-              <Badge variant="secondary" className="ml-2">
-                {submissions.length}
-              </Badge>
-            )}
+            {submissions.length > 0 && <Badge variant="secondary" className="ml-2">{submissions.length}</Badge>}
           </TabsTrigger>
           <TabsTrigger value="analysis">Análise Detalhada</TabsTrigger>
         </TabsList>
 
         <TabsContent value="overview" className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total de Submissões</CardTitle>
+                <CardTitle className="text-sm font-medium">Total</CardTitle>
                 <FileText className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.totalSubmissions}</div>
-                <p className="text-xs text-muted-foreground">Simulados realizados</p>
-              </CardContent>
-            </Card>
-            
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Corrigidas</CardTitle>
-                <CheckCircle className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.gradedSubmissions}</div>
-                <p className="text-xs text-muted-foreground">Automática</p>
+                <p className="text-xs text-muted-foreground">Registros totais</p>
               </CardContent>
             </Card>
 
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Realizados</CardTitle>
+                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.actualSubmissions}</div>
+                <p className="text-xs text-muted-foreground">Simulados feitos</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Não Realizados</CardTitle>
+                <UserX className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{stats.notSubmitted}</div>
+                <p className="text-xs text-muted-foreground">Faltantes</p>
+              </CardContent>
+            </Card>
+            
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Revisadas</CardTitle>
@@ -617,7 +491,7 @@ export function GradeExamsPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats.avgScore}%</div>
-                <p className="text-xs text-muted-foreground">Pontuação média</p>
+                <p className="text-xs text-muted-foreground">Dos realizados</p>
               </CardContent>
             </Card>
             
@@ -637,17 +511,27 @@ export function GradeExamsPage() {
             <CardHeader>
               <CardTitle>Distribuição de Performance</CardTitle>
               <CardDescription>
-                Análise da performance dos alunos por faixa de pontuação
+                Análise da performance dos alunos por faixa de pontuação (excluindo não realizados)
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6">
+                <div className="text-center">
+                  <div className="flex items-center justify-center w-16 h-16 bg-gray-100 rounded-full mx-auto mb-3">
+                    <UserX className="w-8 h-8 text-gray-600" />
+                  </div>
+                  <div className="text-2xl font-bold text-gray-600">
+                    {submissions.filter(s => s.gradingStatus === 'not_submitted').length}
+                  </div>
+                  <p className="text-sm text-muted-foreground">Não Realizado</p>
+                </div>
+
                 <div className="text-center">
                   <div className="flex items-center justify-center w-16 h-16 bg-emerald-100 rounded-full mx-auto mb-3">
                     <Star className="w-8 h-8 text-emerald-600" />
                   </div>
                   <div className="text-2xl font-bold text-emerald-600">
-                    {submissions.filter(s => s.percentage >= 80).length}
+                    {submissions.filter(s => s.percentage >= 80 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Excelente (≥80%)</p>
                 </div>
@@ -657,7 +541,7 @@ export function GradeExamsPage() {
                     <CheckCircle className="w-8 h-8 text-green-600" />
                   </div>
                   <div className="text-2xl font-bold text-green-600">
-                    {submissions.filter(s => s.percentage >= 70 && s.percentage < 80).length}
+                    {submissions.filter(s => s.percentage >= 70 && s.percentage < 80 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Muito Bom (70-79%)</p>
                 </div>
@@ -667,7 +551,7 @@ export function GradeExamsPage() {
                     <Target className="w-8 h-8 text-blue-600" />
                   </div>
                   <div className="text-2xl font-bold text-blue-600">
-                    {submissions.filter(s => s.percentage >= 60 && s.percentage < 70).length}
+                    {submissions.filter(s => s.percentage >= 60 && s.percentage < 70 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Bom (60-69%)</p>
                 </div>
@@ -677,7 +561,7 @@ export function GradeExamsPage() {
                     <AlertCircle className="w-8 h-8 text-yellow-600" />
                   </div>
                   <div className="text-2xl font-bold text-yellow-600">
-                    {submissions.filter(s => s.percentage >= 50 && s.percentage < 60).length}
+                    {submissions.filter(s => s.percentage >= 50 && s.percentage < 60 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Regular (50-59%)</p>
                 </div>
@@ -687,7 +571,7 @@ export function GradeExamsPage() {
                     <XCircle className="w-8 h-8 text-red-600" />
                   </div>
                   <div className="text-2xl font-bold text-red-600">
-                    {submissions.filter(s => s.percentage < 50).length}
+                    {submissions.filter(s => s.percentage < 50 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Insuficiente (&lt;50%)</p>
                 </div>
@@ -701,7 +585,7 @@ export function GradeExamsPage() {
             <CardHeader>
               <CardTitle>Submissões dos Alunos</CardTitle>
               <CardDescription>
-                Gerencie e analise todas as submissões de simulados
+                Gerencie e analise todas as submissões de simulados (incluindo não realizados)
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -745,10 +629,11 @@ export function GradeExamsPage() {
                 </Select>
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-full md:w-48">
-                    <SelectValue placeholder="Filtrar por performance" />
+                    <SelectValue placeholder="Filtrar por status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todas as performances</SelectItem>
+                    <SelectItem value="all">Todos os status</SelectItem>
+                    <SelectItem value="not-submitted">Não Realizado</SelectItem>
                     <SelectItem value="excellent">Excelente (≥80%)</SelectItem>
                     <SelectItem value="very-good">Muito Bom (70-79%)</SelectItem>
                     <SelectItem value="good">Bom (60-69%)</SelectItem>
@@ -819,7 +704,7 @@ export function GradeExamsPage() {
                       </TableRow>
                     ) : (
                       filteredSubmissions.map((submission) => (
-                        <TableRow key={submission.id}>
+                        <TableRow key={submission.id} className={submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' : ''}>
                           <TableCell>
                             <Checkbox
                               checked={selectedSubmissions.includes(submission.id)}
@@ -840,29 +725,41 @@ export function GradeExamsPage() {
                             <div className="font-medium">{submission.examTitle}</div>
                           </TableCell>
                           <TableCell className="text-sm">
-                            {formatDate(submission.submittedAt)}
+                            {submission.gradingStatus === 'not_submitted' ? (
+                              <span className="text-muted-foreground">-</span>
+                            ) : (
+                              formatDate(submission.submittedAt)
+                            )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center">
-                              <Clock className="w-4 h-4 mr-1 text-muted-foreground" />
-                              <span className="text-sm">{submission.timeSpent}min</span>
-                            </div>
+                            {submission.gradingStatus === 'not_submitted' ? (
+                              <span className="text-muted-foreground">-</span>
+                            ) : (
+                              <div className="flex items-center">
+                                <Clock className="w-4 h-4 mr-1 text-muted-foreground" />
+                                <span className="text-sm">{submission.timeSpent}min</span>
+                              </div>
+                            )}
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center space-x-2">
-                              <div className="w-20">
-                                <Progress value={submission.percentage} className="h-2" />
+                            {submission.gradingStatus === 'not_submitted' ? (
+                              <span className="text-muted-foreground">-</span>
+                            ) : (
+                              <div className="flex items-center space-x-2">
+                                <div className="w-20">
+                                  <Progress value={submission.percentage} className="h-2" />
+                                </div>
+                                <div className="text-sm font-medium">
+                                  {submission.score}/{submission.totalQuestions}
+                                </div>
+                                <div className="text-xs text-muted-foreground">
+                                  ({submission.percentage}%)
+                                </div>
                               </div>
-                              <div className="text-sm font-medium">
-                                {submission.score}/{submission.totalQuestions}
-                              </div>
-                              <div className="text-xs text-muted-foreground">
-                                ({submission.percentage}%)
-                              </div>
-                            </div>
+                            )}
                           </TableCell>
                           <TableCell>
-                            {getPerformanceBadge(submission.percentage)}
+                            {getPerformanceBadge(submission.percentage, submission.gradingStatus)}
                           </TableCell>
                           <TableCell>
                             {getGradingStatusBadge(submission.gradingStatus)}
@@ -883,265 +780,254 @@ export function GradeExamsPage() {
                                   <DialogHeader>
                                     <DialogTitle>Análise Detalhada - {submission.studentName}</DialogTitle>
                                     <DialogDescription>
-                                      Revisão da submissão do simulado "{submission.examTitle}"
+                                      {submission.gradingStatus === 'not_submitted' 
+                                        ? `Aluno não realizou o simulado "${submission.examTitle}"`
+                                        : `Revisão da submissão do simulado "${submission.examTitle}"`
+                                      }
                                     </DialogDescription>
                                   </DialogHeader>
                                   
                                   {selectedSubmission && selectedSubmission.id === submission.id && (
                                     <div className="space-y-6">
-                                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                                        <div>
-                                          <Label className="text-sm font-medium">Pontuação</Label>
-                                          <p className="text-2xl font-bold">{selectedSubmission.score}/{selectedSubmission.totalQuestions}</p>
-                                        </div>
-                                        <div>
-                                          <Label className="text-sm font-medium">Percentual</Label>
-                                          <p className="text-2xl font-bold">{selectedSubmission.percentage}%</p>
-                                        </div>
-                                        <div>
-                                          <Label className="text-sm font-medium">Tempo Gasto</Label>
-                                          <p className="text-2xl font-bold">{selectedSubmission.timeSpent}min</p>
-                                        </div>
-                                        <div>
-                                          <Label className="text-sm font-medium">Performance</Label>
-                                          <div className="mt-1">
-                                            {getPerformanceBadge(selectedSubmission.percentage)}
+                                      {submission.gradingStatus === 'not_submitted' ? (
+                                        <div className="text-center py-12">
+                                          <UserX className="w-16 h-16 mx-auto text-gray-400 mb-4" />
+                                          <h3 className="text-lg font-medium mb-2">Simulado Não Realizado</h3>
+                                          <p className="text-muted-foreground mb-4">
+                                            O aluno {submission.studentName} não realizou este simulado.
+                                          </p>
+                                          <div className="bg-gray-50 p-4 rounded-lg max-w-md mx-auto text-left">
+                                            <p className="text-sm text-muted-foreground">
+                                              <strong>Simulado:</strong> {submission.examTitle}<br />
+                                              <strong>Aluno:</strong> {submission.studentName}<br />
+                                              <strong>Turma:</strong> {submission.studentClass} - {submission.studentGrade}<br />
+                                              <strong>Email:</strong> {submission.studentEmail}
+                                            </p>
                                           </div>
                                         </div>
-                                      </div>
-
-                                      <Separator />
-
-                                      {selectedSubmission.questionWeights && selectedSubmission.questionWeights.length > 0 && (
+                                      ) : (
                                         <>
-                                          <div>
-                                            <Label className="text-sm font-medium mb-3 block">Respostas do Aluno</Label>
-                                            <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
-                                              <Table>
-                                                <TableHeader>
-                                                  <TableRow>
-                                                    <TableHead className="w-24">Questão</TableHead>
-                                                    <TableHead>Matéria</TableHead>
-                                                    <TableHead className="w-24">Peso</TableHead>
-                                                    <TableHead className="w-32">Resposta</TableHead>
-                                                    <TableHead className="w-32">Gabarito</TableHead>
-                                                    <TableHead className="w-24 text-center">Status</TableHead>
-                                                  </TableRow>
-                                                </TableHeader>
-                                                <TableBody>
-                                                  {selectedSubmission.questionWeights.map((qw) => {
-                                                    const studentAnswer = selectedSubmission.answers[qw.questionIndex];
-                                                    const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
-                                                    const isCorrect = studentAnswer === correctAnswer;
-                                                    
-                                                    return (
-                                                      <TableRow key={qw.questionIndex}>
-                                                        <TableCell className="font-medium">
-                                                          #{qw.questionIndex + 1}
-                                                        </TableCell>
-                                                        <TableCell>{qw.subject}</TableCell>
-                                                        <TableCell>
-                                                          <Badge variant="outline">{qw.weight}x</Badge>
-                                                        </TableCell>
-                                                        <TableCell className="text-center">
-                                                          {studentAnswer !== undefined ? (
-                                                            <span className={isCorrect ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
-                                                              {String.fromCharCode(65 + studentAnswer)}
-                                                            </span>
-                                                          ) : (
-                                                            <span className="text-muted-foreground">-</span>
-                                                          )}
-                                                        </TableCell>
-                                                        <TableCell className="text-center">
-                                                          <span className="font-medium">
-                                                            {String.fromCharCode(65 + correctAnswer)}
-                                                          </span>
-                                                        </TableCell>
-                                                        <TableCell className="text-center">
-                                                          {isCorrect ? (
-                                                            <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
-                                                          ) : (
-                                                            <XCircle className="w-5 h-5 text-red-600 mx-auto" />
-                                                          )}
-                                                        </TableCell>
-                                                      </TableRow>
-                                                    );
-                                                  })}
-                                                </TableBody>
-                                              </Table>
+                                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                            <div>
+                                              <Label className="text-sm font-medium">Pontuação</Label>
+                                              <p className="text-2xl font-bold">{selectedSubmission.score}/{selectedSubmission.totalQuestions}</p>
+                                            </div>
+                                            <div>
+                                              <Label className="text-sm font-medium">Percentual</Label>
+                                              <p className="text-2xl font-bold">{selectedSubmission.percentage}%</p>
+                                            </div>
+                                            <div>
+                                              <Label className="text-sm font-medium">Tempo Gasto</Label>
+                                              <p className="text-2xl font-bold">{selectedSubmission.timeSpent}min</p>
+                                            </div>
+                                            <div>
+                                              <Label className="text-sm font-medium">Performance</Label>
+                                              <div className="mt-1">
+                                                {getPerformanceBadge(selectedSubmission.percentage, selectedSubmission.gradingStatus)}
+                                              </div>
                                             </div>
                                           </div>
 
                                           <Separator />
-                                        </>
-                                      )}
 
-                                      <div>
-                                        <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
-                                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                                          {selectedSubmission.subjectPerformances.map((subject) => (
-                                            <Card key={subject.subject} className="p-4">
-                                              <div className="flex items-center justify-between mb-2">
-                                                <h4 className="font-medium">{subject.subject}</h4>
-                                                <Badge variant="outline">
-                                                  {subject.correctAnswers}/{subject.totalQuestions}
-                                                </Badge>
-                                              </div>
-                                              <Progress value={subject.percentage} className="h-2" />
-                                              <p className="text-sm text-muted-foreground mt-1">
-                                                {subject.percentage}%
-                                              </p>
-                                            </Card>
-                                          ))}
-                                        </div>
-                                      </div>
-
-                                      <Separator />
-
-                                      <div className="space-y-4">
-                                        <div>
-                                          <Label className="text-sm font-medium mb-2 block flex items-center">
-                                            <ImageIcon className="w-4 h-4 mr-2" />
-                                            Cartões Resposta / Imagens
-                                          </Label>
-                                          <p className="text-sm text-muted-foreground mb-4">
-                                            Faça upload das imagens dos cartões resposta escaneados ou fotos das provas
-                                          </p>
-                                          
-                                          <div className="flex items-center gap-4 mb-4">
-                                            <Button 
-                                              variant="outline" 
-                                              onClick={() => document.getElementById('answer-sheet-upload')?.click()}
-                                              disabled={uploadingImage}
-                                            >
-                                              {uploadingImage ? (
-                                                <>
-                                                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                                  Enviando...
-                                                </>
-                                              ) : (
-                                                <>
-                                                  <Send className="w-4 h-4 mr-2" />
-                                                  Enviar Imagem
-                                                </>
-                                              )}
-                                            </Button>
-                                            <input
-                                              id="answer-sheet-upload"
-                                              type="file"
-                                              accept="image/*"
-                                              className="hidden"
-                                              onChange={handleUploadAnswerSheet}
-                                            />
-                                            <span className="text-sm text-muted-foreground">
-                                              Formatos aceitos: JPG, PNG (máx. 10MB)
-                                            </span>
-                                          </div>
-
-                                          {answerSheetImages.length > 0 && (
-                                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                                              {answerSheetImages.map((image) => (
-                                                <div key={image.id} className="relative group">
-                                                  <div className="aspect-square rounded-lg overflow-hidden border-2 border-slate-200 cursor-pointer"
-                                                       onClick={() => setSelectedImagePreview(image.signedUrl)}>
-                                                    <img 
-                                                      src={image.signedUrl} 
-                                                      alt={image.fileName}
-                                                      className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                                                    />
-                                                  </div>
-                                                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
-                                                    <Button
-                                                      variant="secondary"
-                                                      size="sm"
-                                                      onClick={() => setSelectedImagePreview(image.signedUrl)}
-                                                    >
-                                                      <ZoomIn className="w-4 h-4" />
-                                                    </Button>
-                                                    <Button
-                                                      variant="destructive"
-                                                      size="sm"
-                                                      onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleDeleteAnswerSheet(image.id);
-                                                      }}
-                                                    >
-                                                      <X className="w-4 h-4" />
-                                                    </Button>
-                                                  </div>
-                                                  <p className="text-xs text-muted-foreground mt-1 truncate">
-                                                    {image.fileName}
-                                                  </p>
-                                                  <p className="text-xs text-muted-foreground">
-                                                    {new Date(image.uploadedAt).toLocaleDateString('pt-BR')}
-                                                  </p>
+                                          {selectedSubmission.questionWeights && selectedSubmission.questionWeights.length > 0 && (
+                                            <>
+                                              <div>
+                                                <Label className="text-sm font-medium mb-3 block">Respostas do Aluno</Label>
+                                                <div className="border rounded-lg overflow-hidden max-h-96 overflow-y-auto">
+                                                  <Table>
+                                                    <TableHeader>
+                                                      <TableRow>
+                                                        <TableHead className="w-24">Questão</TableHead>
+                                                        <TableHead>Matéria</TableHead>
+                                                        <TableHead className="w-24">Peso</TableHead>
+                                                        <TableHead className="w-32">Resposta</TableHead>
+                                                        <TableHead className="w-32">Gabarito</TableHead>
+                                                        <TableHead className="w-24 text-center">Status</TableHead>
+                                                      </TableRow>
+                                                    </TableHeader>
+                                                    <TableBody>
+                                                      {selectedSubmission.questionWeights.map((qw) => {
+                                                        const studentAnswer = selectedSubmission.answers[qw.questionIndex];
+                                                        const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
+                                                        const isCorrect = studentAnswer === correctAnswer;
+                                                        return (
+                                                          <TableRow key={qw.questionIndex}>
+                                                            <TableCell className="font-medium">#{qw.questionIndex + 1}</TableCell>
+                                                            <TableCell>{qw.subject}</TableCell>
+                                                            <TableCell><Badge variant="outline">{qw.weight}x</Badge></TableCell>
+                                                            <TableCell className="text-center">
+                                                              {studentAnswer !== undefined ? (
+                                                                <span className={isCorrect ? 'text-green-600 font-medium' : 'text-red-600 font-medium'}>
+                                                                  {String.fromCharCode(65 + studentAnswer)}
+                                                                </span>
+                                                              ) : (
+                                                                <span className="text-muted-foreground">-</span>
+                                                              )}
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                              <span className="font-medium">{String.fromCharCode(65 + correctAnswer)}</span>
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                              {isCorrect ? (
+                                                                <CheckCircle className="w-5 h-5 text-green-600 mx-auto" />
+                                                              ) : (
+                                                                <XCircle className="w-5 h-5 text-red-600 mx-auto" />
+                                                              )}
+                                                            </TableCell>
+                                                          </TableRow>
+                                                        );
+                                                      })}
+                                                    </TableBody>
+                                                  </Table>
                                                 </div>
+                                              </div>
+                                              <Separator />
+                                            </>
+                                          )}
+
+                                          <div>
+                                            <Label className="text-sm font-medium mb-3 block">Performance por Matéria</Label>
+                                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                                              {selectedSubmission.subjectPerformances.map((subject) => (
+                                                <Card key={subject.subject} className="p-4">
+                                                  <div className="flex items-center justify-between mb-2">
+                                                    <h4 className="font-medium">{subject.subject}</h4>
+                                                    <Badge variant="outline">{subject.correctAnswers}/{subject.totalQuestions}</Badge>
+                                                  </div>
+                                                  <Progress value={subject.percentage} className="h-2" />
+                                                  <p className="text-sm text-muted-foreground mt-1">{subject.percentage}%</p>
+                                                </Card>
                                               ))}
                                             </div>
-                                          )}
+                                          </div>
 
-                                          {answerSheetImages.length === 0 && (
-                                            <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center">
-                                              <Clipboard className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
-                                              <p className="text-sm text-muted-foreground">
-                                                Nenhuma imagem enviada ainda
+                                          <Separator />
+
+                                          <div className="space-y-4">
+                                            <div>
+                                              <Label className="text-sm font-medium mb-2 block flex items-center">
+                                                <ImageIcon className="w-4 h-4 mr-2" />
+                                                Cartões Resposta / Imagens
+                                              </Label>
+                                              <p className="text-sm text-muted-foreground mb-4">
+                                                Faça upload das imagens dos cartões resposta escaneados ou fotos das provas
                                               </p>
-                                              <p className="text-xs text-muted-foreground mt-1">
-                                                Clique no botão acima para fazer upload
-                                              </p>
+                                              <div className="flex items-center gap-4 mb-4">
+                                                <Button 
+                                                  variant="outline" 
+                                                  onClick={() => document.getElementById('answer-sheet-upload')?.click()}
+                                                  disabled={uploadingImage}
+                                                >
+                                                  {uploadingImage ? (
+                                                    <>
+                                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                                      Enviando...
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      <Send className="w-4 h-4 mr-2" />
+                                                      Enviar Imagem
+                                                    </>
+                                                  )}
+                                                </Button>
+                                                <input
+                                                  id="answer-sheet-upload"
+                                                  type="file"
+                                                  accept="image/*"
+                                                  className="hidden"
+                                                  onChange={handleUploadAnswerSheet}
+                                                />
+                                                <span className="text-sm text-muted-foreground">
+                                                  Formatos aceitos: JPG, PNG (máx. 10MB)
+                                                </span>
+                                              </div>
+
+                                              {answerSheetImages.length > 0 && (
+                                                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                                                  {answerSheetImages.map((image) => (
+                                                    <div key={image.id} className="relative group">
+                                                      <div className="aspect-square rounded-lg overflow-hidden border-2 border-slate-200 cursor-pointer"
+                                                           onClick={() => setSelectedImagePreview(image.signedUrl)}>
+                                                        <img 
+                                                          src={image.signedUrl} 
+                                                          alt={image.fileName}
+                                                          className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                                        />
+                                                      </div>
+                                                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
+                                                        <Button variant="secondary" size="sm" onClick={() => setSelectedImagePreview(image.signedUrl)}>
+                                                          <ZoomIn className="w-4 h-4" />
+                                                        </Button>
+                                                        <Button
+                                                          variant="destructive"
+                                                          size="sm"
+                                                          onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleDeleteAnswerSheet(image.id);
+                                                          }}
+                                                        >
+                                                          <X className="w-4 h-4" />
+                                                        </Button>
+                                                      </div>
+                                                      <p className="text-xs text-muted-foreground mt-1 truncate">{image.fileName}</p>
+                                                      <p className="text-xs text-muted-foreground">
+                                                        {new Date(image.uploadedAt).toLocaleDateString('pt-BR')}
+                                                      </p>
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              )}
+
+                                              {answerSheetImages.length === 0 && (
+                                                <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center">
+                                                  <Clipboard className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
+                                                  <p className="text-sm text-muted-foreground">Nenhuma imagem enviada ainda</p>
+                                                  <p className="text-xs text-muted-foreground mt-1">Clique no botão acima para fazer upload</p>
+                                                </div>
+                                              )}
                                             </div>
-                                          )}
-                                        </div>
-                                      </div>
+                                          </div>
 
-                                      <Separator />
+                                          <Separator />
 
-                                      <div className="space-y-4">
-                                        <div>
-                                          <Label htmlFor="feedback">Feedback para o Aluno</Label>
-                                          <Textarea
-                                            id="feedback"
-                                            placeholder="Digite o feedback que será enviado para o aluno..."
-                                            value={feedback}
-                                            onChange={(e) => setFeedback(e.target.value)}
-                                            rows={3}
-                                          />
-                                        </div>
-                                        <div>
-                                          <Label htmlFor="reviewNotes">Notas de Revisão (interno)</Label>
-                                          <Textarea
-                                            id="reviewNotes"
-                                            placeholder="Anotações internas sobre a performance do aluno..."
-                                            value={reviewNotes}
-                                            onChange={(e) => setReviewNotes(e.target.value)}
-                                            rows={3}
-                                          />
-                                        </div>
-                                      </div>
+                                          <div className="space-y-4">
+                                            <div>
+                                              <Label htmlFor="feedback">Feedback para o Aluno</Label>
+                                              <Textarea
+                                                id="feedback"
+                                                placeholder="Digite o feedback que será enviado para o aluno..."
+                                                value={feedback}
+                                                onChange={(e) => setFeedback(e.target.value)}
+                                                rows={3}
+                                              />
+                                            </div>
+                                            <div>
+                                              <Label htmlFor="reviewNotes">Notas de Revisão (interno)</Label>
+                                              <Textarea
+                                                id="reviewNotes"
+                                                placeholder="Anotações internas sobre a performance do aluno..."
+                                                value={reviewNotes}
+                                                onChange={(e) => setReviewNotes(e.target.value)}
+                                                rows={3}
+                                              />
+                                            </div>
+                                          </div>
 
-                                      <div className="flex justify-end space-x-2">
-                                        <Button variant="outline" onClick={() => setSelectedSubmission(null)}>
-                                          Cancelar
-                                        </Button>
-                                        <Button onClick={handleSaveReview} disabled={reviewing}>
-                                          {reviewing ? (
-                                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                                          ) : (
-                                            <Save className="w-4 h-4 mr-2" />
-                                          )}
-                                          Salvar Revisão
-                                        </Button>
-                                      </div>
+                                          <div className="flex justify-end space-x-2">
+                                            <Button variant="outline" onClick={() => setSelectedSubmission(null)}>Cancelar</Button>
+                                            <Button onClick={handleSaveReview} disabled={reviewing}>
+                                              {reviewing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                                              Salvar Revisão
+                                            </Button>
+                                          </div>
+                                        </>
+                                      )}
                                     </div>
                                   )}
                                 </DialogContent>
                               </Dialog>
-                              
-                              <Button 
-                                variant="outline" 
-                                size="sm"
-                                onClick={() => handleExportIndividual(submission)}
-                              >
+                              <Button variant="outline" size="sm" onClick={() => handleExportIndividual(submission)}>
                                 <Download className="w-4 h-4" />
                               </Button>
                             </div>
@@ -1160,24 +1046,19 @@ export function GradeExamsPage() {
           <Card>
             <CardHeader>
               <CardTitle>Análise Detalhada por Matéria</CardTitle>
-              <CardDescription>
-                Performance dos alunos por disciplina nos simulados multidisciplinares
-              </CardDescription>
+              <CardDescription>Performance dos alunos por disciplina nos simulados multidisciplinares</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="text-center py-12">
                 <PieChart className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
                 <h3 className="text-lg font-medium mb-2">Análise em Desenvolvimento</h3>
-                <p className="text-muted-foreground">
-                  Funcionalidades avançadas de análise serão implementadas em breve
-                </p>
+                <p className="text-muted-foreground">Funcionalidades avançadas de análise serão implementadas em breve</p>
               </div>
             </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      {/* Image Preview Dialog */}
       {selectedImagePreview && (
         <Dialog open={!!selectedImagePreview} onOpenChange={() => setSelectedImagePreview(null)}>
           <DialogContent className="max-w-7xl max-h-[95vh] p-2">
@@ -1185,17 +1066,8 @@ export function GradeExamsPage() {
               <DialogTitle>Visualização da Imagem</DialogTitle>
             </DialogHeader>
             <div className="relative w-full h-[80vh] bg-black rounded-lg overflow-hidden">
-              <img 
-                src={selectedImagePreview} 
-                alt="Preview"
-                className="w-full h-full object-contain"
-              />
-              <Button
-                variant="secondary"
-                size="icon"
-                className="absolute top-4 right-4"
-                onClick={() => setSelectedImagePreview(null)}
-              >
+              <img src={selectedImagePreview} alt="Preview" className="w-full h-full object-contain" />
+              <Button variant="secondary" size="icon" className="absolute top-4 right-4" onClick={() => setSelectedImagePreview(null)}>
                 <X className="w-4 h-4" />
               </Button>
             </div>
