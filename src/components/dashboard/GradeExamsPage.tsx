@@ -1047,6 +1047,7 @@ export function GradeExamsPage() {
                                                         <TableHead className="w-24">Peso</TableHead>
                                                         <TableHead className="w-32">Resposta</TableHead>
                                                         <TableHead className="w-32">Gabarito</TableHead>
+                                                        <TableHead className="w-32 text-center">Pontos Ganhos</TableHead>
                                                         <TableHead className="w-24 text-center">Status</TableHead>
                                                       </TableRow>
                                                     </TableHeader>
@@ -1055,6 +1056,7 @@ export function GradeExamsPage() {
                                                         const studentAnswer = selectedSubmission.answers[qw.questionIndex];
                                                         const correctAnswer = selectedSubmission.correctAnswers[qw.questionIndex];
                                                         const isCorrect = studentAnswer === correctAnswer;
+                                                        const pointsEarned = isCorrect ? qw.weight : 0;
                                                         return (
                                                           <TableRow key={qw.questionIndex}>
                                                             <TableCell className="font-medium">#{qw.questionIndex + 1}</TableCell>
@@ -1071,6 +1073,11 @@ export function GradeExamsPage() {
                                                             </TableCell>
                                                             <TableCell className="text-center">
                                                               <span className="font-medium">{String.fromCharCode(65 + correctAnswer)}</span>
+                                                            </TableCell>
+                                                            <TableCell className="text-center">
+                                                              <Badge className={isCorrect ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
+                                                                {pointsEarned} pts
+                                                              </Badge>
                                                             </TableCell>
                                                             <TableCell className="text-center">
                                                               {isCorrect ? (
