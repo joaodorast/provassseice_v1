@@ -27,7 +27,7 @@ type DetailedSubmission = {
   studentClass: string; studentGrade: string; answers: number[]; correctAnswers: number[]; score: number;
   totalQuestions: number; percentage: number; subjectPerformances: SubjectPerformance[]; timeSpent: number;
   submittedAt: string; gradingStatus: GradingStatus; feedback?: string; reviewNotes?: string;
-  questionWeights?: QuestionWeight[]; applicationId?: string;
+  questionWeights?: QuestionWeight[]; applicationId?: string; isMock?: boolean;
 };
 type Exam = {
   id: string; title: string; description: string; questionsPerSubject: number; timeLimit: number;
@@ -39,6 +39,13 @@ type Application = {
   status: string; createdAt: string; appliedCount: number; completedCount: number;
 };
 type Student = { id: string; name: string; email: string; class: string; grade: string };
+
+// Dados mock de 3 alunos de teste
+const MOCK_STUDENTS: Student[] = [
+  { id: 'mock-student-1', name: 'Ana Silva Santos', email: 'ana.silva@teste.com', class: '3º Ano A', grade: 'Ensino Médio' },
+  { id: 'mock-student-2', name: 'Carlos Eduardo Lima', email: 'carlos.lima@teste.com', class: '3º Ano B', grade: 'Ensino Médio' },
+  { id: 'mock-student-3', name: 'Maria Fernanda Costa', email: 'maria.costa@teste.com', class: '3º Ano A', grade: 'Ensino Médio' }
+];
 
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
@@ -82,8 +89,74 @@ export function GradeExamsPage() {
     }));
   };
 
+  const generateMockAnswers = (correctAnswers: number[], targetPercentage: number): number[] => {
+    const totalQuestions = correctAnswers.length;
+    const correctCount = Math.floor((targetPercentage / 100) * totalQuestions);
+    const answers = [...correctAnswers];
+    
+    // Embaralha e troca algumas respostas para atingir a porcentagem desejada
+    const wrongCount = totalQuestions - correctCount;
+    const indices = Array.from({ length: totalQuestions }, (_, i) => i);
+    
+    for (let i = indices.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [indices[i], indices[j]] = [indices[j], indices[i]];
+    }
+    
+    for (let i = 0; i < wrongCount; i++) {
+      const wrongAnswer = (correctAnswers[indices[i]] + 1 + Math.floor(Math.random() * 3)) % 5;
+      answers[indices[i]] = wrongAnswer;
+    }
+    
+    return answers;
+  };
+
+  const createMockSubmission = (student: Student, exam: Exam, applicationId: string, targetPercentage: number): DetailedSubmission => {
+    const correctAnswers = exam.questions?.map((q: any) => q.correctAnswer) || [];
+    const questionWeights = exam.questions?.map((q: any, idx: number) => ({
+      questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
+    })) || [];
+    
+    const studentAnswers = generateMockAnswers(correctAnswers, targetPercentage);
+    const correctCount = studentAnswers.filter((ans, idx) => ans === correctAnswers[idx]).length;
+    const percentage = Math.round((correctCount / correctAnswers.length) * 100);
+    const subjectPerformances = calculateSubjectPerformances(studentAnswers, correctAnswers, questionWeights);
+    
+    // Tempo entre 40 e 80 minutos
+    const timeSpent = Math.floor(Math.random() * 40) + 40;
+    
+    // Data de submissão nos últimos 7 dias
+    const daysAgo = Math.floor(Math.random() * 7);
+    const submittedAt = new Date();
+    submittedAt.setDate(submittedAt.getDate() - daysAgo);
+    submittedAt.setHours(Math.floor(Math.random() * 12) + 8); // Entre 8h e 20h
+    
+    return {
+      id: `mock-submission-${student.id}-${exam.id}`,
+      examId: exam.id,
+      examTitle: exam.title,
+      studentId: student.id,
+      studentName: student.name,
+      studentEmail: student.email,
+      studentClass: student.class,
+      studentGrade: student.grade,
+      answers: studentAnswers,
+      correctAnswers,
+      score: correctCount,
+      totalQuestions: correctAnswers.length,
+      percentage,
+      subjectPerformances,
+      timeSpent,
+      submittedAt: submittedAt.toISOString(),
+      gradingStatus: 'graded',
+      questionWeights,
+      applicationId,
+      isMock: true
+    };
+  };
+
   const transformSubmissions = (rawSubmissions: any[], examsList: Exam[]): DetailedSubmission[] => {
-    return rawSubmissions.slice(0, 1).map(sub => {
+    return rawSubmissions.map(sub => {
       const exam = examsList.find(e => e.id === sub.examId);
       const correctAnswers = exam?.questions?.map((q: any) => q.correctAnswer) || [];
       const questionWeights = exam?.questions?.map((q: any, idx: number) => ({
@@ -91,14 +164,28 @@ export function GradeExamsPage() {
       })) || [];
       const subjectPerformances = calculateSubjectPerformances(sub.answers || [], correctAnswers, questionWeights);
       return {
-        id: sub.id, examId: sub.examId, examTitle: sub.examTitle || exam?.title || 'Simulado',
-        studentId: sub.studentId, studentName: sub.studentName, studentEmail: sub.studentEmail,
-        studentClass: sub.studentClass, studentGrade: sub.studentGrade, answers: sub.answers || [],
-        correctAnswers, score: sub.score || 0, totalQuestions: sub.totalQuestions || correctAnswers.length,
-        percentage: sub.percentage || 0, subjectPerformances, timeSpent: sub.timeSpent || 0,
+        id: sub.id,
+        examId: sub.examId,
+        examTitle: sub.examTitle || exam?.title || 'Simulado',
+        studentId: sub.studentId,
+        studentName: sub.studentName,
+        studentEmail: sub.studentEmail,
+        studentClass: sub.studentClass,
+        studentGrade: sub.studentGrade,
+        answers: sub.answers || [],
+        correctAnswers,
+        score: sub.score || 0,
+        totalQuestions: sub.totalQuestions || correctAnswers.length,
+        percentage: sub.percentage || 0,
+        subjectPerformances,
+        timeSpent: sub.timeSpent || 0,
         submittedAt: sub.submittedAt || new Date().toISOString(),
         gradingStatus: sub.gradingStatus || 'graded' as GradingStatus,
-        feedback: sub.feedback, reviewNotes: sub.reviewNotes, questionWeights, applicationId: sub.applicationId
+        feedback: sub.feedback,
+        reviewNotes: sub.reviewNotes,
+        questionWeights,
+        applicationId: sub.applicationId,
+        isMock: false
       };
     });
   };
@@ -109,12 +196,26 @@ export function GradeExamsPage() {
       questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
     })) || [];
     return {
-      id: `not-submitted-${applicationId}-${student.id}`, examId: exam.id, examTitle: exam.title,
-      studentId: student.id, studentName: student.name, studentEmail: student.email,
-      studentClass: student.class, studentGrade: student.grade, answers: [], correctAnswers,
-      score: 0, totalQuestions: correctAnswers.length, percentage: 0, subjectPerformances: [],
-      timeSpent: 0, submittedAt: new Date().toISOString(), gradingStatus: 'not_submitted',
-      feedback: undefined, reviewNotes: undefined, questionWeights, applicationId
+      id: `not-submitted-${applicationId}-${student.id}`,
+      examId: exam.id,
+      examTitle: exam.title,
+      studentId: student.id,
+      studentName: student.name,
+      studentEmail: student.email,
+      studentClass: student.class,
+      studentGrade: student.grade,
+      answers: [],
+      correctAnswers,
+      score: 0,
+      totalQuestions: correctAnswers.length,
+      percentage: 0,
+      subjectPerformances: [],
+      timeSpent: 0,
+      submittedAt: new Date().toISOString(),
+      gradingStatus: 'not_submitted',
+      questionWeights,
+      applicationId,
+      isMock: false
     };
   };
 
@@ -122,6 +223,7 @@ export function GradeExamsPage() {
     try {
       setLoading(true);
       let examsList: Exam[] = [];
+      
       try {
         console.log('=== GradePage: Loading exams ===');
         const examsRes = await apiService.getExams();
@@ -138,12 +240,18 @@ export function GradeExamsPage() {
       try {
         console.log('=== GradePage: Loading students ===');
         const studentsRes = await apiService.getStudents();
-        studentsList = (studentsRes.students || []).filter((s: any) => s && s.id);
-        console.log(`✓ Loaded ${studentsList.length} students`);
+        const realStudents = (studentsRes.students || []).filter((s: any) => s && s.id);
+        
+        // Combina alunos reais com alunos mock
+        studentsList = [...realStudents, ...MOCK_STUDENTS];
+        console.log(`✓ Loaded ${realStudents.length} real students + ${MOCK_STUDENTS.length} mock students = ${studentsList.length} total`);
         setStudents(studentsList);
       } catch (error) {
         console.error('Error loading students:', error);
-        setStudents([]);
+        // Se falhar, usa apenas os mock
+        studentsList = MOCK_STUDENTS;
+        setStudents(MOCK_STUDENTS);
+        console.log(`✓ Using ${MOCK_STUDENTS.length} mock students only`);
       }
       
       let applicationsList: Application[] = [];
@@ -161,27 +269,72 @@ export function GradeExamsPage() {
       try {
         console.log('=== GradePage: Loading submissions ===');
         const submissionsRes = await apiService.getSubmissions();
-        const submissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
-        console.log(`✓ Loaded ${submissionsList.length} submissions`);
+        const realSubmissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
+        console.log(`✓ Loaded ${realSubmissionsList.length} real submissions`);
         
-        const transformedSubmissions = transformSubmissions(submissionsList, examsList);
+        const transformedSubmissions = transformSubmissions(realSubmissionsList, examsList);
+        const mockSubmissions: DetailedSubmission[] = [];
         const notSubmittedEntries: DetailedSubmission[] = [];
         
+        // Cria submissões mock para os 3 alunos de teste
+        if (examsList.length > 0) {
+          const firstExam = examsList[0];
+          const firstAppId = applicationsList.length > 0 ? applicationsList[0].id : 'mock-app-1';
+          
+          // Percentagens aleatórias entre 70% e 95%
+          const percentages = [
+            Math.floor(Math.random() * 26) + 70, // 70-95%
+            Math.floor(Math.random() * 26) + 70, // 70-95%
+            Math.floor(Math.random() * 26) + 70  // 70-95%
+          ];
+          
+          MOCK_STUDENTS.forEach((mockStudent, index) => {
+            // Verifica se já existe submissão real para esse aluno
+            const hasRealSubmission = realSubmissionsList.some(
+              sub => sub.studentId === mockStudent.id && sub.examId === firstExam.id
+            );
+            
+            if (!hasRealSubmission) {
+              mockSubmissions.push(
+                createMockSubmission(mockStudent, firstExam, firstAppId, percentages[index])
+              );
+            }
+          });
+          
+          console.log(`✓ Created ${mockSubmissions.length} mock submissions with 70%+ scores`);
+        }
+        
+        // Cria entradas de "não submetido" para alunos reais que não fizeram
         applicationsList.forEach(app => {
           const exam = examsList.find(e => e.id === app.examId);
           if (!exam) return;
-          app.studentIds.slice(0, 1).forEach(studentId => {
+          
+          app.studentIds.forEach(studentId => {
             const student = studentsList.find(s => s.id === studentId);
             if (!student) return;
-            const hasSubmission = submissionsList.some(sub => sub.studentId === studentId && sub.examId === app.examId);
-            if (!hasSubmission) notSubmittedEntries.push(createNotSubmittedEntry(student, exam, app.id));
+            
+            // Pula se for aluno mock (eles já têm submissões)
+            if (MOCK_STUDENTS.some(m => m.id === studentId)) return;
+            
+            const hasSubmission = [...realSubmissionsList, ...mockSubmissions].some(
+              sub => sub.studentId === studentId && sub.examId === app.examId
+            );
+            
+            if (!hasSubmission) {
+              notSubmittedEntries.push(createNotSubmittedEntry(student, exam, app.id));
+            }
           });
         });
         
         console.log(`✓ Created ${notSubmittedEntries.length} not-submitted entries`);
-        const allSubmissions = [...transformedSubmissions, ...notSubmittedEntries];
+        
+        const allSubmissions = [...transformedSubmissions, ...mockSubmissions, ...notSubmittedEntries];
         setSubmissions(allSubmissions);
-        console.log(`✓ Total submissions (APENAS 1 ALUNO PARA TESTE): ${allSubmissions.length}`);
+        console.log(`✓ Total submissions: ${allSubmissions.length} (${realSubmissionsList.length} real + ${mockSubmissions.length} mock + ${notSubmittedEntries.length} not submitted)`);
+        
+        if (mockSubmissions.length > 0) {
+          toast.success(`✅ Sistema carregado com ${mockSubmissions.length} alunos de teste (70%+ de acerto)`);
+        }
       } catch (error) {
         console.error('Error loading submissions:', error);
         setSubmissions([]);
@@ -269,10 +422,18 @@ export function GradeExamsPage() {
     setSelectedSubmission(submission);
     setReviewNotes(submission.reviewNotes || '');
     setFeedback(submission.feedback || '');
+    
     if (submission.gradingStatus === 'not_submitted') {
       setAnswerSheetImages([]);
       return;
     }
+    
+    // Para submissões mock, não tenta carregar imagens reais
+    if (submission.isMock) {
+      setAnswerSheetImages([]);
+      return;
+    }
+    
     try {
       const response = await apiService.getAnswerSheets(submission.id);
       if (response.success && response.images) setAnswerSheetImages(response.images);
@@ -285,6 +446,12 @@ export function GradeExamsPage() {
 
   const handleUploadAnswerSheet = async (event: React.ChangeEvent<HTMLInputElement>) => {
     if (!selectedSubmission) return;
+    
+    if (selectedSubmission.isMock) {
+      toast.error('Não é possível fazer upload para submissões de teste');
+      return;
+    }
+    
     const file = event.target.files?.[0];
     if (!file) return;
     if (file.size > 10 * 1024 * 1024) {
@@ -341,10 +508,22 @@ export function GradeExamsPage() {
 
   const handleSaveReview = async () => {
     if (!selectedSubmission) return;
+    
     if (selectedSubmission.gradingStatus === 'not_submitted') {
       toast.error('Não é possível revisar uma submissão não realizada');
       return;
     }
+    
+    // Para submissões mock, apenas atualiza localmente
+    if (selectedSubmission.isMock) {
+      setSubmissions(prev => prev.map(sub => sub.id === selectedSubmission.id ? 
+        { ...sub, reviewNotes, feedback, gradingStatus: 'reviewed' as GradingStatus } : sub
+      ));
+      setSelectedSubmission(null);
+      toast.success('✅ Revisão salva localmente (aluno de teste)');
+      return;
+    }
+    
     try {
       setReviewing(true);
       const response = await apiService.updateSubmissionReview(selectedSubmission.id, {
@@ -415,9 +594,14 @@ export function GradeExamsPage() {
           <p className="text-muted-foreground">
             Analise os resultados e performance dos alunos nos simulados multidisciplinares
           </p>
-          <Badge variant="outline" className="mt-2 text-orange-600 border-orange-300">
-            MODO TESTE: Mostrando apenas 1 aluno para correção
-          </Badge>
+          <div className="flex gap-2 mt-2">
+            <Badge variant="outline" className="text-green-600 border-green-300">
+              ✓ Sistema integrado com dados reais + 3 alunos de teste
+            </Badge>
+            <Badge variant="outline" className="text-blue-600 border-blue-300">
+              {submissions.filter(s => s.isMock).length} submissões de teste (70%+ acerto)
+            </Badge>
+          </div>
         </div>
         <div className="flex space-x-2">
           <Button variant="outline" onClick={loadDataProgressively}>
@@ -588,7 +772,7 @@ export function GradeExamsPage() {
             <CardHeader>
               <CardTitle>Submissões dos Alunos</CardTitle>
               <CardDescription>
-                Gerencie e analise todas as submissões de simulados (incluindo não realizados)
+                Gerencie e analise todas as submissões de simulados (incluindo alunos de teste e não realizados)
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -707,7 +891,7 @@ export function GradeExamsPage() {
                       </TableRow>
                     ) : (
                       filteredSubmissions.map((submission) => (
-                        <TableRow key={submission.id} className={submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' : ''}>
+                        <TableRow key={submission.id} className={submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' : submission.isMock ? 'bg-blue-50' : ''}>
                           <TableCell>
                             <Checkbox
                               checked={selectedSubmissions.includes(submission.id)}
@@ -718,7 +902,12 @@ export function GradeExamsPage() {
                           </TableCell>
                           <TableCell>
                             <div>
-                              <div className="font-medium">{submission.studentName}</div>
+                              <div className="font-medium flex items-center gap-2">
+                                {submission.studentName}
+                                {submission.isMock && (
+                                  <Badge variant="outline" className="text-xs text-blue-600 border-blue-300">TESTE</Badge>
+                                )}
+                              </div>
                               <div className="text-sm text-muted-foreground">
                                 {submission.studentClass} • {submission.studentGrade}
                               </div>
@@ -781,7 +970,10 @@ export function GradeExamsPage() {
                                 </DialogTrigger>
                                 <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
                                   <DialogHeader>
-                                    <DialogTitle>Análise Detalhada - {submission.studentName}</DialogTitle>
+                                    <DialogTitle>
+                                      Análise Detalhada - {submission.studentName}
+                                      {submission.isMock && <Badge variant="outline" className="ml-2 text-blue-600">ALUNO TESTE</Badge>}
+                                    </DialogTitle>
                                     <DialogDescription>
                                       {submission.gradingStatus === 'not_submitted' 
                                         ? `Aluno não realizou o simulado "${submission.examTitle}"`
@@ -810,7 +1002,7 @@ export function GradeExamsPage() {
                                         </div>
                                       ) : (
                                         <>
-                                          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                             <div>
                                               <Label className="text-sm font-medium">Pontuação</Label>
                                               <p className="text-2xl font-bold">{selectedSubmission.score}/{selectedSubmission.totalQuestions}</p>
@@ -818,6 +1010,15 @@ export function GradeExamsPage() {
                                             <div>
                                               <Label className="text-sm font-medium">Percentual</Label>
                                               <p className="text-2xl font-bold">{selectedSubmission.percentage}%</p>
+                                            </div>
+                                            <div>
+                                              <Label className="text-sm font-medium">Pontos com Peso</Label>
+                                              <p className="text-2xl font-bold">
+                                                {selectedSubmission.questionWeights?.reduce((total, qw, idx) => {
+                                                  const isCorrect = selectedSubmission.answers[idx] === selectedSubmission.correctAnswers[idx];
+                                                  return total + (isCorrect ? qw.weight : 0);
+                                                }, 0) || 0}
+                                              </p>
                                             </div>
                                             <div>
                                               <Label className="text-sm font-medium">Tempo Gasto</Label>
@@ -912,6 +1113,9 @@ export function GradeExamsPage() {
                                               <Label className="text-sm font-medium mb-2 block flex items-center">
                                                 <ImageIcon className="w-4 h-4 mr-2" />
                                                 Cartões Resposta / Imagens
+                                                {submission.isMock && (
+                                                  <Badge variant="outline" className="ml-2 text-xs text-gray-600">Upload desabilitado para teste</Badge>
+                                                )}
                                               </Label>
                                               <p className="text-sm text-muted-foreground mb-4">
                                                 Faça upload das imagens dos cartões resposta escaneados ou fotos das provas
@@ -920,7 +1124,7 @@ export function GradeExamsPage() {
                                                 <Button 
                                                   variant="outline" 
                                                   onClick={() => document.getElementById('answer-sheet-upload')?.click()}
-                                                  disabled={uploadingImage}
+                                                  disabled={uploadingImage || submission.isMock}
                                                 >
                                                   {uploadingImage ? (    
                                                     <>
@@ -940,6 +1144,7 @@ export function GradeExamsPage() {
                                                   accept="image/*"
                                                   className="hidden"
                                                   onChange={handleUploadAnswerSheet}
+                                                  disabled={submission.isMock}
                                                 />
                                                 <span className="text-sm text-muted-foreground">
                                                   Formatos aceitos: JPG, PNG (máx. 10MB)
@@ -986,7 +1191,9 @@ export function GradeExamsPage() {
                                                 <div className="border-2 border-dashed border-slate-200 rounded-lg p-8 text-center">
                                                   <Clipboard className="w-8 h-8 mx-auto text-muted-foreground mb-2" />
                                                   <p className="text-sm text-muted-foreground">Nenhuma imagem enviada ainda</p>
-                                                  <p className="text-xs text-muted-foreground mt-1">Clique no botão acima para fazer upload</p>
+                                                  <p className="text-xs text-muted-foreground mt-1">
+                                                    {submission.isMock ? 'Upload não disponível para alunos de teste' : 'Clique no botão acima para fazer upload'}
+                                                  </p>
                                                 </div>
                                               )}
                                             </div>
