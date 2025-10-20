@@ -412,9 +412,9 @@ export function ManageStudentsPage() {
                     <SelectValue placeholder="Selecione o turno" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="Matutino">Matutino</SelectItem>
-                    <SelectItem value="Vespertino">Vespertino</SelectItem>
-                    <SelectItem value="Noturno">Noturno</SelectItem>
+                    <SelectItem value="Manhã">Manhã</SelectItem>
+                    <SelectItem value="Tarde">Tarde</SelectItem>
+                    <SelectItem value="Noite">Noite</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
