@@ -18,13 +18,8 @@ import {
   Edit2,
   GripVertical,
   List
-  Trash2,
-  Edit2,
-  GripVertical,
-  List
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { apiService } from '../../utils/api';
 import { apiService } from '../../utils/api';
 
 interface Question {
@@ -42,20 +37,7 @@ interface Question {
 
 interface Section {
   id: string;
-interface Section {
-  id: string;
   name: string;
-  description: string;
-  questions: Question[];
-}
-
-interface SimuladoData {
-  title: string;
-  description: string;
-  grade: string;
-  timeLimit: number;
-  selectedClass: string;
-  sections: Section[];
   description: string;
   questions: Question[];
 }
@@ -71,17 +53,10 @@ interface SimuladoData {
 
 export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
   const [simuladoData, setSimuladoData] = useState<SimuladoData>({
-  const [simuladoData, setSimuladoData] = useState<SimuladoData>({
     title: '',
     description: '',
     grade: '',
     timeLimit: 120,
-    selectedClass: '',
-    sections: []
-  });
-
-  const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
-  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
     selectedClass: '',
     sections: []
   });
@@ -115,10 +90,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
-  const [filterSubject, setFilterSubject] = useState('all');
 
   useEffect(() => {
-    loadBankQuestions();
     loadBankQuestions();
     loadClasses();
   }, []);
@@ -137,12 +110,9 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       console.error('Error loading classes:', error);
       setAvailableClasses([]);
       toast.error('Erro ao carregar turmas');
-      setAvailableClasses([]);
-      toast.error('Erro ao carregar turmas');
     }
   };
 
-  const loadBankQuestions = async () => {
   const loadBankQuestions = async () => {
     try {
       setLoading(true);
@@ -315,31 +285,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
     setFilterDifficulty('all');
     setFilterSubject('all');
     setShowBankDialog(true);
-    setFilterSubject('all');
-    setShowBankDialog(true);
   };
 
-  const handleAddQuestionFromBank = (question: Question) => {
-    const newQuestion: Question = {
-      ...question,
-      id: `bank_${question.id}_${Date.now()}`,
-      fromBank: true
-    };
-
-    setSimuladoData(prev => ({
-      ...prev,
-      sections: prev.sections.map(section => {
-        if (section.id === currentSectionId) {
-          return {
-            ...section,
-            questions: [...section.questions, newQuestion]
-          };
-        }
-        return section;
-      })
-    }));
-
-    toast.success('Questão adicionada do banco!');
   const handleAddQuestionFromBank = (question: Question) => {
     const newQuestion: Question = {
       ...question,
@@ -425,10 +372,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       filtered = filtered.filter(q => q.subject === filterSubject);
     }
     
-    if (filterSubject !== 'all') {
-      filtered = filtered.filter(q => q.subject === filterSubject);
-    }
-    
     return filtered;
   };
 
@@ -450,25 +393,16 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       simuladoData.sections.length > 0 &&
       getTotalQuestions() > 0
     );
-    return (
-      simuladoData.title &&
-      simuladoData.grade &&
-      simuladoData.selectedClass &&
-      simuladoData.sections.length > 0 &&
-      getTotalQuestions() > 0
-    );
   };
 
   const handleCreateSimulado = async () => {
     if (!canCreateSimulado()) {
-      toast.error('Verifique os dados do simulado antes de salvar');
       toast.error('Verifique os dados do simulado antes de salvar');
       return;
     }
 
     try {
       setLoading(true);
-      
       
       const examData = {
         title: simuladoData.title,
@@ -477,11 +411,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         selectedClass: simuladoData.selectedClass,
         timeLimit: simuladoData.timeLimit,
         type: 'simulado',
-        sections: simuladoData.sections.map(section => ({
-          name: section.name,
-          description: section.description,
-          questions: section.questions
-        })),
         sections: simuladoData.sections.map(section => ({
           name: section.name,
           description: section.description,
@@ -496,12 +425,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
       const response = await apiService.createExam(examData);
 
-      if (response && !response.error) {
-        toast.success('Simulado criado com sucesso!');
-        onBack();
-      } else {
-        throw new Error(response.error || 'Falha ao criar simulado');
-      }
       if (response && !response.error) {
         toast.success('Simulado criado com sucesso!');
         onBack();
@@ -911,12 +834,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       {/* Section Dialog */}
       <Dialog open={showSectionDialog} onOpenChange={setShowSectionDialog}>
         <DialogContent className="max-w-lg">
-      {/* Section Dialog */}
-      <Dialog open={showSectionDialog} onOpenChange={setShowSectionDialog}>
-        <DialogContent className="max-w-lg">
           <DialogHeader>
-            <DialogTitle>
-              {editingSection ? 'Editar Seção' : 'Nova Seção'}
             <DialogTitle>
               {editingSection ? 'Editar Seção' : 'Nova Seção'}
             </DialogTitle>
@@ -1118,17 +1036,17 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
       {/* Bank Questions Dialog */}
       <Dialog open={showBankDialog} onOpenChange={setShowBankDialog}>
-        <DialogContent className="max-w-6xl w-[95vw] h-[90vh] p-0 flex flex-col">
-          <div className="px-6 pt-6 pb-4 border-b flex-shrink-0">
-            <DialogTitle className="text-xl mb-2">Banco de Questões</DialogTitle>
+        <DialogContent className="max-w-6xl h-[90vh] flex flex-col p-0">
+          <DialogHeader className="px-6 pt-6 pb-4 border-b">
+            <DialogTitle className="text-xl">Banco de Questões</DialogTitle>
             <DialogDescription>
               Selecione questões do banco para adicionar a esta seção
             </DialogDescription>
-          </div>
+          </DialogHeader>
           
-          {/* Filters - Fixed */}
-          <div className="px-6 py-4 border-b flex-shrink-0 space-y-3">
-            <div className="flex space-x-3">
+          <div className="flex-1 flex flex-col px-6 py-4 overflow-hidden">
+            {/* Filters - Fixed at top */}
+            <div className="flex space-x-3 mb-4">
               <div className="flex-1 relative">
                 <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
                 <Input
@@ -1138,19 +1056,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                   className="pl-10"
                 />
               </div>
-              <Select value={filterSubject} onValueChange={setFilterSubject}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todas as matérias</SelectItem>
-                  {uniqueSubjects.map(subject => (
-                    <SelectItem key={subject} value={subject}>
-                      {subject}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
               <Select value={filterSubject} onValueChange={setFilterSubject}>
                 <SelectTrigger className="w-48">
                   <SelectValue />
@@ -1176,138 +1081,102 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                 </SelectContent>
               </Select>
             </div>
-            
-            <div className="text-sm text-slate-600 font-medium">
+
+            {/* Results count */}
+            <div className="text-sm text-slate-600 mb-3 px-1">
               {getFilteredBankQuestions().length} questão(ões) encontrada(s)
             </div>
-          </div>
 
-          {/* Scrollable content area with visible scrollbar */}
-          <div 
-            className="flex-1 overflow-y-auto px-6 py-4" 
-            style={{ 
-              minHeight: 0,
-              scrollbarWidth: 'thin',
-              scrollbarColor: '#cbd5e1 #f1f5f9'
-            }}
-          >
-            <style>{`
-              .flex-1.overflow-y-auto::-webkit-scrollbar {
-                width: 12px;
-              }
-              .flex-1.overflow-y-auto::-webkit-scrollbar-track {
-                background: #f1f5f9;
-                border-radius: 10px;
-              }
-              .flex-1.overflow-y-auto::-webkit-scrollbar-thumb {
-                background: #cbd5e1;
-                border-radius: 10px;
-                border: 2px solid #f1f5f9;
-              }
-              .flex-1.overflow-y-auto::-webkit-scrollbar-thumb:hover {
-                background: #94a3b8;
-              }
-            `}</style>
-            <div className="space-y-3 pb-4">
-              {getFilteredBankQuestions().length === 0 ? (
-                <div className="text-center py-12">
-                  <BookOpen className="w-16 h-16 text-slate-300 mx-auto mb-3" />
-                  <p className="text-slate-500 mb-2">Nenhuma questão encontrada</p>
-                  <p className="text-sm text-slate-400">
-                    Tente ajustar os filtros ou crie novas questões
-                  </p>
-                </div>
-              ) : (
-                getFilteredBankQuestions().map(question => (
-                  <Card 
-                    key={question.id}
-                    className="hover:border-blue-300 transition-all hover:shadow-md"
-                  >
-                    <CardContent className="p-4">
-                      <div className="flex items-start justify-between mb-3 gap-4">
-                        <div className="flex items-center flex-wrap gap-2 flex-1 min-w-0">
-                          <Badge variant="outline" className="whitespace-nowrap">
-                            {question.subject}
-                          </Badge>
-                          <Badge className={
-                            question.type === 'essay' 
-                              ? 'bg-indigo-100 text-indigo-800'
-                              : 'bg-cyan-100 text-cyan-800'
-                          }>
-                            {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
-                          </Badge>
-                          <Badge className={
-                            question.difficulty === 'Fácil' ? 'bg-green-100 text-green-800' :
-                            question.difficulty === 'Médio' ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-800'
-                          }>
-                            {question.difficulty}
-                          </Badge>
-                          <Badge className="bg-purple-100 text-purple-800">
-                            {question.points} pt{question.points !== 1 && 's'}
-                          </Badge>
-                          {question.tags && question.tags.length > 0 && (
-                            <Badge variant="outline" className="text-xs">
-                              {question.tags[0]}
+            {/* Scrollable questions list */}
+            <div className="flex-1 overflow-y-auto pr-2">
+              <div className="space-y-3">
+                {getFilteredBankQuestions().length === 0 ? (
+                  <div className="text-center py-12">
+                    <BookOpen className="w-16 h-16 text-slate-300 mx-auto mb-3" />
+                    <p className="text-slate-500 mb-2">Nenhuma questão encontrada</p>
+                    <p className="text-sm text-slate-400">
+                      Tente ajustar os filtros ou crie novas questões
+                    </p>
+                  </div>
+                ) : (
+                  getFilteredBankQuestions().map(question => (
+                    <Card 
+                      key={question.id}
+                      className="hover:border-blue-300 transition-all"
+                    >
+                      <CardContent className="p-4">
+                        <div className="flex items-start justify-between mb-3 gap-3">
+                          <div className="flex items-center space-x-2 flex-wrap gap-1 flex-1">
+                            <Badge variant="outline" className="whitespace-nowrap">{question.subject}</Badge>
+                            <Badge className={
+                              question.type === 'essay' 
+                                ? 'bg-indigo-100 text-indigo-800'
+                                : 'bg-cyan-100 text-cyan-800'
+                            }>
+                              {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
                             </Badge>
-                          )}
+                            <Badge className={
+                              question.difficulty === 'Fácil' ? 'bg-green-100 text-green-800' :
+                              question.difficulty === 'Médio' ? 'bg-yellow-100 text-yellow-800' :
+                              'bg-red-100 text-red-800'
+                            }>
+                              {question.difficulty}
+                            </Badge>
+                            <Badge className="bg-purple-100 text-purple-800">
+                              {question.points} pt{question.points !== 1 && 's'}
+                            </Badge>
+                            {question.tags && question.tags.length > 0 && (
+                              <Badge variant="outline" className="text-xs">
+                                {question.tags[0]}
+                              </Badge>
+                            )}
+                          </div>
+                          <Button
+                            size="sm"
+                            onClick={() => handleAddQuestionFromBank(question)}
+                            className="bg-blue-600 hover:bg-blue-700 whitespace-nowrap flex-shrink-0"
+                          >
+                            <Plus className="w-4 h-4 mr-2" />
+                            Adicionar
+                          </Button>
                         </div>
-                        <Button
-                          size="sm"
-                          onClick={() => handleAddQuestionFromBank(question)}
-                          className="bg-blue-600 hover:bg-blue-700 whitespace-nowrap flex-shrink-0"
-                        >
-                          <Plus className="w-4 h-4 mr-2" />
-                          Adicionar
-                        </Button>
-                      </div>
-                      
-                      <p className="text-sm text-slate-800 mb-3 leading-relaxed whitespace-pre-wrap">
-                        {question.question}
-                      </p>
-                      
-                      {question.type === 'multiple-choice' && question.options && (
-                        <div className="grid grid-cols-1 gap-2">
-                          {question.options.filter(opt => opt && opt.trim()).map((option, idx) => (
-                            <div 
-                              key={idx}
-                              className={`text-xs p-3 rounded ${
-                                idx === question.correctAnswer 
-                                  ? 'bg-green-50 text-green-800 border-2 border-green-300 font-medium' 
-                                  : 'bg-slate-50 text-slate-600 border border-slate-200'
-                              }`}
-                            >
-                              <span className="font-bold mr-2">
-                                {String.fromCharCode(65 + idx)})
-                              </span>
-                              {option}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      
-                      {question.type === 'essay' && (
-                        <div className="bg-indigo-50 border border-indigo-200 text-indigo-800 p-3 rounded text-xs font-medium">
-                          📝 Questão dissertativa - Resposta em texto livre
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                ))
-              )}
+                        
+                        <p className="text-sm text-slate-800 mb-3 leading-relaxed">{question.question}</p>
+                        
+                        {question.type === 'multiple-choice' && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                            {question.options.filter(opt => opt.trim()).map((option, idx) => (
+                              <div 
+                                key={idx}
+                                className={`text-xs p-2 rounded ${
+                                  idx === question.correctAnswer 
+                                    ? 'bg-green-50 text-green-800 border border-green-200' 
+                                    : 'bg-slate-50 text-slate-600'
+                                }`}
+                              >
+                                <span className="font-semibold">{String.fromCharCode(65 + idx)}) </span>
+                                {option}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        
+                        {question.type === 'essay' && (
+                          <div className="bg-indigo-50 text-indigo-800 p-2 rounded text-xs">
+                            Questão dissertativa - Resposta em texto livre
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  ))
+                )}
+              </div>
             </div>
           </div>
 
-          {/* Footer - Fixed */}
-          <div className="px-6 py-4 border-t bg-slate-50 flex justify-between items-center flex-shrink-0">
-            <div className="text-sm text-slate-600">
-              Use a barra de rolagem ao lado para ver todas as questões
-            </div>
-            <Button 
-              variant="outline" 
-              onClick={() => setShowBankDialog(false)}
-              className="hover:bg-slate-200"
-            >
+          {/* Footer - Fixed at bottom */}
+          <div className="px-6 py-4 border-t bg-slate-50 flex justify-end">
+            <Button variant="outline" onClick={() => setShowBankDialog(false)}>
               Fechar
             </Button>
           </div>
