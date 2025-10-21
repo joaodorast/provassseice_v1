@@ -69,7 +69,7 @@ export function QuestionBankPage() {
       console.error('Error loading subjects and series:', error);
       // Use valores padrão se falhar
       setSubjects(['Matemática', 'Português', 'História', 'Geografia', 'Ciências', 'Literatura']);
-      setSeries(['1º Ano', '2º Ano', '3º Ano', '4º Ano', '5º Ano']);
+     setSeries(['5º Ano', '6º Ano', '7º Ano', '8º Ano', '9º Ano']);
     }
   };
 
@@ -527,27 +527,25 @@ export function QuestionBankPage() {
                 </Select>
               </div>
               
-           {/* 
-<div>
-  <label className="block text-sm font-medium text-slate-700 mb-2">Série/Ano</label>
-  <Select value={newQuestion.grade} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, grade: value }))}>
-    <SelectTrigger className="text-sm">
-      <SelectValue placeholder="Selecione a série" />
-    </SelectTrigger>
-    <SelectContent>
-      {series.length === 0 ? (
-        <div className="p-4 text-center text-sm text-slate-500">
-          Nenhuma série cadastrada. Configure em Configurações → Acadêmico.
-        </div>
-      ) : (
-        series.map(s => (
-          <SelectItem key={s} value={s}>{s}</SelectItem>
-        ))
-      )}
-    </SelectContent>
-  </Select>
-</div>
-*/}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Série/Ano</label>
+                <Select value={newQuestion.grade} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, grade: value }))}>
+                  <SelectTrigger className="text-sm">
+                    <SelectValue placeholder="Selecione a série" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {series.length === 0 ? (
+                      <div className="p-4 text-center text-sm text-slate-500">
+                        Nenhuma série cadastrada. Configure em Configurações → Acadêmico.
+                      </div>
+                    ) : (
+                      series.map(s => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">Dificuldade</label>
@@ -682,6 +680,11 @@ export function QuestionBankPage() {
                     <Badge variant="outline" className="bg-blue-50 text-blue-700 text-xs">
                       {question.subject}
                     </Badge>
+                    {question.grade && (
+                      <Badge variant="outline" className="bg-indigo-50 text-indigo-700 text-xs">
+                        {question.grade}
+                      </Badge>
+                    )}
                     <Badge className={`${getDifficultyColor(question.difficulty)} text-xs`}>
                       {question.difficulty}
                     </Badge>
@@ -785,6 +788,7 @@ export function QuestionBankPage() {
         columns={[
           { header: 'ID', key: 'id', width: 10, type: 'text' },
           { header: 'Matéria', key: 'subject', width: 15, type: 'text' },
+          { header: 'Série', key: 'grade', width: 12, type: 'text' },
           { header: 'Dificuldade', key: 'difficulty', width: 12, type: 'text' },
           { header: 'Questão', key: 'question', width: 50, type: 'text' },
           { header: 'Tipo', key: 'type', width: 15, type: 'text' },
@@ -794,6 +798,7 @@ export function QuestionBankPage() {
           { header: 'Alternativa D', key: 'option_d', width: 30, type: 'text' },
           { header: 'Resposta Correta', key: 'correctAnswerLetter', width: 15, type: 'text' },
           { header: 'Tags', key: 'tagsString', width: 25, type: 'text' },
+          { header: 'Peso', key: 'weight', width: 10, type: 'number' },
           { header: 'Data Criação', key: 'createdAt', width: 15, type: 'date' },
           { header: 'Vezes Usada', key: 'usageCount', width: 12, type: 'number' },
           { header: 'Status', key: 'status', width: 10, type: 'text' }
