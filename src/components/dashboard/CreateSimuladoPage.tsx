@@ -18,8 +18,13 @@ import {
   Edit2,
   GripVertical,
   List
+  Trash2,
+  Edit2,
+  GripVertical,
+  List
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { apiService } from '../../utils/api';
 import { apiService } from '../../utils/api';
 
 interface Question {
@@ -37,7 +42,20 @@ interface Question {
 
 interface Section {
   id: string;
+interface Section {
+  id: string;
   name: string;
+  description: string;
+  questions: Question[];
+}
+
+interface SimuladoData {
+  title: string;
+  description: string;
+  grade: string;
+  timeLimit: number;
+  selectedClass: string;
+  sections: Section[];
   description: string;
   questions: Question[];
 }
@@ -53,10 +71,17 @@ interface SimuladoData {
 
 export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
   const [simuladoData, setSimuladoData] = useState<SimuladoData>({
+  const [simuladoData, setSimuladoData] = useState<SimuladoData>({
     title: '',
     description: '',
     grade: '',
     timeLimit: 120,
+    selectedClass: '',
+    sections: []
+  });
+
+  const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
     selectedClass: '',
     sections: []
   });
@@ -90,8 +115,10 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
+  const [filterSubject, setFilterSubject] = useState('all');
 
   useEffect(() => {
+    loadBankQuestions();
     loadBankQuestions();
     loadClasses();
   }, []);
@@ -110,9 +137,12 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       console.error('Error loading classes:', error);
       setAvailableClasses([]);
       toast.error('Erro ao carregar turmas');
+      setAvailableClasses([]);
+      toast.error('Erro ao carregar turmas');
     }
   };
 
+  const loadBankQuestions = async () => {
   const loadBankQuestions = async () => {
     try {
       setLoading(true);
@@ -285,8 +315,31 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
     setFilterDifficulty('all');
     setFilterSubject('all');
     setShowBankDialog(true);
+    setFilterSubject('all');
+    setShowBankDialog(true);
   };
 
+  const handleAddQuestionFromBank = (question: Question) => {
+    const newQuestion: Question = {
+      ...question,
+      id: `bank_${question.id}_${Date.now()}`,
+      fromBank: true
+    };
+
+    setSimuladoData(prev => ({
+      ...prev,
+      sections: prev.sections.map(section => {
+        if (section.id === currentSectionId) {
+          return {
+            ...section,
+            questions: [...section.questions, newQuestion]
+          };
+        }
+        return section;
+      })
+    }));
+
+    toast.success('Questão adicionada do banco!');
   const handleAddQuestionFromBank = (question: Question) => {
     const newQuestion: Question = {
       ...question,
@@ -372,6 +425,10 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       filtered = filtered.filter(q => q.subject === filterSubject);
     }
     
+    if (filterSubject !== 'all') {
+      filtered = filtered.filter(q => q.subject === filterSubject);
+    }
+    
     return filtered;
   };
 
@@ -393,16 +450,25 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       simuladoData.sections.length > 0 &&
       getTotalQuestions() > 0
     );
+    return (
+      simuladoData.title &&
+      simuladoData.grade &&
+      simuladoData.selectedClass &&
+      simuladoData.sections.length > 0 &&
+      getTotalQuestions() > 0
+    );
   };
 
   const handleCreateSimulado = async () => {
     if (!canCreateSimulado()) {
+      toast.error('Verifique os dados do simulado antes de salvar');
       toast.error('Verifique os dados do simulado antes de salvar');
       return;
     }
 
     try {
       setLoading(true);
+      
       
       const examData = {
         title: simuladoData.title,
@@ -411,6 +477,11 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         selectedClass: simuladoData.selectedClass,
         timeLimit: simuladoData.timeLimit,
         type: 'simulado',
+        sections: simuladoData.sections.map(section => ({
+          name: section.name,
+          description: section.description,
+          questions: section.questions
+        })),
         sections: simuladoData.sections.map(section => ({
           name: section.name,
           description: section.description,
@@ -425,6 +496,12 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
       const response = await apiService.createExam(examData);
 
+      if (response && !response.error) {
+        toast.success('Simulado criado com sucesso!');
+        onBack();
+      } else {
+        throw new Error(response.error || 'Falha ao criar simulado');
+      }
       if (response && !response.error) {
         toast.success('Simulado criado com sucesso!');
         onBack();
@@ -834,7 +911,12 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
       {/* Section Dialog */}
       <Dialog open={showSectionDialog} onOpenChange={setShowSectionDialog}>
         <DialogContent className="max-w-lg">
+      {/* Section Dialog */}
+      <Dialog open={showSectionDialog} onOpenChange={setShowSectionDialog}>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
+            <DialogTitle>
+              {editingSection ? 'Editar Seção' : 'Nova Seção'}
             <DialogTitle>
               {editingSection ? 'Editar Seção' : 'Nova Seção'}
             </DialogTitle>
@@ -1056,6 +1138,19 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                   className="pl-10"
                 />
               </div>
+              <Select value={filterSubject} onValueChange={setFilterSubject}>
+                <SelectTrigger className="w-48">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as matérias</SelectItem>
+                  {uniqueSubjects.map(subject => (
+                    <SelectItem key={subject} value={subject}>
+                      {subject}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Select value={filterSubject} onValueChange={setFilterSubject}>
                 <SelectTrigger className="w-48">
                   <SelectValue />
