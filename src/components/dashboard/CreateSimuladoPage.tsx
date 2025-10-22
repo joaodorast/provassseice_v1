@@ -404,6 +404,28 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
     try {
       setLoading(true);
       
+      // 🔥 CORREÇÃO CRÍTICA: Criar array flat de questões E manter seções
+      const allQuestions = simuladoData.sections.flatMap(section => 
+        section.questions.map(q => ({
+          ...q,
+          sectionId: section.id,
+          sectionName: section.name
+        }))
+      );
+
+      // Coletar todas as matérias únicas
+      const allSubjects = Array.from(new Set(
+        simuladoData.sections.flatMap(section => 
+          section.questions.map(q => q.subject).filter(Boolean)
+        )
+      ));
+
+      console.log('🚀 Criando simulado com estrutura corrigida:', {
+        totalQuestions: allQuestions.length,
+        sections: simuladoData.sections.length,
+        subjects: allSubjects
+      });
+
       const examData = {
         title: simuladoData.title,
         description: simuladoData.description,
@@ -411,17 +433,25 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         selectedClass: simuladoData.selectedClass,
         timeLimit: simuladoData.timeLimit,
         type: 'simulado',
+        // ✅ Array flat de questões para compatibilidade
+        questions: allQuestions,
+        // ✅ Seções preservadas para estrutura
         sections: simuladoData.sections.map(section => ({
+          id: section.id,
           name: section.name,
           description: section.description,
           questions: section.questions
         })),
+        // ✅ Metadados consolidados
+        subjects: allSubjects,
         settings: {
-          totalQuestions: getTotalQuestions(),
+          totalQuestions: allQuestions.length,
           totalSections: simuladoData.sections.length,
           totalPoints: getTotalPoints()
         }
       };
+
+      console.log('📤 Enviando dados do simulado:', examData);
 
       const response = await apiService.createExam(examData);
 
@@ -432,7 +462,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         throw new Error(response.error || 'Falha ao criar simulado');
       }
     } catch (error: any) {
-      console.error('Error creating simulado:', error);
+      console.error('❌ Error creating simulado:', error);
       toast.error('Erro ao criar simulado: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setLoading(false);
@@ -1045,7 +1075,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
           </DialogHeader>
           
           <div className="flex-1 flex flex-col px-6 py-4 overflow-hidden">
-            {/* Filters - Fixed at top */}
             <div className="flex space-x-3 mb-4">
               <div className="flex-1 relative">
                 <Search className="w-4 h-4 absolute left-3 top-3 text-slate-400" />
@@ -1082,12 +1111,10 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
               </Select>
             </div>
 
-            {/* Results count */}
             <div className="text-sm text-slate-600 mb-3 px-1">
               {getFilteredBankQuestions().length} questão(ões) encontrada(s)
             </div>
 
-            {/* Scrollable questions list */}
             <div className="flex-1 overflow-y-auto pr-2">
               <div className="space-y-3">
                 {getFilteredBankQuestions().length === 0 ? (
@@ -1174,7 +1201,6 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             </div>
           </div>
 
-          {/* Footer - Fixed at bottom */}
           <div className="px-6 py-4 border-t bg-slate-50 flex justify-end">
             <Button variant="outline" onClick={() => setShowBankDialog(false)}>
               Fechar
