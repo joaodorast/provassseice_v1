@@ -59,13 +59,36 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       console.log('ManageExamsPage: Submissions response:', submissionsResponse);
       console.log('ManageExamsPage: Students response:', studentsResponse);
       
-      const examsList = examsResponse?.exams || [];
+      let examsList = examsResponse?.exams || [];
       const submissionsList = submissionsResponse?.submissions || [];
       const studentsList = studentsResponse?.students || [];
       
-      console.log(`✓ ManageExamsPage: Loaded ${examsList.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students`);
+      // Carregar questões completas para cada exame
+      console.log('🔄 Carregando questões completas para cada simulado...');
+      const examsWithQuestions = await Promise.all(
+        examsList.map(async (exam) => {
+          try {
+            const fullExamResponse = await apiService.getExam(exam.id);
+            const fullExam = fullExamResponse?.exam || exam;
+            const questionsCount = fullExam.questions?.length || 0;
+            
+            console.log(`  📋 ${exam.title}: ${questionsCount} questões`);
+            
+            return {
+              ...exam,
+              questions: fullExam.questions || [],
+              questionCount: questionsCount
+            };
+          } catch (error) {
+            console.error(`  ❌ Erro ao carregar questões do exame ${exam.id}:`, error);
+            return exam;
+          }
+        })
+      );
       
-      setExams(examsList);
+      console.log(`✓ ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students`);
+      
+      setExams(examsWithQuestions);
       setSubmissions(submissionsList);
       setStudents(studentsList);
     } catch (error) {
@@ -146,10 +169,19 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
 
   const handleDownloadAnswerSheet = async (exam: any) => {
     try {
+      // Usar os dados do exame que já tem as questões carregadas
       const totalQuestions = exam.questions?.length || 0;
       const examTitle = exam.title || 'Simulado';
       const examId = exam.id || '';
       const selectedClass = exam.selectedClass;
+      
+      console.log('📊 Gerando cartões para simulado:', {
+        examId,
+        examTitle,
+        selectedClass,
+        totalQuestions,
+        hasQuestions: !!exam.questions
+      });
       
       // Validações
       if (totalQuestions === 0) {
