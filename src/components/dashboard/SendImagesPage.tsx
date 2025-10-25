@@ -1,12 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
-import { Progress } from '../ui/progress';
-import { Badge } from '../ui/badge';
-import { ScrollArea } from '../ui/scroll-area';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Progress } from '@/components/ui/progress';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Upload, 
   Image as ImageIcon, 
@@ -15,23 +14,26 @@ import {
   XCircle, 
   Clock,
   Trash2,
-  Eye,
-  Download,
   Camera,
   Scan,
   FileCheck,
-  AlertCircle
+  AlertCircle,
+  User,
+  BookOpen,
+  Loader2
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
-import { toast } from 'sonner@2.0.3';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
-  const [studentName, setStudentName] = useState('');
+  const [selectedStudent, setSelectedStudent] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [exams, setExams] = useState<any[]>([]);
+  const [students, setStudents] = useState<any[]>([]);
+  const [availableStudents, setAvailableStudents] = useState<any[]>([]);
   const [images, setImages] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAnswerSheet, setShowAnswerSheet] = useState(false);
@@ -42,34 +44,48 @@ export function SendImagesPage() {
     loadData();
   }, []);
 
+  useEffect(() => {
+    if (selectedExam) {
+      const exam = exams.find(e => e.id === selectedExam);
+      if (exam && exam.selectedClass) {
+        const filteredStudents = students.filter(s => s.class === exam.selectedClass);
+        setAvailableStudents(filteredStudents);
+        console.log(`✓ Filtered ${filteredStudents.length} students from class: ${exam.selectedClass}`);
+      } else {
+        setAvailableStudents(students);
+      }
+      setSelectedStudent('');
+    }
+  }, [selectedExam, students, exams]);
+
   const loadData = async () => {
     try {
       setLoading(true);
       console.log('=== SendImagesPage: Loading data ===');
       
-      const [examsResponse, imagesResponse] = await Promise.all([
+      const [examsResponse, studentsResponse, imagesResponse] = await Promise.all([
         apiService.getExams(),
+        apiService.getStudents(),
         apiService.getImages()
       ]);
       
-      console.log('SendImagesPage: Raw exams response:', examsResponse);
-      console.log('SendImagesPage: Total exams received:', examsResponse.exams?.length || 0);
-      
-      // Show ALL exams, not just type 'simulado'
       const allExams = (examsResponse.exams || []).filter((exam: any) => exam && exam.id && exam.title);
-      console.log(`✓ SendImagesPage: Loaded ${allExams.length} valid exams`);
+      const allStudents = (studentsResponse.students || []).filter((s: any) => s && s.id && s.name);
       
-      if (allExams.length === 0 && examsResponse.exams?.length > 0) {
-        console.warn('⚠️ SendImagesPage: Some exams were filtered out. Raw exams:', examsResponse.exams);
-      }
+      console.log(`✓ SendImagesPage: Loaded ${allExams.length} exams`);
+      console.log(`✓ SendImagesPage: Loaded ${allStudents.length} students`);
       
-      console.log('SendImagesPage: Final exams list:', allExams);
       setExams(allExams);
+      setStudents(allStudents);
       setImages(imagesResponse.images || []);
       
       if (allExams.length === 0) {
-        console.log('ℹ️ SendImagesPage: No exams available. User needs to create exams first.');
+        console.log('ℹ️ SendImagesPage: No exams available');
       }
+      if (allStudents.length === 0) {
+        console.log('ℹ️ SendImagesPage: No students available');
+      }
+      
     } catch (error) {
       console.error('SendImagesPage: Error loading data:', error);
       toast.error('Erro ao carregar dados');
@@ -87,8 +103,8 @@ export function SendImagesPage() {
       return;
     }
 
-    if (!studentName.trim()) {
-      toast.error('Digite o nome do aluno');
+    if (!selectedStudent) {
+      toast.error('Selecione um aluno');
       return;
     }
 
@@ -97,51 +113,74 @@ export function SendImagesPage() {
 
     try {
       const selectedExamData = exams.find(e => e.id === selectedExam);
+      const selectedStudentData = students.find(s => s.id === selectedStudent);
       
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setUploadProgress((i / files.length) * 100);
-
-        // Convert file to base64 for storage
-        const reader = new FileReader();
-        reader.onload = async (e) => {
-          try {
-            const base64Data = e.target?.result as string;
-            
-            const imageData = {
-              filename: file.name,
-              examId: selectedExam,
-              examTitle: selectedExamData?.title || 'Simulado não encontrado',
-              studentName: studentName.trim(),
-              size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-              mimeType: file.type,
-              data: base64Data,
-              pages: 1,
-              status: 'Aguardando Processamento',
-              uploadedAt: new Date().toLocaleString('pt-BR')
-            };
-
-            await apiService.uploadImage(imageData);
-          } catch (error) {
-            console.error('Error uploading file:', error);
-            toast.error(`Erro ao enviar ${file.name}`);
-          }
-        };
-        reader.readAsDataURL(file);
+      if (!selectedExamData || !selectedStudentData) {
+        toast.error('Dados inválidos');
+        setIsUploading(false);
+        return;
       }
 
-      setUploadProgress(100);
-      setTimeout(async () => {
-        setIsUploading(false);
-        setUploadProgress(0);
-        setStudentName('');
-        await loadData();
-        toast.success(`${files.length} arquivo(s) enviado(s) com sucesso!`);
-      }, 1000);
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        setUploadProgress(((i + 1) / files.length) * 100);
+
+        const reader = new FileReader();
+        
+        await new Promise<void>((resolve, reject) => {
+          reader.onload = async (e) => {
+            try {
+              const base64Data = e.target?.result as string;
+              
+              const imageData = {
+                filename: file.name,
+                examId: selectedExam,
+                examTitle: selectedExamData.title,
+                studentId: selectedStudent,
+                studentName: selectedStudentData.name,
+                studentEmail: selectedStudentData.email || '',
+                studentClass: selectedStudentData.class || '',
+                studentGrade: selectedStudentData.grade || '',
+                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                mimeType: file.type,
+                data: base64Data,
+                pages: 1,
+                status: 'Aguardando Processamento',
+                uploadedAt: new Date().toLocaleString('pt-BR')
+              };
+
+              console.log('📤 Uploading image:', imageData.filename);
+              const response = await apiService.uploadImage(imageData);
+              
+              if (response && !response.error) {
+                console.log('✅ Image uploaded successfully');
+                resolve();
+              } else {
+                throw new Error(response.error || 'Upload failed');
+              }
+            } catch (error) {
+              console.error('Error uploading file:', error);
+              toast.error(`Erro ao enviar ${file.name}`);
+              reject(error);
+            }
+          };
+          
+          reader.onerror = () => {
+            reject(new Error('Failed to read file'));
+          };
+          
+          reader.readAsDataURL(file);
+        });
+      }
+
+      toast.success(`✅ ${files.length} arquivo(s) enviado(s) com sucesso!`);
+      setSelectedStudent('');
+      await loadData();
 
     } catch (error) {
       console.error('Error in file upload:', error);
       toast.error('Erro durante o upload');
+    } finally {
       setIsUploading(false);
       setUploadProgress(0);
     }
@@ -155,7 +194,9 @@ export function SendImagesPage() {
       return;
     }
 
-    // Initialize manual answers with -1 (not answered)
+    console.log('📋 Processing image for exam:', examData.title);
+    console.log('📝 Total questions:', examData.questions.length);
+
     setManualAnswers(new Array(examData.questions.length).fill(-1));
     setSelectedImage(image);
     setShowAnswerSheet(true);
@@ -170,10 +211,17 @@ export function SendImagesPage() {
       return;
     }
 
+    const answeredCount = manualAnswers.filter(a => a >= 0).length;
+    if (answeredCount === 0) {
+      toast.error('Marque pelo menos uma resposta antes de finalizar');
+      return;
+    }
+
     setIsProcessing(true);
 
     try {
-      // Calculate score based on manual answers
+      console.log('🔄 Starting manual correction process...');
+      
       let correctCount = 0;
       const results = examData.questions.map((question: any, index: number) => {
         const studentAnswer = manualAnswers[index];
@@ -191,36 +239,82 @@ export function SendImagesPage() {
 
       const score = Math.round((correctCount / examData.questions.length) * 100);
 
-      // Create submission
+      console.log(`📊 Score calculated: ${correctCount}/${examData.questions.length} (${score}%)`);
+
+      const subjectPerformances: any = {};
+      examData.questions.forEach((question: any, index: number) => {
+        const subject = question.subject || 'Geral';
+        if (!subjectPerformances[subject]) {
+          subjectPerformances[subject] = { total: 0, correct: 0 };
+        }
+        subjectPerformances[subject].total++;
+        if (manualAnswers[index] === question.correctAnswer) {
+          subjectPerformances[subject].correct++;
+        }
+      });
+
+      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]: any) => ({
+        subject,
+        totalQuestions: data.total,
+        correctAnswers: data.correct,
+        percentage: Math.round((data.correct / data.total) * 100)
+      }));
+
+      console.log('📈 Subject performances:', subjectPerformanceArray);
+
       const submissionData = {
         examId: selectedImage.examId,
         examTitle: examData.title,
+        studentId: selectedImage.studentId,
         studentName: selectedImage.studentName,
+        studentEmail: selectedImage.studentEmail,
+        studentClass: selectedImage.studentClass,
+        studentGrade: selectedImage.studentGrade || examData.grade || 'Ensino Médio',
         answers: manualAnswers,
+        correctAnswers: examData.questions.map((q: any) => q.correctAnswer),
         score: correctCount,
         totalQuestions: examData.questions.length,
         percentage: score,
+        subjectPerformances: subjectPerformanceArray,
+        timeSpent: 0,
         results,
         submittedAt: new Date().toISOString(),
-        correctionType: 'manual'
+        gradingStatus: 'graded',
+        correctionType: 'manual-image',
+        questionWeights: examData.questions.map((q: any, idx: number) => ({
+          questionIndex: idx,
+          weight: q.weight || 1,
+          subject: q.subject || 'Geral'
+        }))
       };
 
-      await apiService.createSubmission(submissionData);
+      console.log('📤 Creating submission:', submissionData);
 
-      // Update image status
-      await apiService.updateImageStatus(selectedImage.id, {
-        status: 'Processada',
-        score,
-        processedAt: new Date().toLocaleString('pt-BR')
-      });
+      const submissionResponse = await apiService.createSubmission(submissionData);
+      
+      if (submissionResponse && !submissionResponse.error) {
+        console.log('✅ Submission created successfully');
 
-      toast.success(`Correção concluída! Nota: ${score}%`);
-      setShowAnswerSheet(false);
-      setSelectedImage(null);
-      await loadData();
-    } catch (error) {
-      console.error('Error processing correction:', error);
-      toast.error('Erro ao processar correção');
+        await apiService.updateImageStatus(selectedImage.id, {
+          status: 'Processada',
+          score,
+          processedAt: new Date().toLocaleString('pt-BR')
+        });
+
+        toast.success(
+          `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)\n\nResultado salvo em "Correção de Simulados"`,
+          { duration: 5000 }
+        );
+        
+        setShowAnswerSheet(false);
+        setSelectedImage(null);
+        await loadData();
+      } else {
+        throw new Error(submissionResponse.error || 'Falha ao criar submissão');
+      }
+    } catch (error: any) {
+      console.error('❌ Error processing correction:', error);
+      toast.error('Erro ao processar correção: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setIsProcessing(false);
     }
@@ -264,16 +358,25 @@ export function SendImagesPage() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-600" />
+          <p className="text-sm text-slate-600">Carregando dados...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div>
         <h1 className="text-2xl font-semibold text-slate-800">Correção com Cartão Resposta</h1>
-        <p className="text-slate-600">Envie imagens de cartões resposta para correção automática dos simulados</p>
+        <p className="text-slate-600">Envie imagens de cartões resposta e selecione as respostas marcadas pelo aluno</p>
       </div>
 
-      {/* Upload Section */}
-      <Card className="seice-card">
+      <Card className="border-2">
         <CardHeader>
           <CardTitle className="flex items-center">
             <Upload className="w-5 h-5 mr-2" />
@@ -296,14 +399,11 @@ export function SendImagesPage() {
                       Nenhum simulado disponível. Crie um simulado primeiro.
                     </div>
                   ) : (
-                    exams.map(exam => {
-                      console.log('Rendering exam option in SendImages:', exam.id, exam.title);
-                      return (
-                        <SelectItem key={exam.id} value={exam.id}>
-                          {exam.title} ({exam.questions?.length || exam.totalQuestions || 0} questões)
-                        </SelectItem>
-                      );
-                    })
+                    exams.map(exam => (
+                      <SelectItem key={exam.id} value={exam.id}>
+                        {exam.title} ({exam.questions?.length || 0} questões)
+                      </SelectItem>
+                    ))
                   )}
                 </SelectContent>
               </Select>
@@ -312,29 +412,49 @@ export function SendImagesPage() {
                   {exams.length} simulado(s) disponível(is)
                 </p>
               )}
-              {exams.length === 0 && !loading && (
-                <Card className="mt-3 border-yellow-200 bg-yellow-50">
-                  <CardContent className="p-3">
-                    <div className="flex items-start space-x-2">
-                      <AlertCircle className="w-4 h-4 text-yellow-600 mt-0.5" />
-                      <p className="text-xs text-yellow-800">
-                        Você precisa criar um simulado antes de enviar cartões resposta.
-                      </p>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
-                Nome do Aluno *
+                Selecione o Aluno *
               </label>
-              <Input
-                placeholder="Digite o nome completo do aluno"
-                value={studentName}
-                onChange={(e) => setStudentName(e.target.value)}
-              />
+              <Select 
+                value={selectedStudent} 
+                onValueChange={setSelectedStudent}
+                disabled={!selectedExam}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={
+                    !selectedExam 
+                      ? "Selecione um simulado primeiro" 
+                      : "Escolha o aluno..."
+                  } />
+                </SelectTrigger>
+                <SelectContent>
+                  {availableStudents.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-slate-500">
+                      {selectedExam 
+                        ? "Nenhum aluno encontrado para esta turma"
+                        : "Selecione um simulado primeiro"
+                      }
+                    </div>
+                  ) : (
+                    availableStudents.map(student => (
+                      <SelectItem key={student.id} value={student.id}>
+                        <div className="flex items-center">
+                          <User className="w-4 h-4 mr-2" />
+                          {student.name} - {student.class}
+                        </div>
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+              {selectedExam && availableStudents.length > 0 && (
+                <p className="text-xs text-slate-500 mt-1">
+                  {availableStudents.length} aluno(s) da turma
+                </p>
+              )}
             </div>
           </div>
 
@@ -366,12 +486,12 @@ export function SendImagesPage() {
                   accept="image/*,.pdf"
                   onChange={handleFileUpload}
                   className="hidden"
-                  disabled={!selectedExam || !studentName.trim()}
+                  disabled={!selectedExam || !selectedStudent}
                 />
                 <label
                   htmlFor="file-upload"
                   className={`inline-flex items-center px-4 py-2 rounded-lg font-medium cursor-pointer ${
-                    selectedExam && studentName.trim()
+                    selectedExam && selectedStudent
                       ? 'bg-blue-600 text-white hover:bg-blue-700' 
                       : 'bg-slate-300 text-slate-500 cursor-not-allowed'
                   }`}
@@ -385,7 +505,7 @@ export function SendImagesPage() {
                 <div className="space-y-2">
                   <Progress value={uploadProgress} className="w-full" />
                   <p className="text-sm text-slate-600">
-                    Enviando... {uploadProgress}%
+                    Enviando... {Math.round(uploadProgress)}%
                   </p>
                 </div>
               )}
@@ -396,23 +516,22 @@ export function SendImagesPage() {
             <CardContent className="p-4">
               <h4 className="font-medium text-blue-900 mb-2 flex items-center">
                 <Scan className="w-4 h-4 mr-2" />
-                Dicas para melhor correção:
+                Como funciona a correção:
               </h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Certifique-se de que o cartão resposta está completamente visível</li>
-                <li>• Use boa iluminação e evite sombras</li>
-                <li>• As marcações devem estar bem preenchidas e legíveis</li>
-                <li>• Evite dobras, rasgos ou manchas no cartão</li>
-                <li>• Após enviar, clique em "Processar" para fazer a correção manual</li>
+                <li>• Selecione o simulado e o aluno da turma correspondente</li>
+                <li>• Faça upload da foto do cartão resposta preenchido</li>
+                <li>• Clique em "Processar" e marque as respostas que o aluno preencheu</li>
+                <li>• O sistema calculará automaticamente a nota comparando com o gabarito</li>
+                <li>• O resultado ficará disponível em "Correção de Simulados"</li>
               </ul>
             </CardContent>
           </Card>
         </CardContent>
       </Card>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="seice-card">
+        <Card className="border-2">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
@@ -426,7 +545,7 @@ export function SendImagesPage() {
           </CardContent>
         </Card>
 
-        <Card className="seice-card">
+        <Card className="border-2">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
@@ -442,7 +561,7 @@ export function SendImagesPage() {
           </CardContent>
         </Card>
 
-        <Card className="seice-card">
+        <Card className="border-2">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-yellow-100 rounded-lg flex items-center justify-center">
@@ -458,7 +577,7 @@ export function SendImagesPage() {
           </CardContent>
         </Card>
 
-        <Card className="seice-card">
+        <Card className="border-2">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
               <div className="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
@@ -475,8 +594,7 @@ export function SendImagesPage() {
         </Card>
       </div>
 
-      {/* Images List */}
-      <Card className="seice-card">
+      <Card className="border-2">
         <CardHeader>
           <CardTitle className="flex items-center justify-between">
             <div className="flex items-center">
@@ -488,7 +606,7 @@ export function SendImagesPage() {
         <CardContent>
           <div className="space-y-3">
             {images.map(image => (
-              <Card key={image.id} className="seice-card border hover:shadow-md transition-shadow">
+              <Card key={image.id} className="border-2 hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 flex-1">
@@ -567,14 +685,13 @@ export function SendImagesPage() {
               <ImageIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <h3 className="font-medium text-slate-800 mb-2">Nenhum cartão resposta enviado</h3>
               <p className="text-slate-500">
-                Comece selecionando um simulado, informando o nome do aluno e enviando as imagens dos cartões
+                Comece selecionando um simulado, um aluno e enviando as imagens dos cartões
               </p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Manual Answer Sheet Dialog */}
       <Dialog open={showAnswerSheet} onOpenChange={setShowAnswerSheet}>
         <DialogContent className="max-w-4xl max-h-[80vh]">
           <DialogHeader>
@@ -585,7 +702,7 @@ export function SendImagesPage() {
               </Badge>
             </DialogTitle>
             <DialogDescription>
-              Selecione a alternativa marcada pelo aluno em cada questão. As respostas corretas estão destacadas em verde.
+              Marque as alternativas que o aluno preencheu no cartão resposta. As respostas corretas estão destacadas em verde.
             </DialogDescription>
           </DialogHeader>
           
@@ -597,9 +714,9 @@ export function SendImagesPage() {
                   <div>
                     <p className="font-medium text-orange-900">Instruções de Correção</p>
                     <p className="text-sm text-orange-800 mt-1">
-                      Selecione a alternativa marcada pelo aluno em cada questão.
+                      Olhe a imagem do cartão resposta e selecione a alternativa que o aluno marcou em cada questão.
                       As respostas corretas estão destacadas em verde para referência.
-                      Deixe em branco as questões não respondidas.
+                      Deixe em branco as questões não respondidas pelo aluno.
                     </p>
                   </div>
                 </div>
@@ -609,7 +726,7 @@ export function SendImagesPage() {
             <ScrollArea className="h-[400px] pr-4">
               <div className="space-y-4">
                 {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question: any, index: number) => (
-                  <Card key={index} className="seice-card">
+                  <Card key={index} className="border-2">
                     <CardContent className="p-4">
                       <div className="mb-3">
                         <div className="flex items-center justify-between mb-2">
@@ -642,7 +759,7 @@ export function SendImagesPage() {
                                 }}
                                 className={`text-left p-2 rounded text-sm border transition-all ${
                                   isSelected
-                                    ? 'border-blue-500 bg-blue-50 font-medium'
+                                    ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
                                     : isCorrect
                                       ? 'border-green-300 bg-green-50'
                                       : 'border-slate-200 bg-slate-50'
@@ -652,7 +769,12 @@ export function SendImagesPage() {
                                 {option}
                                 {isCorrect && (
                                   <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
-                                    Correta
+                                    ✓ Gabarito
+                                  </Badge>
+                                )}
+                                {isSelected && (
+                                  <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
+                                    Marcada
                                   </Badge>
                                 )}
                               </button>
@@ -666,7 +788,6 @@ export function SendImagesPage() {
               </div>
             </ScrollArea>
 
-            {/* Summary */}
             <Card className="border-blue-200 bg-blue-50">
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
@@ -686,7 +807,6 @@ export function SendImagesPage() {
               </CardContent>
             </Card>
 
-            {/* Actions */}
             <div className="flex justify-end space-x-2 pt-4 border-t">
               <Button 
                 variant="outline" 
@@ -705,7 +825,7 @@ export function SendImagesPage() {
               >
                 {isProcessing ? (
                   <>
-                    <Clock className="w-4 h-4 mr-2 animate-spin" />
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                     Processando...
                   </>
                 ) : (
