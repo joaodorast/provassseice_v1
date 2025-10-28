@@ -13,7 +13,7 @@ class ApiService {
 
   private async request(endpoint: string, options: RequestInit = {}) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // Increased to 10 seconds for better reliability
+    const timeoutId = setTimeout(() => controller.abort(), 10000);
     
     try {
       console.log(`API Request starting: ${endpoint}`);
@@ -129,6 +129,10 @@ class ApiService {
   // Exams API
   async getExams() {
     return this.request('/exams');
+  }
+
+  async getExam(id: string) {
+    return this.request(`/exams/${id}`);
   }
 
   async createExam(exam: any) {

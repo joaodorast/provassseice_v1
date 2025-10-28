@@ -39,14 +39,22 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
   const [exams, setExams] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  const [classes, setClasses] = useState<any[]>([]);
   
-  // Estado para edição de título
+  // Estado para edição de título e descrição
   const [editDialogOpen, setEditDialogOpen] = useState(false);
   const [editingExam, setEditingExam] = useState<any>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState('');
+
+  // Estado para edição de turma
+  const [editClassDialogOpen, setEditClassDialogOpen] = useState(false);
+  const [editingClassExam, setEditingClassExam] = useState<any>(null);
+  const [selectedClass, setSelectedClass] = useState('');
+  const [saveClassLoading, setSaveClassLoading] = useState(false);
+  const [saveClassError, setSaveClassError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -57,19 +65,22 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       setLoading(true);
       console.log('=== ManageExamsPage: Loading data ===');
       
-      const [examsResponse, submissionsResponse, studentsResponse] = await Promise.all([
+      const [examsResponse, submissionsResponse, studentsResponse, classesResponse] = await Promise.all([
         apiService.getExams(),
         apiService.getSubmissions(),
-        apiService.getStudents()
+        apiService.getStudents(),
+        apiService.getClasses()
       ]);
       
       console.log('ManageExamsPage: Exams response:', examsResponse);
       console.log('ManageExamsPage: Submissions response:', submissionsResponse);
       console.log('ManageExamsPage: Students response:', studentsResponse);
+      console.log('ManageExamsPage: Classes response:', classesResponse);
       
       let examsList = examsResponse?.exams || [];
       const submissionsList = submissionsResponse?.submissions || [];
       const studentsList = studentsResponse?.students || [];
+      const classesList = classesResponse?.classes || [];
       
       // Carregar questões completas para cada exame
       console.log('🔄 Carregando questões completas para cada simulado...');
@@ -94,17 +105,19 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         })
       );
       
-      console.log(`✓ ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students`);
+      console.log(`✓ ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students, ${classesList.length} classes`);
       
       setExams(examsWithQuestions);
       setSubmissions(submissionsList);
       setStudents(studentsList);
+      setClasses(classesList);
     } catch (error) {
       console.error('ManageExamsPage: Error loading data:', error);
       showToast('Erro ao carregar dados', 'error');
       setExams([]);
       setSubmissions([]);
       setStudents([]);
+      setClasses([]);
     } finally {
       setLoading(false);
     }
@@ -135,7 +148,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
     };
   };
 
-  // Função para abrir o diálogo de edição
+  // Função para abrir o diálogo de edição de título
   const handleEditClick = (exam: any) => {
     console.log('📝 Abrindo edição do exame:', exam);
     setEditingExam(exam);
@@ -145,7 +158,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
     setEditDialogOpen(true);
   };
 
-  // Função para salvar as alterações via API
+  // Função para salvar as alterações de título via API
   const handleSaveEdit = async () => {
     if (!editTitle.trim()) {
       setSaveError('O título não pode estar vazio');
@@ -162,7 +175,6 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         description: editDescription
       });
 
-      // Chamar API real para atualizar o exame
       const response = await apiService.updateExam(editingExam.id, {
         title: editTitle,
         description: editDescription
@@ -173,7 +185,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       if (response.success) {
         showToast('Simulado atualizado com sucesso!', 'success');
         setEditDialogOpen(false);
-        await loadData(); // Recarregar dados
+        await loadData();
       } else {
         throw new Error(response.error || 'Erro ao atualizar simulado');
       }
@@ -183,6 +195,53 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       showToast('Erro ao atualizar simulado', 'error');
     } finally {
       setSaveLoading(false);
+    }
+  };
+
+  // Função para abrir o diálogo de edição de turma
+  const handleEditClassClick = (exam: any) => {
+    console.log('🏫 Abrindo edição de turma do exame:', exam);
+    setEditingClassExam(exam);
+    setSelectedClass(exam.selectedClass || '');
+    setSaveClassError('');
+    setEditClassDialogOpen(true);
+  };
+
+  // Função para salvar a alteração de turma via API
+  const handleSaveClassEdit = async () => {
+    if (!selectedClass) {
+      setSaveClassError('Por favor, selecione uma turma');
+      return;
+    }
+
+    try {
+      setSaveClassLoading(true);
+      setSaveClassError('');
+      
+      console.log('🏫 Atualizando turma do simulado via API:', {
+        examId: editingClassExam.id,
+        selectedClass: selectedClass
+      });
+
+      const response = await apiService.updateExam(editingClassExam.id, {
+        selectedClass: selectedClass
+      });
+
+      console.log('✓ Resposta da API:', response);
+
+      if (response.success) {
+        showToast('Turma atualizada com sucesso!', 'success');
+        setEditClassDialogOpen(false);
+        await loadData();
+      } else {
+        throw new Error(response.error || 'Erro ao atualizar turma');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao salvar turma:', error);
+      setSaveClassError(error.message || 'Erro ao salvar turma. Tente novamente.');
+      showToast('Erro ao atualizar turma', 'error');
+    } finally {
+      setSaveClassLoading(false);
     }
   };
 
@@ -687,10 +746,8 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
 
   const totalQuestions = exams.reduce((total, exam) => total + (exam.questions?.length || 0), 0);
 
-  // Toast simples
   const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     console.log(`[${type.toUpperCase()}] ${message}`);
-    // Você pode integrar com uma biblioteca de toast como sonner aqui
   };
 
   if (loading && exams.length === 0) {
@@ -861,16 +918,34 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                       </TableCell>
                       <TableCell>
                         {exam.selectedClass ? (
-                          <div>
-                            <Badge variant="outline" className="text-xs">
-                              {exam.selectedClass}
-                            </Badge>
-                            <p className="text-xs text-slate-500 mt-1">
-                              {classStudentsCount} aluno{classStudentsCount !== 1 ? 's' : ''}
-                            </p>
+                          <div className="flex items-center gap-2">
+                            <div>
+                              <Badge variant="outline" className="text-xs">
+                                {exam.selectedClass}
+                              </Badge>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {classStudentsCount} aluno{classStudentsCount !== 1 ? 's' : ''}
+                              </p>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleEditClassClick(exam)}
+                              className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              title="Alterar turma"
+                            >
+                              <Edit className="w-3 h-3" />
+                            </Button>
                           </div>
                         ) : (
-                          <span className="text-slate-400 text-xs">Sem turma</span>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleEditClassClick(exam)}
+                            className="text-xs"
+                          >
+                            Atribuir turma
+                          </Button>
                         )}
                       </TableCell>
                       <TableCell>
@@ -1090,6 +1165,120 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                 <>
                   <Save className="w-4 h-4 mr-2" />
                   Salvar Alterações
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Edição de Turma */}
+      <Dialog open={editClassDialogOpen} onOpenChange={setEditClassDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-purple-600" />
+              Alterar Turma do Simulado
+            </DialogTitle>
+            <DialogDescription>
+              Selecione a turma que realizará este simulado
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            {editingClassExam && (
+              <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                <p className="text-sm font-medium text-slate-700">Simulado:</p>
+                <p className="text-base font-semibold text-slate-900 mt-1">{editingClassExam.title}</p>
+                {editingClassExam.selectedClass && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    Turma atual: <span className="font-medium">{editingClassExam.selectedClass}</span>
+                  </p>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="select-class">
+                Selecione a Turma <span className="text-red-500">*</span>
+              </Label>
+              <Select value={selectedClass} onValueChange={setSelectedClass}>
+                <SelectTrigger id="select-class" className={saveClassError && !selectedClass ? 'border-red-500' : ''}>
+                  <SelectValue placeholder="Escolha uma turma" />
+                </SelectTrigger>
+                <SelectContent>
+                  {classes.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-slate-500">
+                      Nenhuma turma cadastrada
+                    </div>
+                  ) : (
+                    classes.map((cls) => {
+                      const studentsInClass = students.filter(s => s.class === cls.name).length;
+                      return (
+                        <SelectItem key={cls.id} value={cls.name}>
+                          <div className="flex items-center justify-between w-full">
+                            <span>{cls.name}</span>
+                            <span className="text-xs text-slate-500 ml-2">
+                              ({studentsInClass} aluno{studentsInClass !== 1 ? 's' : ''})
+                            </span>
+                          </div>
+                        </SelectItem>
+                      );
+                    })
+                  )}
+                </SelectContent>
+              </Select>
+              
+              {selectedClass && (
+                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                  <p className="font-medium">
+                    ✓ {students.filter(s => s.class === selectedClass).length} alunos nesta turma
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {saveClassError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{saveClassError}</AlertDescription>
+              </Alert>
+            )}
+
+            {classes.length === 0 && (
+              <Alert>
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  Você precisa cadastrar turmas antes de atribuí-las aos simulados.
+                  Vá para a seção de Turmas para criar sua primeira turma.
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditClassDialogOpen(false)}
+              disabled={saveClassLoading}
+            >
+              <X className="w-4 h-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveClassEdit}
+              disabled={saveClassLoading || !selectedClass || classes.length === 0}
+              className="bg-purple-600 hover:bg-purple-700"
+            >
+              {saveClassLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                  Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Salvar Turma
                 </>
               )}
             </Button>
