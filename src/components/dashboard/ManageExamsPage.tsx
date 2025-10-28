@@ -1,10 +1,14 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
-import { Button } from '../ui/button';
-import { Input } from '../ui/input';
-import { Badge } from '../ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Badge } from '@/components/ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { 
   BookOpen, 
   Plus, 
@@ -14,17 +18,13 @@ import {
   Trash2, 
   Eye, 
   Copy,
-  Calendar,
-  Clock,
   Users,
   Target,
-  Download,
-  Upload,
-  FileText,
-  AlertCircle,
-  QrCode
+  QrCode,
+  Save,
+  X,
+  AlertCircle
 } from 'lucide-react';
-import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 
 type ManageExamsPageProps = {
@@ -39,6 +39,14 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
   const [exams, setExams] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
+  
+  // Estado para edição de título
+  const [editDialogOpen, setEditDialogOpen] = useState(false);
+  const [editingExam, setEditingExam] = useState<any>(null);
+  const [editTitle, setEditTitle] = useState('');
+  const [editDescription, setEditDescription] = useState('');
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -93,7 +101,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       setStudents(studentsList);
     } catch (error) {
       console.error('ManageExamsPage: Error loading data:', error);
-      toast.error('Erro ao carregar dados');
+      showToast('Erro ao carregar dados', 'error');
       setExams([]);
       setSubmissions([]);
       setStudents([]);
@@ -127,20 +135,71 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
     };
   };
 
+  // Função para abrir o diálogo de edição
+  const handleEditClick = (exam: any) => {
+    console.log('📝 Abrindo edição do exame:', exam);
+    setEditingExam(exam);
+    setEditTitle(exam.title || '');
+    setEditDescription(exam.description || '');
+    setSaveError('');
+    setEditDialogOpen(true);
+  };
+
+  // Função para salvar as alterações via API
+  const handleSaveEdit = async () => {
+    if (!editTitle.trim()) {
+      setSaveError('O título não pode estar vazio');
+      return;
+    }
+
+    try {
+      setSaveLoading(true);
+      setSaveError('');
+      
+      console.log('💾 Salvando alterações via API:', {
+        examId: editingExam.id,
+        title: editTitle,
+        description: editDescription
+      });
+
+      // Chamar API real para atualizar o exame
+      const response = await apiService.updateExam(editingExam.id, {
+        title: editTitle,
+        description: editDescription
+      });
+
+      console.log('✓ Resposta da API:', response);
+
+      if (response.success) {
+        showToast('Simulado atualizado com sucesso!', 'success');
+        setEditDialogOpen(false);
+        await loadData(); // Recarregar dados
+      } else {
+        throw new Error(response.error || 'Erro ao atualizar simulado');
+      }
+    } catch (error) {
+      console.error('❌ Erro ao salvar alterações:', error);
+      setSaveError(error.message || 'Erro ao salvar alterações. Tente novamente.');
+      showToast('Erro ao atualizar simulado', 'error');
+    } finally {
+      setSaveLoading(false);
+    }
+  };
+
   const handleDuplicateExam = async (exam: any) => {
     try {
       setLoading(true);
       const response = await apiService.duplicateExam(exam.id);
       
       if (response.success) {
-        toast.success('Simulado duplicado com sucesso!');
+        showToast('Simulado duplicado com sucesso!', 'success');
         await loadData();
       } else {
         throw new Error(response.error || 'Failed to duplicate exam');
       }
     } catch (error) {
       console.error('Error duplicating exam:', error);
-      toast.error('Erro ao duplicar simulado');
+      showToast('Erro ao duplicar simulado', 'error');
     } finally {
       setLoading(false);
     }
@@ -153,14 +212,14 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         const response = await apiService.deleteExam(examId);
         
         if (response.success) {
-          toast.success('Simulado excluído com sucesso!');
+          showToast('Simulado excluído com sucesso!', 'success');
           await loadData();
         } else {
           throw new Error(response.error || 'Failed to delete exam');
         }
       } catch (error) {
         console.error('Error deleting exam:', error);
-        toast.error('Erro ao excluir simulado');
+        showToast('Erro ao excluir simulado', 'error');
       } finally {
         setLoading(false);
       }
@@ -169,7 +228,6 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
 
   const handleDownloadAnswerSheet = async (exam: any) => {
     try {
-      // Usar os dados do exame que já tem as questões carregadas
       const totalQuestions = exam.questions?.length || 0;
       const examTitle = exam.title || 'Simulado';
       const examId = exam.id || '';
@@ -183,22 +241,20 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         hasQuestions: !!exam.questions
       });
       
-      // Validações
       if (totalQuestions === 0) {
-        toast.error('Este simulado não possui questões cadastradas');
+        showToast('Este simulado não possui questões cadastradas', 'error');
         return;
       }
 
       if (!selectedClass) {
-        toast.error('Este simulado não possui turma selecionada');
+        showToast('Este simulado não possui turma selecionada', 'error');
         return;
       }
 
-      // Filtrar alunos da turma específica do simulado
       const classStudents = students.filter(student => student.class === selectedClass);
       
       if (classStudents.length === 0) {
-        toast.error(`Nenhum aluno encontrado na turma ${selectedClass}`);
+        showToast(`Nenhum aluno encontrado na turma ${selectedClass}`, 'error');
         return;
       }
 
@@ -207,14 +263,12 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         examTitle,
         selectedClass,
         totalQuestions,
-        studentsCount: classStudents.length,
-        students: classStudents.map(s => ({ name: s.name, id: s.studentId || s.id }))
+        studentsCount: classStudents.length
       });
 
       const qrCodeUrl = `${window.location.origin}/correcao?exam=${examId}`;
       const questionsPerColumn = Math.ceil(totalQuestions / 2);
 
-      // Gerar HTML para todos os alunos da turma
       const studentsHTML = classStudents.map((student, index) => {
         const studentName = student.name || 'Nome do Aluno';
         const studentId = student.studentId || student.id || '';
@@ -343,7 +397,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
 
       const printWindow = window.open('', '_blank');
       if (!printWindow) {
-        toast.error('Bloqueador de pop-ups impediu a abertura. Por favor, permita pop-ups para este site.');
+        showToast('Bloqueador de pop-ups impediu a abertura. Por favor, permita pop-ups para este site.', 'error');
         return;
       }
       
@@ -598,13 +652,10 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       
       printWindow.document.close();
       
-      toast.success(`✓ ${classStudents.length} cartões resposta gerados para a turma ${selectedClass}!`, {
-        duration: 5000,
-        description: 'Todos os cartões estão preenchidos com nome, matrícula e turma dos alunos'
-      });
+      showToast(`✓ ${classStudents.length} cartões resposta gerados para a turma ${selectedClass}!`, 'success');
     } catch (error) {
       console.error('Error generating answer sheets:', error);
-      toast.error('Erro ao gerar cartões resposta');
+      showToast('Erro ao gerar cartões resposta', 'error');
     }
   };
 
@@ -636,6 +687,12 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
 
   const totalQuestions = exams.reduce((total, exam) => total + (exam.questions?.length || 0), 0);
 
+  // Toast simples
+  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    console.log(`[${type.toUpperCase()}] ${message}`);
+    // Você pode integrar com uma biblioteca de toast como sonner aqui
+  };
+
   if (loading && exams.length === 0) {
     return (
       <div className="space-y-6">
@@ -650,7 +707,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 p-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">Gerenciar Simulados</h1>
@@ -676,7 +733,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card className="seice-card">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Total de Simulados</CardTitle>
             <BookOpen className="h-5 w-5 text-blue-600" />
@@ -687,7 +744,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </CardContent>
         </Card>
         
-        <Card className="seice-card">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Questões</CardTitle>
             <Target className="h-5 w-5 text-green-600" />
@@ -698,7 +755,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </CardContent>
         </Card>
         
-        <Card className="seice-card">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Aplicações</CardTitle>
             <Users className="h-5 w-5 text-purple-600" />
@@ -709,7 +766,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </CardContent>
         </Card>
         
-        <Card className="seice-card">
+        <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Matérias</CardTitle>
             <Filter className="h-5 w-5 text-orange-600" />
@@ -721,7 +778,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         </Card>
       </div>
 
-      <Card className="seice-card">
+      <Card>
         <CardHeader>
           <CardTitle>Seus Simulados</CardTitle>
           <CardDescription>Gerencie e organize seus simulados criados</CardDescription>
@@ -866,8 +923,17 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                           <Button 
                             variant="ghost" 
                             size="sm" 
+                            title="Editar Título"
+                            onClick={() => handleEditClick(exam)}
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
                             title="Visualizar"
-                            onClick={() => toast.info('Funcionalidade em desenvolvimento')}
+                            onClick={() => showToast('Funcionalidade em desenvolvimento', 'info')}
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
@@ -876,7 +942,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                             size="sm" 
                             title={exam.selectedClass ? `Gerar ${classStudentsCount} cartões para ${exam.selectedClass}` : 'Cartão Resposta'}
                             onClick={() => handleDownloadAnswerSheet(exam)}
-                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            className="text-green-600 hover:text-green-700 hover:bg-green-50"
                             disabled={!exam.selectedClass || classStudentsCount === 0}
                           >
                             <QrCode className="w-4 h-4" />
@@ -936,7 +1002,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       </Card>
 
       {exams.length > 0 && (
-        <Card className="seice-card border-blue-200 bg-blue-50">
+        <Card className="border-blue-200 bg-blue-50">
           <CardContent className="p-4">
             <div className="flex items-start space-x-3">
               <QrCode className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
@@ -952,6 +1018,84 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Dialog de Edição de Título */}
+      <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Edit className="w-5 h-5 text-blue-600" />
+              Editar Simulado
+            </DialogTitle>
+            <DialogDescription>
+              Altere o título e a descrição do simulado
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="edit-title">
+                Título do Simulado <span className="text-red-500">*</span>
+              </Label>
+              <Input
+                id="edit-title"
+                placeholder="Ex: Simulado de Matemática - 1º Bimestre"
+                value={editTitle}
+                onChange={(e) => setEditTitle(e.target.value)}
+                className={saveError && !editTitle.trim() ? 'border-red-500' : ''}
+              />
+            </div>
+            
+            <div className="space-y-2">
+              <Label htmlFor="edit-description">
+                Descrição (opcional)
+              </Label>
+              <Textarea
+                id="edit-description"
+                placeholder="Ex: Avaliação diagnóstica do primeiro bimestre focada em álgebra e geometria"
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                rows={3}
+              />
+            </div>
+
+            {saveError && (
+              <Alert variant="destructive">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>{saveError}</AlertDescription>
+              </Alert>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setEditDialogOpen(false)}
+              disabled={saveLoading}
+            >
+              <X className="w-4 h-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveEdit}
+              disabled={saveLoading || !editTitle.trim()}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {saveLoading ? (
+                <>
+                  <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent mr-2"></div>
+                  Salvando...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Salvar Alterações
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
