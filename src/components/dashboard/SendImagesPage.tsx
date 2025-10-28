@@ -19,26 +19,31 @@ import {
   FileCheck,
   AlertCircle,
   User,
-  BookOpen,
-  Loader2
+  Loader2,
+  Users,
+  AlertTriangle
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
+  const [uploadMode, setUploadMode] = useState('batch');
   const [selectedStudent, setSelectedStudent] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [exams, setExams] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
-  const [availableStudents, setAvailableStudents] = useState<any[]>([]);
-  const [images, setImages] = useState<any[]>([]);
+  const [exams, setExams] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [availableStudents, setAvailableStudents] = useState([]);
+  const [images, setImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showAnswerSheet, setShowAnswerSheet] = useState(false);
-  const [selectedImage, setSelectedImage] = useState<any>(null);
-  const [manualAnswers, setManualAnswers] = useState<number[]>([]);
+  const [selectedImage, setSelectedImage] = useState(null);
+  const [manualAnswers, setManualAnswers] = useState([]);
+  const [batchImages, setBatchImages] = useState([]);
+  const [showBatchProcessing, setShowBatchProcessing] = useState(false);
+  const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
 
   useEffect(() => {
     loadData();
@@ -69,10 +74,36 @@ export function SendImagesPage() {
         apiService.getImages()
       ]);
       
-      const allExams = (examsResponse.exams || []).filter((exam: any) => exam && exam.id && exam.title);
-      const allStudents = (studentsResponse.students || []).filter((s: any) => s && s.id && s.name);
+      const allExams = (examsResponse.exams || []).filter((exam) => {
+        if (!exam || !exam.id || !exam.title) return false;
+        
+        // ✅ VALIDAÇÃO CRÍTICA: Verificar estrutura de questões
+        const hasQuestions = exam.questions && Array.isArray(exam.questions) && exam.questions.length > 0;
+        const hasSections = exam.sections && Array.isArray(exam.sections) && exam.sections.length > 0;
+        
+        if (!hasQuestions && !hasSections) {
+          console.warn(`⚠️ Simulado "${exam.title}" sem questões ou seções - será ignorado`);
+          return false;
+        }
+        
+        // Se tem seções mas não tem questions flat, criar o flat array
+        if (hasSections && !hasQuestions) {
+          exam.questions = exam.sections.flatMap(section => 
+            (section.questions || []).map(q => ({
+              ...q,
+              sectionId: section.id,
+              sectionName: section.name
+            }))
+          );
+          console.log(`✓ Criado array flat de ${exam.questions.length} questões para "${exam.title}"`);
+        }
+        
+        return true;
+      });
       
-      console.log(`✓ SendImagesPage: Loaded ${allExams.length} exams`);
+      const allStudents = (studentsResponse.students || []).filter((s) => s && s.id && s.name);
+      
+      console.log(`✓ SendImagesPage: Loaded ${allExams.length} exams válidos`);
       console.log(`✓ SendImagesPage: Loaded ${allStudents.length} students`);
       
       setExams(allExams);
@@ -80,10 +111,8 @@ export function SendImagesPage() {
       setImages(imagesResponse.images || []);
       
       if (allExams.length === 0) {
-        console.log('ℹ️ SendImagesPage: No exams available');
-      }
-      if (allStudents.length === 0) {
-        console.log('ℹ️ SendImagesPage: No students available');
+        console.log('ℹ️ SendImagesPage: No valid exams available');
+        toast.error('Nenhum simulado válido encontrado. Crie um simulado com questões primeiro.');
       }
       
     } catch (error) {
@@ -94,7 +123,34 @@ export function SendImagesPage() {
     }
   };
 
-  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const validateExamStructure = (exam) => {
+    if (!exam) {
+      return { valid: false, error: 'Simulado não encontrado' };
+    }
+    
+    if (!exam.questions || !Array.isArray(exam.questions) || exam.questions.length === 0) {
+      return { 
+        valid: false, 
+        error: `Simulado "${exam.title}" não possui questões. Verifique a estrutura do simulado.` 
+      };
+    }
+    
+    // Validar que todas as questões têm os campos necessários
+    const invalidQuestions = exam.questions.filter(q => 
+      !q.question || !q.options || !Array.isArray(q.options) || typeof q.correctAnswer !== 'number'
+    );
+    
+    if (invalidQuestions.length > 0) {
+      return { 
+        valid: false, 
+        error: `${invalidQuestions.length} questão(ões) do simulado estão incompletas` 
+      };
+    }
+    
+    return { valid: true };
+  };
+
+  const handleFileUpload = async (event) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
 
@@ -103,8 +159,17 @@ export function SendImagesPage() {
       return;
     }
 
-    if (!selectedStudent) {
+    if (uploadMode === 'individual' && !selectedStudent) {
       toast.error('Selecione um aluno');
+      return;
+    }
+
+    const selectedExamData = exams.find(e => e.id === selectedExam);
+    
+    // ✅ VALIDAÇÃO antes do upload
+    const validation = validateExamStructure(selectedExamData);
+    if (!validation.valid) {
+      toast.error(validation.error);
       return;
     }
 
@@ -112,70 +177,127 @@ export function SendImagesPage() {
     setUploadProgress(0);
 
     try {
-      const selectedExamData = exams.find(e => e.id === selectedExam);
-      const selectedStudentData = students.find(s => s.id === selectedStudent);
-      
-      if (!selectedExamData || !selectedStudentData) {
-        toast.error('Dados inválidos');
-        setIsUploading(false);
-        return;
-      }
+      if (uploadMode === 'batch') {
+        // Modo em lote
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setUploadProgress(((i + 1) / files.length) * 100);
 
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        setUploadProgress(((i + 1) / files.length) * 100);
+          const reader = new FileReader();
+          
+          await new Promise((resolve, reject) => {
+            reader.onload = async (e) => {
+              try {
+                const base64Data = e.target?.result;
+                
+                const imageData = {
+                  filename: file.name,
+                  examId: selectedExam,
+                  examTitle: selectedExamData.title,
+                  studentId: 'batch',
+                  studentName: 'Lote - Todos os Alunos',
+                  studentEmail: '',
+                  studentClass: selectedExamData.selectedClass || '',
+                  studentGrade: selectedExamData.grade || '',
+                  size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                  mimeType: file.type,
+                  data: base64Data,
+                  pages: 1,
+                  status: 'Aguardando Processamento',
+                  uploadedAt: new Date().toLocaleString('pt-BR'),
+                  isBatch: true,
+                  totalQuestions: selectedExamData.questions.length
+                };
 
-        const reader = new FileReader();
-        
-        await new Promise<void>((resolve, reject) => {
-          reader.onload = async (e) => {
-            try {
-              const base64Data = e.target?.result as string;
-              
-              const imageData = {
-                filename: file.name,
-                examId: selectedExam,
-                examTitle: selectedExamData.title,
-                studentId: selectedStudent,
-                studentName: selectedStudentData.name,
-                studentEmail: selectedStudentData.email || '',
-                studentClass: selectedStudentData.class || '',
-                studentGrade: selectedStudentData.grade || '',
-                size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
-                mimeType: file.type,
-                data: base64Data,
-                pages: 1,
-                status: 'Aguardando Processamento',
-                uploadedAt: new Date().toLocaleString('pt-BR')
-              };
-
-              console.log('📤 Uploading image:', imageData.filename);
-              const response = await apiService.uploadImage(imageData);
-              
-              if (response && !response.error) {
-                console.log('✅ Image uploaded successfully');
-                resolve();
-              } else {
-                throw new Error(response.error || 'Upload failed');
+                console.log('📤 Uploading batch image:', imageData.filename);
+                const response = await apiService.uploadImage(imageData);
+                
+                if (response && !response.error) {
+                  console.log('✅ Batch image uploaded successfully');
+                  resolve();
+                } else {
+                  throw new Error(response.error || 'Upload failed');
+                }
+              } catch (error) {
+                console.error('Error uploading file:', error);
+                toast.error(`Erro ao enviar ${file.name}`);
+                reject(error);
               }
-            } catch (error) {
-              console.error('Error uploading file:', error);
-              toast.error(`Erro ao enviar ${file.name}`);
-              reject(error);
-            }
-          };
-          
-          reader.onerror = () => {
-            reject(new Error('Failed to read file'));
-          };
-          
-          reader.readAsDataURL(file);
-        });
-      }
+            };
+            
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+          });
+        }
 
-      toast.success(`✅ ${files.length} arquivo(s) enviado(s) com sucesso!`);
-      setSelectedStudent('');
-      await loadData();
+        toast.success(`✅ ${files.length} arquivo(s) enviado(s) em modo lote!`);
+        await loadData();
+
+      } else {
+        // Modo individual
+        const selectedStudentData = students.find(s => s.id === selectedStudent);
+        
+        if (!selectedStudentData) {
+          toast.error('Aluno não encontrado');
+          setIsUploading(false);
+          return;
+        }
+
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          setUploadProgress(((i + 1) / files.length) * 100);
+
+          const reader = new FileReader();
+          
+          await new Promise((resolve, reject) => {
+            reader.onload = async (e) => {
+              try {
+                const base64Data = e.target?.result;
+                
+                const imageData = {
+                  filename: file.name,
+                  examId: selectedExam,
+                  examTitle: selectedExamData.title,
+                  studentId: selectedStudent,
+                  studentName: selectedStudentData.name,
+                  studentEmail: selectedStudentData.email || '',
+                  studentClass: selectedStudentData.class || '',
+                  studentGrade: selectedStudentData.grade || '',
+                  size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
+                  mimeType: file.type,
+                  data: base64Data,
+                  pages: 1,
+                  status: 'Aguardando Processamento',
+                  uploadedAt: new Date().toLocaleString('pt-BR'),
+                  isBatch: false,
+                  totalQuestions: selectedExamData.questions.length
+                };
+
+                console.log('📤 Uploading image:', imageData.filename);
+                const response = await apiService.uploadImage(imageData);
+                
+                if (response && !response.error) {
+                  console.log('✅ Image uploaded successfully');
+                  resolve();
+                } else {
+                  throw new Error(response.error || 'Upload failed');
+                }
+              } catch (error) {
+                console.error('Error uploading file:', error);
+                toast.error(`Erro ao enviar ${file.name}`);
+                reject(error);
+              }
+            };
+            
+            reader.onerror = () => reject(new Error('Failed to read file'));
+            reader.readAsDataURL(file);
+          });
+        }
+
+        toast.success(`✅ ${files.length} arquivo(s) enviado(s) com sucesso!`);
+        setSelectedStudent('');
+        await loadData();
+      }
 
     } catch (error) {
       console.error('Error in file upload:', error);
@@ -186,20 +308,171 @@ export function SendImagesPage() {
     }
   };
 
-  const handleProcessImage = async (image: any) => {
+  const handleProcessImage = async (image) => {
     const examData = exams.find(e => e.id === image.examId);
     
-    if (!examData || !examData.questions) {
-      toast.error('Simulado não encontrado ou sem questões');
+    // ✅ VALIDAÇÃO antes de processar
+    const validation = validateExamStructure(examData);
+    if (!validation.valid) {
+      toast.error(validation.error);
       return;
     }
 
     console.log('📋 Processing image for exam:', examData.title);
     console.log('📝 Total questions:', examData.questions.length);
 
-    setManualAnswers(new Array(examData.questions.length).fill(-1));
-    setSelectedImage(image);
-    setShowAnswerSheet(true);
+    if (image.isBatch) {
+      // Processamento em lote
+      const batchStudentsList = availableStudents.map(student => ({
+        ...image,
+        studentId: student.id,
+        studentName: student.name,
+        studentEmail: student.email,
+        studentClass: student.class,
+        studentGrade: student.grade
+      }));
+      
+      setBatchImages(batchStudentsList);
+      setManualAnswers(new Array(examData.questions.length).fill(-1));
+      setSelectedImage(image);
+      setCurrentBatchIndex(0);
+      setShowBatchProcessing(true);
+    } else {
+      // Processamento individual
+      setManualAnswers(new Array(examData.questions.length).fill(-1));
+      setSelectedImage(image);
+      setShowAnswerSheet(true);
+    }
+  };
+
+  const handleBatchCorrection = async () => {
+    if (!selectedImage || currentBatchIndex >= batchImages.length) return;
+
+    const currentStudent = batchImages[currentBatchIndex];
+    const examData = exams.find(e => e.id === selectedImage.examId);
+    
+    if (!examData) {
+      toast.error('Simulado não encontrado');
+      return;
+    }
+
+    const answeredCount = manualAnswers.filter(a => a >= 0).length;
+    if (answeredCount === 0) {
+      toast.error('Marque pelo menos uma resposta antes de continuar');
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      console.log(`🔄 Processing correction for student: ${currentStudent.studentName}`);
+      
+      let correctCount = 0;
+      const results = examData.questions.map((question, index) => {
+        const studentAnswer = manualAnswers[index];
+        const isCorrect = studentAnswer === question.correctAnswer;
+        if (isCorrect) correctCount++;
+        
+        return {
+          question: question.question,
+          subject: question.subject,
+          studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não respondida',
+          correctAnswer: String.fromCharCode(65 + question.correctAnswer),
+          isCorrect
+        };
+      });
+
+      const score = Math.round((correctCount / examData.questions.length) * 100);
+
+      const subjectPerformances = {};
+      examData.questions.forEach((question, index) => {
+        const subject = question.subject || 'Geral';
+        if (!subjectPerformances[subject]) {
+          subjectPerformances[subject] = { total: 0, correct: 0 };
+        }
+        subjectPerformances[subject].total++;
+        if (manualAnswers[index] === question.correctAnswer) {
+          subjectPerformances[subject].correct++;
+        }
+      });
+
+      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
+        subject,
+        totalQuestions: data.total,
+        correctAnswers: data.correct,
+        percentage: Math.round((data.correct / data.total) * 100)
+      }));
+
+      const submissionData = {
+        examId: selectedImage.examId,
+        examTitle: examData.title,
+        studentId: currentStudent.studentId,
+        studentName: currentStudent.studentName,
+        studentEmail: currentStudent.studentEmail,
+        studentClass: currentStudent.studentClass,
+        studentGrade: currentStudent.studentGrade || examData.grade || 'Ensino Médio',
+        answers: manualAnswers,
+        correctAnswers: examData.questions.map((q) => q.correctAnswer),
+        score: correctCount,
+        totalQuestions: examData.questions.length,
+        percentage: score,
+        subjectPerformances: subjectPerformanceArray,
+        timeSpent: 0,
+        results,
+        submittedAt: new Date().toISOString(),
+        gradingStatus: 'graded',
+        correctionType: 'manual-image-batch',
+        questionWeights: examData.questions.map((q, idx) => ({
+          questionIndex: idx,
+          weight: q.weight || 1,
+          subject: q.subject || 'Geral'
+        }))
+      };
+
+      console.log('📤 Creating submission via API:', submissionData);
+      const submissionResponse = await apiService.createSubmission(submissionData);
+      
+      if (submissionResponse && !submissionResponse.error) {
+        console.log(`✅ Submission created for ${currentStudent.studentName}`);
+        
+        toast.success(
+          `✅ ${currentStudent.studentName}: ${score}% (${correctCount}/${examData.questions.length})`,
+          { duration: 3000 }
+        );
+
+        // Próximo aluno ou finalizar
+        if (currentBatchIndex === batchImages.length - 1) {
+          // Último aluno - atualizar status da imagem
+          await apiService.updateImageStatus(selectedImage.id, {
+            status: 'Processada',
+            score: 0,
+            processedAt: new Date().toLocaleString('pt-BR')
+          });
+
+          toast.success(
+            `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.`,
+            { duration: 5000 }
+          );
+          
+          setShowBatchProcessing(false);
+          setBatchImages([]);
+          setSelectedImage(null);
+          setCurrentBatchIndex(0);
+          await loadData();
+        } else {
+          // Próximo aluno
+          setCurrentBatchIndex(prev => prev + 1);
+          setManualAnswers(new Array(examData.questions.length).fill(-1));
+        }
+      } else {
+        throw new Error(submissionResponse.error || 'Falha ao criar submissão');
+      }
+    } catch (error) {
+      console.error('❌ Error processing correction:', error);
+      toast.error('Erro ao processar: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleManualCorrection = async () => {
@@ -223,7 +496,7 @@ export function SendImagesPage() {
       console.log('🔄 Starting manual correction process...');
       
       let correctCount = 0;
-      const results = examData.questions.map((question: any, index: number) => {
+      const results = examData.questions.map((question, index) => {
         const studentAnswer = manualAnswers[index];
         const isCorrect = studentAnswer === question.correctAnswer;
         if (isCorrect) correctCount++;
@@ -241,8 +514,8 @@ export function SendImagesPage() {
 
       console.log(`📊 Score calculated: ${correctCount}/${examData.questions.length} (${score}%)`);
 
-      const subjectPerformances: any = {};
-      examData.questions.forEach((question: any, index: number) => {
+      const subjectPerformances = {};
+      examData.questions.forEach((question, index) => {
         const subject = question.subject || 'Geral';
         if (!subjectPerformances[subject]) {
           subjectPerformances[subject] = { total: 0, correct: 0 };
@@ -253,14 +526,12 @@ export function SendImagesPage() {
         }
       });
 
-      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]: any) => ({
+      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
         subject,
         totalQuestions: data.total,
         correctAnswers: data.correct,
         percentage: Math.round((data.correct / data.total) * 100)
       }));
-
-      console.log('📈 Subject performances:', subjectPerformanceArray);
 
       const submissionData = {
         examId: selectedImage.examId,
@@ -271,7 +542,7 @@ export function SendImagesPage() {
         studentClass: selectedImage.studentClass,
         studentGrade: selectedImage.studentGrade || examData.grade || 'Ensino Médio',
         answers: manualAnswers,
-        correctAnswers: examData.questions.map((q: any) => q.correctAnswer),
+        correctAnswers: examData.questions.map((q) => q.correctAnswer),
         score: correctCount,
         totalQuestions: examData.questions.length,
         percentage: score,
@@ -281,15 +552,14 @@ export function SendImagesPage() {
         submittedAt: new Date().toISOString(),
         gradingStatus: 'graded',
         correctionType: 'manual-image',
-        questionWeights: examData.questions.map((q: any, idx: number) => ({
+        questionWeights: examData.questions.map((q, idx) => ({
           questionIndex: idx,
           weight: q.weight || 1,
           subject: q.subject || 'Geral'
         }))
       };
 
-      console.log('📤 Creating submission:', submissionData);
-
+      console.log('📤 Creating submission via API:', submissionData);
       const submissionResponse = await apiService.createSubmission(submissionData);
       
       if (submissionResponse && !submissionResponse.error) {
@@ -312,7 +582,7 @@ export function SendImagesPage() {
       } else {
         throw new Error(submissionResponse.error || 'Falha ao criar submissão');
       }
-    } catch (error: any) {
+    } catch (error) {
       console.error('❌ Error processing correction:', error);
       toast.error('Erro ao processar correção: ' + (error.message || 'Erro desconhecido'));
     } finally {
@@ -320,7 +590,7 @@ export function SendImagesPage() {
     }
   };
 
-  const handleDeleteImage = async (imageId: string) => {
+  const handleDeleteImage = async (imageId) => {
     if (!confirm('Tem certeza que deseja excluir esta imagem?')) {
       return;
     }
@@ -338,7 +608,7 @@ export function SendImagesPage() {
     }
   };
 
-  const getStatusColor = (status: string) => {
+  const getStatusColor = (status) => {
     switch (status) {
       case 'Processada': return 'bg-green-100 text-green-800';
       case 'Processando': return 'bg-yellow-100 text-yellow-800';
@@ -348,7 +618,7 @@ export function SendImagesPage() {
     }
   };
 
-  const getStatusIcon = (status: string) => {
+  const getStatusIcon = (status) => {
     switch (status) {
       case 'Processada': return <CheckCircle className="w-4 h-4 text-green-600" />;
       case 'Processando': return <Clock className="w-4 h-4 text-yellow-600" />;
@@ -376,6 +646,23 @@ export function SendImagesPage() {
         <p className="text-slate-600">Envie imagens de cartões resposta e selecione as respostas marcadas pelo aluno</p>
       </div>
 
+      {exams.length === 0 && (
+        <Card className="border-orange-200 bg-orange-50">
+          <CardContent className="p-6">
+            <div className="flex items-start space-x-3">
+              <AlertTriangle className="w-6 h-6 text-orange-600 mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-semibold text-orange-900 mb-2">Nenhum simulado válido disponível</p>
+                <p className="text-sm text-orange-800">
+                  Para usar esta funcionalidade, você precisa primeiro criar um simulado com questões.
+                  Vá para "Criar Simulado" e configure pelo menos uma seção com questões.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
       <Card className="border-2">
         <CardHeader>
           <CardTitle className="flex items-center">
@@ -385,6 +672,36 @@ export function SendImagesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Modo de Upload *
+              </label>
+              <Select value={uploadMode} onValueChange={(value) => setUploadMode(value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="batch">
+                    <div className="flex items-center">
+                      <Users className="w-4 h-4 mr-2" />
+                      Lote - Todos os Alunos da Turma
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="individual">
+                    <div className="flex items-center">
+                      <User className="w-4 h-4 mr-2" />
+                      Individual - Um Aluno Específico
+                    </div>
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-slate-500 mt-1">
+                {uploadMode === 'batch' 
+                  ? 'Um arquivo com cartões de todos os alunos' 
+                  : 'Um arquivo por aluno específico'}
+              </p>
+            </div>
+
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Selecione o Simulado *
@@ -413,7 +730,9 @@ export function SendImagesPage() {
                 </p>
               )}
             </div>
+          </div>
 
+          {uploadMode === 'individual' && (
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Selecione o Aluno *
@@ -456,7 +775,24 @@ export function SendImagesPage() {
                 </p>
               )}
             </div>
-          </div>
+          )}
+
+          {uploadMode === 'batch' && selectedExam && (
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="p-4">
+                <div className="flex items-start space-x-3">
+                  <Users className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-blue-900">Modo de Lote Ativado</p>
+                    <p className="text-sm text-blue-800 mt-1">
+                      O arquivo será processado para todos os {availableStudents.length} alunos da turma.
+                      Você preencherá as respostas de cada aluno sequencialmente após o upload.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
 
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors">
             <div className="space-y-4">
@@ -486,12 +822,12 @@ export function SendImagesPage() {
                   accept="image/*,.pdf"
                   onChange={handleFileUpload}
                   className="hidden"
-                  disabled={!selectedExam || !selectedStudent}
+                  disabled={!selectedExam || (uploadMode === 'individual' && !selectedStudent)}
                 />
                 <label
                   htmlFor="file-upload"
                   className={`inline-flex items-center px-4 py-2 rounded-lg font-medium cursor-pointer ${
-                    selectedExam && selectedStudent
+                    selectedExam && (uploadMode === 'batch' || selectedStudent)
                       ? 'bg-blue-600 text-white hover:bg-blue-700' 
                       : 'bg-slate-300 text-slate-500 cursor-not-allowed'
                   }`}
@@ -519,8 +855,8 @@ export function SendImagesPage() {
                 Como funciona a correção:
               </h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• Selecione o simulado e o aluno da turma correspondente</li>
-                <li>• Faça upload da foto do cartão resposta preenchido</li>
+                <li>• <strong>Modo Lote:</strong> Envie um arquivo com cartões de todos os alunos e corrija sequencialmente</li>
+                <li>• <strong>Modo Individual:</strong> Envie um arquivo para cada aluno específico</li>
                 <li>• Clique em "Processar" e marque as respostas que o aluno preencheu</li>
                 <li>• O sistema calculará automaticamente a nota comparando com o gabarito</li>
                 <li>• O resultado ficará disponível em "Correção de Simulados"</li>
@@ -611,12 +947,22 @@ export function SendImagesPage() {
                   <div className="flex items-center justify-between">
                     <div className="flex items-center space-x-4 flex-1">
                       <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <ImageIcon className="w-6 h-6 text-slate-600" />
+                        {image.isBatch ? (
+                          <Users className="w-6 h-6 text-slate-600" />
+                        ) : (
+                          <ImageIcon className="w-6 h-6 text-slate-600" />
+                        )}
                       </div>
                       
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-1">
                           <p className="font-medium text-slate-800">{image.studentName}</p>
+                          {image.isBatch && (
+                            <Badge className="bg-purple-100 text-purple-800">
+                              <Users className="w-3 h-3 mr-1" />
+                              Lote
+                            </Badge>
+                          )}
                           <Badge className={getStatusColor(image.status)}>
                             {image.status}
                           </Badge>
@@ -685,13 +1031,14 @@ export function SendImagesPage() {
               <ImageIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <h3 className="font-medium text-slate-800 mb-2">Nenhum cartão resposta enviado</h3>
               <p className="text-slate-500">
-                Comece selecionando um simulado, um aluno e enviando as imagens dos cartões
+                Comece selecionando um simulado e o modo de upload (lote ou individual)
               </p>
             </div>
           )}
         </CardContent>
       </Card>
 
+      {/* Dialog para correção individual */}
       <Dialog open={showAnswerSheet} onOpenChange={setShowAnswerSheet}>
         <DialogContent className="max-w-4xl max-h-[80vh]">
           <DialogHeader>
@@ -725,7 +1072,7 @@ export function SendImagesPage() {
 
             <ScrollArea className="h-[400px] pr-4">
               <div className="space-y-4">
-                {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question: any, index: number) => (
+                {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
                   <Card key={index} className="border-2">
                     <CardContent className="p-4">
                       <div className="mb-3">
@@ -745,7 +1092,7 @@ export function SendImagesPage() {
                           Selecione a resposta do aluno:
                         </p>
                         <div className="grid grid-cols-2 gap-2">
-                          {question.options.map((option: string, optIdx: number) => {
+                          {question.options.map((option, optIdx) => {
                             const isCorrect = optIdx === question.correctAnswer;
                             const isSelected = manualAnswers[index] === optIdx;
                             
@@ -832,6 +1179,186 @@ export function SendImagesPage() {
                   <>
                     <CheckCircle className="w-4 h-4 mr-2" />
                     Finalizar Correção
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para correção em lote */}
+      <Dialog open={showBatchProcessing} onOpenChange={setShowBatchProcessing}>
+        <DialogContent className="max-w-4xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center justify-between">
+              <span>Correção em Lote - Aluno {currentBatchIndex + 1} de {batchImages.length}</span>
+              <Badge className="bg-purple-100 text-purple-800">
+                {exams.find(e => e.id === selectedImage?.examId)?.title}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              Corrigindo: <strong>{batchImages[currentBatchIndex]?.studentName}</strong>
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4">
+            <Card className="border-purple-200 bg-purple-50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-3">
+                    <Users className="w-5 h-5 text-purple-600" />
+                    <div>
+                      <p className="font-medium text-purple-900">Progresso do Lote</p>
+                      <p className="text-sm text-purple-800">
+                        {currentBatchIndex} de {batchImages.length} alunos corrigidos
+                      </p>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-purple-900">
+                      {Math.round((currentBatchIndex / batchImages.length) * 100)}%
+                    </p>
+                  </div>
+                </div>
+                <Progress 
+                  value={(currentBatchIndex / batchImages.length) * 100} 
+                  className="mt-3"
+                />
+              </CardContent>
+            </Card>
+
+            <Card className="border-orange-200 bg-orange-50">
+              <CardContent className="p-4">
+                <div className="flex items-start space-x-3">
+                  <AlertCircle className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="font-medium text-orange-900">Instruções</p>
+                    <p className="text-sm text-orange-800 mt-1">
+                      Marque as respostas do aluno <strong>{batchImages[currentBatchIndex]?.studentName}</strong> no cartão resposta.
+                      Após finalizar, você será direcionado para o próximo aluno automaticamente.
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <ScrollArea className="h-[350px] pr-4">
+              <div className="space-y-4">
+                {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
+                  <Card key={index} className="border-2">
+                    <CardContent className="p-4">
+                      <div className="mb-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-semibold text-slate-800">
+                            Questão {index + 1}
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {question.subject}
+                          </Badge>
+                        </div>
+                        <p className="text-sm text-slate-700">{question.question}</p>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-slate-600 mb-2">
+                          Selecione a resposta do aluno:
+                        </p>
+                        <div className="grid grid-cols-2 gap-2">
+                          {question.options.map((option, optIdx) => {
+                            const isCorrect = optIdx === question.correctAnswer;
+                            const isSelected = manualAnswers[index] === optIdx;
+                            
+                            return (
+                              <button
+                                key={optIdx}
+                                onClick={() => {
+                                  const newAnswers = [...manualAnswers];
+                                  newAnswers[index] = isSelected ? -1 : optIdx;
+                                  setManualAnswers(newAnswers);
+                                }}
+                                className={`text-left p-2 rounded text-sm border transition-all ${
+                                  isSelected
+                                    ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
+                                    : isCorrect
+                                      ? 'border-green-300 bg-green-50'
+                                      : 'border-slate-200 bg-slate-50'
+                                } hover:border-slate-400`}
+                              >
+                                <span className="font-semibold">{String.fromCharCode(65 + optIdx)}) </span>
+                                {option}
+                                {isCorrect && (
+                                  <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
+                                    ✓ Gabarito
+                                  </Badge>
+                                )}
+                                {isSelected && (
+                                  <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
+                                    Marcada
+                                  </Badge>
+                                )}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </ScrollArea>
+
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium text-blue-900">Progresso desta Correção</p>
+                    <p className="text-sm text-blue-800 mt-1">
+                      {manualAnswers.filter(a => a >= 0).length} de {manualAnswers.length} questões marcadas
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-2xl font-bold text-blue-900">
+                      {Math.round((manualAnswers.filter(a => a >= 0).length / manualAnswers.length) * 100)}%
+                    </p>
+                    <p className="text-xs text-blue-700">Completo</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <div className="flex justify-between items-center pt-4 border-t">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowBatchProcessing(false);
+                  setBatchImages([]);
+                  setSelectedImage(null);
+                  setCurrentBatchIndex(0);
+                }}
+                disabled={isProcessing}
+              >
+                Cancelar Lote
+              </Button>
+              <Button 
+                onClick={handleBatchCorrection}
+                disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processando...
+                  </>
+                ) : currentBatchIndex === batchImages.length - 1 ? (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Finalizar Último Aluno
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle className="w-4 h-4 mr-2" />
+                    Próximo Aluno ({currentBatchIndex + 2}/{batchImages.length})
                   </>
                 )}
               </Button>
