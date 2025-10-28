@@ -65,22 +65,34 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       setLoading(true);
       console.log('=== ManageExamsPage: Loading data ===');
       
-      const [examsResponse, submissionsResponse, studentsResponse, classesResponse] = await Promise.all([
+      const [examsResponse, submissionsResponse, studentsResponse] = await Promise.all([
         apiService.getExams(),
         apiService.getSubmissions(),
-        apiService.getStudents(),
-        apiService.getClasses()
+        apiService.getStudents()
       ]);
       
       console.log('ManageExamsPage: Exams response:', examsResponse);
       console.log('ManageExamsPage: Submissions response:', submissionsResponse);
       console.log('ManageExamsPage: Students response:', studentsResponse);
-      console.log('ManageExamsPage: Classes response:', classesResponse);
       
       let examsList = examsResponse?.exams || [];
       const submissionsList = submissionsResponse?.submissions || [];
       const studentsList = studentsResponse?.students || [];
-      const classesList = classesResponse?.classes || [];
+      
+      // Extrair turmas únicas dos alunos
+      const uniqueClassNames = Array.from(new Set(
+        studentsList
+          .map(s => s.class)
+          .filter(Boolean)
+      )).sort();
+      
+      const classesList = uniqueClassNames.map(className => ({
+        id: className,
+        name: className,
+        studentsCount: studentsList.filter(s => s.class === className).length
+      }));
+      
+      console.log('ManageExamsPage: Classes extracted from students:', classesList);
       
       // Carregar questões completas para cada exame
       console.log('🔄 Carregando questões completas para cada simulado...');
@@ -796,17 +808,6 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             <BookOpen className="h-5 w-5 text-blue-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-slate-800">{exams.length}</div>
-            <p className="text-xs text-slate-500 mt-1">Simulados criados</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium text-slate-600">Questões</CardTitle>
-            <Target className="h-5 w-5 text-green-600" />
-          </CardHeader>
-          <CardContent>
             <div className="text-3xl font-bold text-slate-800">{totalQuestions}</div>
             <p className="text-xs text-slate-500 mt-1">Total de questões</p>
           </CardContent>
@@ -1209,7 +1210,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                 <SelectContent>
                   {classes.length === 0 ? (
                     <div className="p-4 text-center text-sm text-slate-500">
-                      Nenhuma turma cadastrada
+                      Nenhuma turma encontrada. Importe alunos primeiro.
                     </div>
                   ) : (
                     classes.map((cls) => {
@@ -1249,8 +1250,9 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Você precisa cadastrar turmas antes de atribuí-las aos simulados.
-                  Vá para a seção de Turmas para criar sua primeira turma.
+                  Nenhuma turma encontrada. Para criar turmas, importe alunos na seção 
+                  <strong> Gerenciar Alunos</strong>. As turmas serão criadas automaticamente 
+                  com base na coluna "TURMA" do arquivo importado.
                 </AlertDescription>
               </Alert>
             )}
