@@ -15,7 +15,7 @@ import { Checkbox } from '../ui/checkbox';
 import { 
   CheckCircle, Clock, Search, Eye, Download, FileText, Target, TrendingUp, Award, XCircle, AlertCircle,
   Loader2, RefreshCw, GraduationCap, Star, Save, X, PieChart, Clipboard, Send, Image as ImageIcon, ZoomIn, UserX,
-  Camera, Scan, FileSpreadsheet
+  Camera, Scan, FileSpreadsheet, Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -40,6 +40,7 @@ export function GradeExamsPage() {
   const [answerSheetImages, setAnswerSheetImages] = useState([]);
   const [selectedImagePreview, setSelectedImagePreview] = useState(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
+  const [deletingSubmission, setDeletingSubmission] = useState(null);
 
   useEffect(() => {
     loadDataProgressively();
@@ -411,12 +412,12 @@ export function GradeExamsPage() {
     
     let filename;
     if (type === 'all') {
-      filename = `Relatorio_Geral_${timestamp}.csv`;
+      filename = `Relatorio_Geral_${timestamp}`;
     } else if (type === 'subject' && subject) {
-      filename = `${subject.replace(/\s/g, '_')}_${timestamp}.csv`;
+      filename = `${subject.replace(/\s/g, '_')}_${timestamp}`;
     }
     
-    downloadExcel(content, filename);
+    downloadExcel(content, filename, 'xlsx');
   };
 
   const getPerformanceBadge = (percentage, status) => {
@@ -621,6 +622,94 @@ export function GradeExamsPage() {
     }
   };
 
+  const handleDeleteSubmission = async (submissionId, studentName) => {
+    if (!window.confirm(`Tem certeza que deseja excluir a submissão de ${studentName}?\n\nEsta ação não pode ser desfeita.`)) {
+      return;
+    }
+
+    try {
+      setDeletingSubmission(submissionId);
+      console.log('🗑️ Deleting submission:', submissionId);
+      
+      const response = await apiService.deleteSubmission(submissionId);
+      
+      if (response && response.success) {
+        console.log('✅ Submission deleted successfully');
+        
+        // Remover da lista local
+        setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
+        
+        toast.success(`✅ Submissão de ${studentName} excluída com sucesso!`);
+      } else {
+        throw new Error(response?.error || 'Falha ao excluir submissão');
+      }
+    } catch (error) {
+      console.error('❌ Error deleting submission:', error);
+      toast.error('Erro ao excluir submissão: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setDeletingSubmission(null);
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedSubmissions.length === 0) {
+      toast.error('Selecione pelo menos uma submissão para excluir');
+      return;
+    }
+
+    const submissionsToDelete = submissions.filter(s => selectedSubmissions.includes(s.id));
+    const realSubmissions = submissionsToDelete.filter(s => s.gradingStatus !== 'not_submitted');
+    
+    if (realSubmissions.length === 0) {
+      toast.error('Não é possível excluir submissões "Não Realizadas"');
+      return;
+    }
+
+    if (!window.confirm(
+      `Tem certeza que deseja excluir ${realSubmissions.length} submissão(ões)?\n\n` +
+      `Alunos:\n${realSubmissions.map(s => `• ${s.studentName}`).join('\n')}\n\n` +
+      `Esta ação não pode ser desfeita.`
+    )) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      let successCount = 0;
+      let errorCount = 0;
+
+      for (const submission of realSubmissions) {
+        try {
+          const response = await apiService.deleteSubmission(submission.id);
+          if (response && response.success) {
+            successCount++;
+            setSubmissions(prev => prev.filter(sub => sub.id !== submission.id));
+          } else {
+            errorCount++;
+          }
+        } catch (error) {
+          console.error(`Error deleting submission ${submission.id}:`, error);
+          errorCount++;
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`✅ ${successCount} submissão(ões) excluída(s) com sucesso!`);
+      }
+      
+      if (errorCount > 0) {
+        toast.error(`❌ Erro ao excluir ${errorCount} submissão(ões)`);
+      }
+
+      setSelectedSubmissions([]);
+    } catch (error) {
+      console.error('Error in bulk delete:', error);
+      toast.error('Erro ao excluir submissões');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredSubmissions = submissions.filter(submission => {
     const matchesSearch = submission.studentName.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          submission.examTitle.toLowerCase().includes(searchTerm.toLowerCase());
@@ -684,6 +773,16 @@ export function GradeExamsPage() {
             <FileSpreadsheet className="w-4 h-4 mr-2" />
             Exportar Excel
           </Button>
+          {selectedSubmissions.length > 0 && (
+            <Button 
+              variant="destructive" 
+              onClick={handleBulkDelete}
+              disabled={loading}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              Excluir ({selectedSubmissions.length})
+            </Button>
+          )}
         </div>
       </div>
 
@@ -908,11 +1007,20 @@ export function GradeExamsPage() {
                   <div className="flex space-x-2">
                     <Button variant="outline" size="sm" onClick={handleBulkExport}>
                       <Download className="w-4 h-4 mr-1" />
-                      Exportar
+                      Exportar JSON
+                    </Button>
+                    <Button 
+                      variant="destructive" 
+                      size="sm" 
+                      onClick={handleBulkDelete}
+                      disabled={loading}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" />
+                      Excluir Selecionados
                     </Button>
                     <Button variant="outline" size="sm" onClick={clearAllSubmissions}>
                       <X className="w-4 h-4 mr-1" />
-                      Limpar
+                      Limpar Seleção
                     </Button>
                   </div>
                 </div>
@@ -965,6 +1073,7 @@ export function GradeExamsPage() {
                               onCheckedChange={(checked) => 
                                 handleSelectSubmission(submission.id, checked)
                               }
+                              disabled={submission.gradingStatus === 'not_submitted'}
                             />
                           </TableCell>
                           <TableCell>
@@ -1013,9 +1122,28 @@ export function GradeExamsPage() {
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
-                              <Button variant="outline" size="sm" onClick={() => handleExportIndividual(submission)}>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => handleExportIndividual(submission)}
+                              >
                                 <Download className="w-4 h-4" />
                               </Button>
+                              {submission.gradingStatus !== 'not_submitted' && (
+                                <Button 
+                                  variant="ghost" 
+                                  size="sm"
+                                  onClick={() => handleDeleteSubmission(submission.id, submission.studentName)}
+                                  disabled={deletingSubmission === submission.id}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                                >
+                                  {deletingSubmission === submission.id ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-4 h-4" />
+                                  )}
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -1063,9 +1191,9 @@ export function GradeExamsPage() {
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h4 className="font-medium text-green-900">Relatório Geral</h4>
+                    <h4 className="font-medium text-green-900">Relatório Geral (XLSX)</h4>
                     <p className="text-sm text-green-800 mt-1">
-                      Inclui todas as matérias com detalhamento completo
+                      Inclui todas as matérias com detalhamento completo em formato Excel
                     </p>
                   </div>
                   <Button 
@@ -1076,7 +1204,7 @@ export function GradeExamsPage() {
                     className="bg-green-600 hover:bg-green-700"
                   >
                     <Download className="w-4 h-4 mr-2" />
-                    Exportar
+                    Exportar XLSX
                   </Button>
                 </div>
               </CardContent>
@@ -1085,22 +1213,38 @@ export function GradeExamsPage() {
             <Separator />
 
             <div>
-              <h4 className="font-medium text-slate-900 mb-3">Exportar por Matéria</h4>
+              <h4 className="font-medium text-slate-900 mb-3">Exportar por Matéria (XLSX)</h4>
+              <p className="text-sm text-slate-600 mb-3">Clique em qualquer matéria para exportar apenas ela</p>
               <div className="grid grid-cols-2 gap-3">
                 {getUniqueSubjects(filteredSubmissions).map(subject => (
-                  <Card key={subject} className="border-2 hover:border-blue-300 transition-colors">
+                  <Card key={subject} className="border-2 hover:border-blue-300 transition-colors cursor-pointer"
+                    onClick={() => {
+                      handleExportExcel('subject', subject);
+                      setShowExportDialog(false);
+                    }}
+                  >
                     <CardContent className="p-4">
                       <div className="flex items-center justify-between">
-                        <span className="font-medium text-sm">{subject}</span>
+                        <div className="flex-1">
+                          <span className="font-medium text-sm">{subject}</span>
+                          <p className="text-xs text-slate-500 mt-1">
+                            {filteredSubmissions.filter(s => 
+                              s.gradingStatus !== 'not_submitted' && 
+                              s.subjectPerformances.some(p => p.subject === subject)
+                            ).length} alunos
+                          </p>
+                        </div>
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => {
+                          onClick={(e) => {
+                            e.stopPropagation();
                             handleExportExcel('subject', subject);
                             setShowExportDialog(false);
                           }}
                         >
-                          <Download className="w-3 h-3" />
+                          <Download className="w-3 h-3 mr-1" />
+                          XLSX
                         </Button>
                       </div>
                     </CardContent>
@@ -1144,13 +1288,13 @@ export function GradeExamsPage() {
                     const content = generateExcelExport([selectedSubmission], 'all');
                     if (content) {
                       const timestamp = new Date().toISOString().split('T')[0];
-                      const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${timestamp}.csv`;
-                      downloadExcel(content, filename);
+                      const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Completo_${timestamp}`;
+                      downloadExcel(content, filename, 'xlsx');
                     }
                   }}
                 >
                   <FileSpreadsheet className="w-4 h-4 mr-2" />
-                  Exportar Excel
+                  Exportar Completo (XLSX)
                 </Button>
               </DialogTitle>
               <DialogDescription>{selectedSubmission.examTitle}</DialogDescription>
@@ -1214,39 +1358,41 @@ export function GradeExamsPage() {
                             const content = generateExcelExport([selectedSubmission], 'all');
                             if (content) {
                               const timestamp = new Date().toISOString().split('T')[0];
-                              const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Todas_Materias_${timestamp}.csv`;
-                              downloadExcel(content, filename);
+                              const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Geral_${timestamp}`;
+                              downloadExcel(content, filename, 'xlsx');
                             }
                           }}
                         >
-                          <Download className="w-3 h-3 mr-1" />
-                          Exportar Todas
+                          <FileSpreadsheet className="w-3 h-3 mr-1" />
+                          Exportar Geral (XLSX)
                         </Button>
                       </div>
                     </div>
                     <div className="grid grid-cols-3 gap-4">
                       {selectedSubmission.subjectPerformances.map((subject) => (
                         <Card key={subject.subject} className="p-4 hover:shadow-md transition-shadow">
-                          <div className="flex items-center justify-between mb-2">
-                            <h4 className="font-medium">{subject.subject}</h4>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => {
-                                const content = generateExcelExport([selectedSubmission], 'subject', subject.subject);
-                                if (content) {
-                                  const timestamp = new Date().toISOString().split('T')[0];
-                                  const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${subject.subject.replace(/\s/g, '_')}_${timestamp}.csv`;
-                                  downloadExcel(content, filename);
-                                }
-                              }}
-                            >
-                              <Download className="w-3 h-3" />
-                            </Button>
+                          <div className="flex flex-col space-y-2">
+                            <div className="flex items-center justify-between">
+                              <h4 className="font-medium text-sm">{subject.subject}</h4>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  const content = generateExcelExport([selectedSubmission], 'subject', subject.subject);
+                                  if (content) {
+                                    const timestamp = new Date().toISOString().split('T')[0];
+                                    const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${subject.subject.replace(/\s/g, '_')}_${timestamp}`;
+                                    downloadExcel(content, filename, 'xlsx');
+                                  }
+                                }}
+                              >
+                                <Download className="w-3 h-3" />
+                              </Button>
+                            </div>
+                            <Badge variant="outline" className="text-xs">{subject.correctAnswers}/{subject.totalQuestions} acertos</Badge>
+                            <Progress value={subject.percentage} className="h-2" />
+                            <p className="text-sm font-semibold text-center">{subject.percentage}%</p>
                           </div>
-                          <Badge variant="outline" className="mb-2">{subject.correctAnswers}/{subject.totalQuestions}</Badge>
-                          <Progress value={subject.percentage} className="h-2" />
-                          <p className="text-sm text-muted-foreground mt-1">{subject.percentage}%</p>
                         </Card>
                       ))}
                     </div>
@@ -1356,10 +1502,34 @@ export function GradeExamsPage() {
 
                   <div className="flex justify-end space-x-2">
                     <Button variant="outline" onClick={() => setSelectedSubmission(null)}>Fechar</Button>
-                    <Button onClick={handleSaveReview} disabled={reviewing}>
-                      {reviewing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
-                      Salvar Revisão
-                    </Button>
+                    {selectedSubmission.gradingStatus !== 'not_submitted' && (
+                      <>
+                        <Button 
+                          variant="destructive" 
+                          onClick={() => {
+                            handleDeleteSubmission(selectedSubmission.id, selectedSubmission.studentName);
+                            setSelectedSubmission(null);
+                          }}
+                          disabled={deletingSubmission === selectedSubmission.id}
+                        >
+                          {deletingSubmission === selectedSubmission.id ? (
+                            <>
+                              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                              Excluindo...
+                            </>
+                          ) : (
+                            <>
+                              <Trash2 className="w-4 h-4 mr-2" />
+                              Excluir Submissão
+                            </>
+                          )}
+                        </Button>
+                        <Button onClick={handleSaveReview} disabled={reviewing}>
+                          {reviewing ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
+                          Salvar Revisão
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </>
               )}
