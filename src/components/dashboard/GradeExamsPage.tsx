@@ -324,26 +324,64 @@ export function GradeExamsPage() {
       return csv;
     } else if (type === 'subject' && subject) {
       // Planilha específica de matéria
+      if (!bySubject[subject]) {
+        toast.error(`Matéria "${subject}" não encontrada`);
+        return null;
+      }
       return generateCSV(bySubject[subject] || [], subject);
     }
     
     return null;
   };
 
-  const downloadExcel = (content, filename) => {
+  const downloadExcel = (content, filename, format = 'csv') => {
     if (!content) return;
     
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    let blob, extension;
+    
+    if (format === 'xlsx') {
+      // Converter CSV para formato Excel-friendly
+      const rows = content.split('\n').map(row => row.split(','));
+      
+      // Criar HTML table para Excel
+      let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
+      html += '<head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
+      html += '<x:Name>Relatório</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>';
+      html += '</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body><table>';
+      
+      rows.forEach(row => {
+        html += '<tr>';
+        row.forEach(cell => {
+          html += `<td>${cell.replace(/"/g, '')}</td>`;
+        });
+        html += '</tr>';
+      });
+      
+      html += '</table></body></html>';
+      
+      blob = new Blob(['\ufeff', html], { 
+        type: 'application/vnd.ms-excel;charset=utf-8;' 
+      });
+      extension = '.xls';
+    } else {
+      blob = new Blob(['\ufeff', content], { 
+        type: 'text/csv;charset=utf-8;' 
+      });
+      extension = '.csv';
+    }
+    
+    const filenameWithExt = filename.replace(/\.(csv|xls|xlsx)$/i, '') + extension;
+    
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', filename);
+    link.setAttribute('download', filenameWithExt);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     
-    toast.success(`✅ Planilha exportada: ${filename}`);
+    toast.success(`✅ Planilha exportada: ${filenameWithExt}`);
   };
 
   const getUniqueSubjects = (submissionsList) => {
@@ -1094,9 +1132,26 @@ export function GradeExamsPage() {
         <Dialog open={!!selectedSubmission} onOpenChange={() => setSelectedSubmission(null)}>
           <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                {selectedSubmission.studentName}
-                {getCorrectionTypeBadge(selectedSubmission.correctionType)}
+              <DialogTitle className="flex items-center gap-2 justify-between">
+                <div className="flex items-center gap-2">
+                  {selectedSubmission.studentName}
+                  {getCorrectionTypeBadge(selectedSubmission.correctionType)}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const content = generateExcelExport([selectedSubmission], 'all');
+                    if (content) {
+                      const timestamp = new Date().toISOString().split('T')[0];
+                      const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${timestamp}.csv`;
+                      downloadExcel(content, filename);
+                    }
+                  }}
+                >
+                  <FileSpreadsheet className="w-4 h-4 mr-2" />
+                  Exportar Excel
+                </Button>
               </DialogTitle>
               <DialogDescription>{selectedSubmission.examTitle}</DialogDescription>
             </DialogHeader>
@@ -1149,14 +1204,47 @@ export function GradeExamsPage() {
                   <Separator />
 
                   <div>
-                    <Label className="mb-3 block">Performance por Matéria</Label>
+                    <div className="flex items-center justify-between mb-3">
+                      <Label>Performance por Matéria</Label>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            const content = generateExcelExport([selectedSubmission], 'all');
+                            if (content) {
+                              const timestamp = new Date().toISOString().split('T')[0];
+                              const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Todas_Materias_${timestamp}.csv`;
+                              downloadExcel(content, filename);
+                            }
+                          }}
+                        >
+                          <Download className="w-3 h-3 mr-1" />
+                          Exportar Todas
+                        </Button>
+                      </div>
+                    </div>
                     <div className="grid grid-cols-3 gap-4">
                       {selectedSubmission.subjectPerformances.map((subject) => (
-                        <Card key={subject.subject} className="p-4">
+                        <Card key={subject.subject} className="p-4 hover:shadow-md transition-shadow">
                           <div className="flex items-center justify-between mb-2">
                             <h4 className="font-medium">{subject.subject}</h4>
-                            <Badge variant="outline">{subject.correctAnswers}/{subject.totalQuestions}</Badge>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => {
+                                const content = generateExcelExport([selectedSubmission], 'subject', subject.subject);
+                                if (content) {
+                                  const timestamp = new Date().toISOString().split('T')[0];
+                                  const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${subject.subject.replace(/\s/g, '_')}_${timestamp}.csv`;
+                                  downloadExcel(content, filename);
+                                }
+                              }}
+                            >
+                              <Download className="w-3 h-3" />
+                            </Button>
                           </div>
+                          <Badge variant="outline" className="mb-2">{subject.correctAnswers}/{subject.totalQuestions}</Badge>
                           <Progress value={subject.percentage} className="h-2" />
                           <p className="text-sm text-muted-foreground mt-1">{subject.percentage}%</p>
                         </Card>
