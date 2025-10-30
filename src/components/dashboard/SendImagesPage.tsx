@@ -4,24 +4,10 @@ import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
-  Upload, 
-  Image as ImageIcon, 
-  FileText, 
-  CheckCircle, 
-  XCircle, 
-  Clock,
-  Trash2,
-  Camera,
-  Scan,
-  FileCheck,
-  AlertCircle,
-  User,
-  Loader2,
-  Users,
-  AlertTriangle
+  Upload, Image as ImageIcon, FileText, CheckCircle, XCircle, Clock, Trash2, Camera,
+  Scan, FileCheck, AlertCircle, User, Loader2, Users, AlertTriangle, Download, FileSpreadsheet
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -44,6 +30,7 @@ export function SendImagesPage() {
   const [batchImages, setBatchImages] = useState([]);
   const [showBatchProcessing, setShowBatchProcessing] = useState(false);
   const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
+  const [completedCorrections, setCompletedCorrections] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -129,7 +116,6 @@ export function SendImagesPage() {
       console.log(`✓ ${newImages.length} imagens carregadas da API:`, newImages);
       setImages(newImages);
       
-      // Força re-render
       if (newImages.length > 0) {
         console.log('✅ Imagens atualizadas no estado:', newImages.map(img => ({
           id: img.id,
@@ -183,8 +169,7 @@ export function SendImagesPage() {
       return;
     }
 
-    // Validar tamanho dos arquivos (30MB máximo)
-    const maxSize = 30 * 1024 * 1024; // 30MB em bytes
+    const maxSize = 30 * 1024 * 1024;
     const invalidFiles = Array.from(files).filter(file => file.size > maxSize);
     
     if (invalidFiles.length > 0) {
@@ -241,7 +226,6 @@ export function SendImagesPage() {
                 if (response && !response.error) {
                   console.log('✅ Batch image uploaded successfully:', response);
                   
-                  // Adiciona imediatamente ao estado local
                   const newImage = {
                     id: response.image?.id || `temp-${Date.now()}-${i}`,
                     ...imageData,
@@ -270,7 +254,6 @@ export function SendImagesPage() {
         toast.success(`✅ ${files.length} arquivo(s) enviado(s) em modo lote!`);
         console.log('🔄 Carregando imagens atualizadas após upload em lote...');
         await reloadOnlyImages();
-        console.log('✅ Estado de imagens após reload:', images.length);
 
       } else {
         const selectedStudentData = students.find(s => s.id === selectedStudent);
@@ -317,7 +300,6 @@ export function SendImagesPage() {
                 if (response && !response.error) {
                   console.log('✅ Image uploaded successfully:', response);
                   
-                  // Adiciona imediatamente ao estado local
                   const newImage = {
                     id: response.image?.id || `temp-${Date.now()}-${i}`,
                     ...imageData,
@@ -347,7 +329,6 @@ export function SendImagesPage() {
         setSelectedStudent('');
         console.log('🔄 Carregando imagens atualizadas após upload individual...');
         await reloadOnlyImages();
-        console.log('✅ Estado de imagens após reload:', images.length);
       }
 
     } catch (error) {
@@ -373,6 +354,7 @@ export function SendImagesPage() {
     console.log('📝 Total questions:', examData.questions.length);
 
     if (image.isBatch) {
+      // TODOS os alunos disponíveis, independente da ordem
       const batchStudentsList = availableStudents.map(student => ({
         ...image,
         studentId: student.id,
@@ -386,12 +368,87 @@ export function SendImagesPage() {
       setManualAnswers(new Array(examData.questions.length).fill(-1));
       setSelectedImage(image);
       setCurrentBatchIndex(0);
+      setCompletedCorrections([]);
       setShowBatchProcessing(true);
+      
+      toast.success(`🎯 ${batchStudentsList.length} alunos carregados para correção em lote!`);
     } else {
       setManualAnswers(new Array(examData.questions.length).fill(-1));
       setSelectedImage(image);
       setShowAnswerSheet(true);
     }
+  };
+
+  const generateExcelExport = (corrections, examData, type = 'all') => {
+    // Organizar por matéria
+    const bySubject = {};
+    
+    corrections.forEach(correction => {
+      correction.subjectPerformances.forEach(subj => {
+        if (!bySubject[subj.subject]) {
+          bySubject[subj.subject] = [];
+        }
+        bySubject[subj.subject].push({
+          aluno: correction.studentName,
+          turma: correction.studentClass,
+          acertos: subj.correctAnswers,
+          total: subj.totalQuestions,
+          percentual: subj.percentage
+        });
+      });
+    });
+
+    // Gerar CSV para cada matéria ou geral
+    const generateCSV = (data, subject) => {
+      let csv = `Matéria: ${subject}\n`;
+      csv += `Simulado: ${examData.title}\n`;
+      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
+      csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
+      
+      data.forEach(row => {
+        csv += `${row.aluno},${row.turma},${row.acertos},${row.total},${row.percentual}%\n`;
+      });
+      
+      return csv;
+    };
+
+    if (type === 'all') {
+      // Planilha geral
+      let csv = `RELATÓRIO GERAL - ${examData.title}\n`;
+      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
+      csv += 'Aluno,Turma,Nota,Percentual\n';
+      
+      corrections.forEach(corr => {
+        csv += `${corr.studentName},${corr.studentClass},${corr.score}/${corr.totalQuestions},${corr.percentage}%\n`;
+      });
+      
+      csv += '\n\nDETALHAMENTO POR MATÉRIA\n\n';
+      
+      Object.entries(bySubject).forEach(([subject, data]) => {
+        csv += `\n${subject}\n`;
+        csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
+        data.forEach(row => {
+          csv += `${row.aluno},${row.turma},${row.acertos},${row.total},${row.percentual}%\n`;
+        });
+      });
+      
+      return csv;
+    } else {
+      // Planilha específica de matéria
+      return generateCSV(bySubject[type] || [], type);
+    }
+  };
+
+  const downloadExcel = (content, filename) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const handleBatchCorrection = async () => {
@@ -484,26 +541,27 @@ export function SendImagesPage() {
       if (submissionResponse && !submissionResponse.error) {
         console.log(`✅ Submission created for ${currentStudent.studentName}`);
         
+        // Adicionar às correções completas
+        setCompletedCorrections(prev => [...prev, submissionData]);
+        
         toast.success(
           `✅ ${currentStudent.studentName}: ${score}% (${correctCount}/${examData.questions.length})`,
           { duration: 3000 }
         );
 
         if (currentBatchIndex === batchImages.length - 1) {
-          // Último aluno - mantém como "Aguardando Processamento" para permitir reprocessamento
-          console.log('✅ Lote finalizado - mantendo imagem disponível para reprocessamento');
+          // Último aluno
+          console.log('✅ Lote finalizado - todas as correções completas');
 
           toast.success(
-            `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nVocê pode reprocessar a imagem a qualquer momento.`,
+            `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nAgora você pode exportar os resultados!`,
             { duration: 5000 }
           );
           
-          setShowBatchProcessing(false);
-          setBatchImages([]);
-          setSelectedImage(null);
-          setCurrentBatchIndex(0);
-          await reloadOnlyImages();
+          // NÃO fechar o dialog - mostrar opções de exportação
+          // setShowBatchProcessing(false) - REMOVIDO
         } else {
+          // Próximo aluno
           setCurrentBatchIndex(prev => prev + 1);
           setManualAnswers(new Array(examData.questions.length).fill(-1));
         }
@@ -608,9 +666,6 @@ export function SendImagesPage() {
       if (submissionResponse && !submissionResponse.error) {
         console.log('✅ Submission created successfully');
 
-        // Mantém como "Aguardando Processamento" para permitir reprocessamento
-        console.log('✅ Correção salva - imagem disponível para reprocessamento');
-
         toast.success(
           `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)\n\nResultado salvo em "Correção de Simulados"\n\nVocê pode reprocessar esta imagem a qualquer momento.`,
           { duration: 6000 }
@@ -666,6 +721,36 @@ export function SendImagesPage() {
       case 'Erro': return <XCircle className="w-4 h-4 text-red-600" />;
       default: return <Clock className="w-4 h-4 text-gray-600" />;
     }
+  };
+
+  const handleExportExcel = (type, subject = null) => {
+    const examData = exams.find(e => e.id === selectedImage.examId);
+    if (!examData) return;
+
+    const content = generateExcelExport(completedCorrections, examData, subject || 'all');
+    const timestamp = new Date().toISOString().split('T')[0];
+    
+    let filename;
+    if (type === 'general') {
+      filename = `Relatorio_Geral_${examData.title}_${timestamp}.csv`;
+    } else {
+      filename = `${subject}_${examData.title}_${timestamp}.csv`;
+    }
+    
+    downloadExcel(content, filename);
+    toast.success(`✅ Planilha exportada: ${filename}`);
+  };
+
+  const getUniqueSubjects = () => {
+    const examData = exams.find(e => e.id === selectedImage?.examId);
+    if (!examData) return [];
+    
+    const subjects = new Set();
+    examData.questions.forEach(q => {
+      subjects.add(q.subject || 'Geral');
+    });
+    
+    return Array.from(subjects);
   };
 
   if (loading) {
@@ -827,6 +912,7 @@ export function SendImagesPage() {
                     <p className="text-sm text-blue-800 mt-1">
                       O arquivo será processado para todos os {availableStudents.length} alunos da turma.
                       Você preencherá as respostas de cada aluno sequencialmente após o upload.
+                      Todos os alunos serão carregados, independente da ordem alfabética.
                     </p>
                   </div>
                 </div>
@@ -899,7 +985,7 @@ export function SendImagesPage() {
                 <li>• <strong>Modo Individual:</strong> Envie um arquivo para cada aluno específico</li>
                 <li>• Clique em "Processar" e marque as respostas que o aluno preencheu</li>
                 <li>• O sistema calculará automaticamente a nota comparando com o gabarito</li>
-                <li>• O resultado ficará disponível em "Correção de Simulados"</li>
+                <li>• Após finalizar o lote, você poderá exportar planilhas Excel por matéria ou geral</li>
                 <li>• <strong>Tamanho máximo:</strong> 30MB por arquivo (JPG, PNG, PDF)</li>
               </ul>
             </CardContent>
@@ -1040,7 +1126,6 @@ export function SendImagesPage() {
                     <div className="flex items-center space-x-2 ml-4">
                       {getStatusIcon(image.status)}
                       
-                      {/* Botão de processar - sempre visível para permitir reprocessamento */}
                       <Button 
                         size="sm"
                         onClick={() => handleProcessImage(image)}
@@ -1232,18 +1317,37 @@ export function SendImagesPage() {
       </Dialog>
 
       {/* Dialog para correção em lote */}
-      <Dialog open={showBatchProcessing} onOpenChange={setShowBatchProcessing}>
+      <Dialog open={showBatchProcessing} onOpenChange={(open) => {
+        if (!open && completedCorrections.length < batchImages.length) {
+          if (confirm('Você tem correções não finalizadas. Deseja realmente sair?')) {
+            setShowBatchProcessing(false);
+            setBatchImages([]);
+            setSelectedImage(null);
+            setCurrentBatchIndex(0);
+            setCompletedCorrections([]);
+          }
+        } else {
+          setShowBatchProcessing(open);
+        }
+      }}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center justify-between">
-              <span>Correção em Lote - Aluno {currentBatchIndex + 1} de {batchImages.length}</span>
+              <span>
+                {currentBatchIndex >= batchImages.length ? 
+                  'Correção em Lote Finalizada!' : 
+                  `Correção em Lote - Aluno ${currentBatchIndex + 1} de ${batchImages.length}`
+                }
+              </span>
               <Badge className="bg-purple-100 text-purple-800">
                 {exams.find(e => e.id === selectedImage?.examId)?.title}
               </Badge>
             </DialogTitle>
-            <DialogDescription>
-              Corrigindo: <strong>{batchImages[currentBatchIndex]?.studentName}</strong>
-            </DialogDescription>
+            {currentBatchIndex < batchImages.length && (
+              <DialogDescription>
+                Corrigindo: <strong>{batchImages[currentBatchIndex]?.studentName}</strong>
+              </DialogDescription>
+            )}
           </DialogHeader>
           
           <div className="flex-1 overflow-y-auto pr-2">
@@ -1256,157 +1360,269 @@ export function SendImagesPage() {
                       <div>
                         <p className="font-medium text-purple-900">Progresso do Lote</p>
                         <p className="text-sm text-purple-800">
-                          {currentBatchIndex} de {batchImages.length} alunos corrigidos
+                          {completedCorrections.length} de {batchImages.length} alunos corrigidos
                         </p>
                       </div>
                     </div>
                     <div className="text-right">
                       <p className="text-2xl font-bold text-purple-900">
-                        {Math.round((currentBatchIndex / batchImages.length) * 100)}%
+                        {Math.round((completedCorrections.length / batchImages.length) * 100)}%
                       </p>
                     </div>
                   </div>
                   <Progress 
-                    value={(currentBatchIndex / batchImages.length) * 100} 
+                    value={(completedCorrections.length / batchImages.length) * 100} 
                     className="mt-3"
                   />
                 </CardContent>
               </Card>
 
-              <Card className="border-orange-200 bg-orange-50">
-                <CardContent className="p-4">
-                  <div className="flex items-start space-x-3">
-                    <AlertCircle className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
-                    <div>
-                      <p className="font-medium text-orange-900">Instruções</p>
-                      <p className="text-sm text-orange-800 mt-1">
-                        Marque as respostas do aluno <strong>{batchImages[currentBatchIndex]?.studentName}</strong> no cartão resposta.
-                        Após finalizar, você será direcionado para o próximo aluno automaticamente.
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-4 pb-4">
-                {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
-                  <Card key={index} className="border-2">
-                    <CardContent className="p-4">
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-slate-800">
-                            Questão {index + 1}
-                          </span>
-                          <Badge variant="outline" className="text-xs">
-                            {question.subject}
-                          </Badge>
-                        </div>
-                        <p className="text-sm text-slate-700">{question.question}</p>
+              {currentBatchIndex >= batchImages.length ? (
+                // Tela de finalização com exportação
+                <div className="space-y-4">
+                  <Card className="border-green-200 bg-green-50">
+                    <CardContent className="p-6">
+                      <div className="text-center">
+                        <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
+                        <h3 className="text-xl font-bold text-green-900 mb-2">
+                          Todas as Correções Concluídas!
+                        </h3>
+                        <p className="text-green-800">
+                          {completedCorrections.length} alunos corrigidos com sucesso
+                        </p>
                       </div>
-                      
-                      <div className="space-y-2">
-                        <p className="text-xs font-medium text-slate-600 mb-2">
-                          Selecione a resposta do aluno:
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <FileSpreadsheet className="w-5 h-5 mr-2" />
+                        Exportar Planilhas Excel
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div>
+                        <Button 
+                          onClick={() => handleExportExcel('general')}
+                          className="w-full bg-green-600 hover:bg-green-700"
+                        >
+                          <Download className="w-4 h-4 mr-2" />
+                          Exportar Planilha Geral (Todas as Matérias)
+                        </Button>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <p className="text-sm font-medium text-slate-700 mb-3">
+                          Exportar por Matéria:
                         </p>
                         <div className="grid grid-cols-2 gap-2">
-                          {question.options.map((option, optIdx) => {
-                            const isCorrect = optIdx === question.correctAnswer;
-                            const isSelected = manualAnswers[index] === optIdx;
-                            
-                            return (
-                              <button
-                                key={optIdx}
-                                onClick={() => {
-                                  const newAnswers = [...manualAnswers];
-                                  newAnswers[index] = isSelected ? -1 : optIdx;
-                                  setManualAnswers(newAnswers);
-                                }}
-                                className={`text-left p-2 rounded text-sm border transition-all ${
-                                  isSelected
-                                    ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
-                                    : isCorrect
-                                      ? 'border-green-300 bg-green-50'
-                                      : 'border-slate-200 bg-slate-50'
-                                } hover:border-slate-400`}
-                              >
-                                <span className="font-semibold">{String.fromCharCode(65 + optIdx)}) </span>
-                                {option}
-                                {isCorrect && (
-                                  <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
-                                    ✓ Gabarito
-                                  </Badge>
-                                )}
-                                {isSelected && (
-                                  <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
-                                    Marcada
-                                  </Badge>
-                                )}
-                              </button>
-                            );
-                          })}
+                          {getUniqueSubjects().map(subject => (
+                            <Button
+                              key={subject}
+                              onClick={() => handleExportExcel('subject', subject)}
+                              variant="outline"
+                              className="w-full"
+                            >
+                              <FileSpreadsheet className="w-4 h-4 mr-2" />
+                              {subject}
+                            </Button>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="border-t pt-4">
+                        <h4 className="text-sm font-medium text-slate-700 mb-3">
+                          Resumo das Correções:
+                        </h4>
+                        <div className="max-h-48 overflow-y-auto space-y-2">
+                          {completedCorrections.map((corr, idx) => (
+                            <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded">
+                              <span className="text-sm">{corr.studentName}</span>
+                              <Badge className={
+                                corr.percentage >= 70 ? 'bg-green-100 text-green-800' :
+                                corr.percentage >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                                'bg-red-100 text-red-800'
+                              }>
+                                {corr.percentage}%
+                              </Badge>
+                            </div>
+                          ))}
                         </div>
                       </div>
                     </CardContent>
                   </Card>
-                ))}
-              </div>
+                </div>
+              ) : (
+                // Tela de correção do aluno atual
+                <>
+                  <Card className="border-orange-200 bg-orange-50">
+                    <CardContent className="p-4">
+                      <div className="flex items-start space-x-3">
+                        <AlertCircle className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
+                        <div>
+                          <p className="font-medium text-orange-900">Instruções</p>
+                          <p className="text-sm text-orange-800 mt-1">
+                            Marque as respostas do aluno <strong>{batchImages[currentBatchIndex]?.studentName}</strong> no cartão resposta.
+                            Após finalizar, você será direcionado para o próximo aluno automaticamente.
+                            Nenhum aluno será pulado - todos serão corrigidos.
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
 
-              <Card className="border-blue-200 bg-blue-50">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-blue-900">Progresso desta Correção</p>
-                      <p className="text-sm text-blue-800 mt-1">
-                        {manualAnswers.filter(a => a >= 0).length} de {manualAnswers.length} questões marcadas
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-blue-900">
-                        {Math.round((manualAnswers.filter(a => a >= 0).length / manualAnswers.length) * 100)}%
-                      </p>
-                      <p className="text-xs text-blue-700">Completo</p>
-                    </div>
+                  <div className="space-y-4 pb-4">
+                    {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
+                      <Card key={index} className="border-2">
+                        <CardContent className="p-4">
+                          <div className="mb-3">
+                            <div className="flex items-center justify-between mb-2">
+                              <span className="font-semibold text-slate-800">
+                                Questão {index + 1}
+                              </span>
+                              <Badge variant="outline" className="text-xs">
+                                {question.subject}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-slate-700">{question.question}</p>
+                          </div>
+                          
+                          <div className="space-y-2">
+                            <p className="text-xs font-medium text-slate-600 mb-2">
+                              Selecione a resposta do aluno:
+                            </p>
+                            <div className="grid grid-cols-2 gap-2">
+                              {question.options.map((option, optIdx) => {
+                                const isCorrect = optIdx === question.correctAnswer;
+                                const isSelected = manualAnswers[index] === optIdx;
+                                
+                                return (
+                                  <button
+                                    key={optIdx}
+                                    onClick={() => {
+                                      const newAnswers = [...manualAnswers];
+                                      newAnswers[index] = isSelected ? -1 : optIdx;
+                                      setManualAnswers(newAnswers);
+                                    }}
+                                    className={`text-left p-2 rounded text-sm border transition-all ${
+                                      isSelected
+                                        ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
+                                        : isCorrect
+                                          ? 'border-green-300 bg-green-50'
+                                          : 'border-slate-200 bg-slate-50'
+                                    } hover:border-slate-400`}
+                                  >
+                                    <span className="font-semibold">{String.fromCharCode(65 + optIdx)}) </span>
+                                    {option}
+                                    {isCorrect && (
+                                      <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
+                                        ✓ Gabarito
+                                      </Badge>
+                                    )}
+                                    {isSelected && (
+                                      <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
+                                        Marcada
+                                      </Badge>
+                                    )}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
                   </div>
-                </CardContent>
-              </Card>
+
+                  <Card className="border-blue-200 bg-blue-50">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <p className="font-medium text-blue-900">Progresso desta Correção</p>
+                          <p className="text-sm text-blue-800 mt-1">
+                            {manualAnswers.filter(a => a >= 0).length} de {manualAnswers.length} questões marcadas
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-2xl font-bold text-blue-900">
+                            {Math.round((manualAnswers.filter(a => a >= 0).length / manualAnswers.length) * 100)}%
+                          </p>
+                          <p className="text-xs text-blue-700">Completo</p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
             </div>
           </div>
 
           <div className="flex-shrink-0 flex justify-between items-center pt-4 border-t mt-4">
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                setShowBatchProcessing(false);
-                setBatchImages([]);
-                setSelectedImage(null);
-                setCurrentBatchIndex(0);
-              }}
-              disabled={isProcessing}
-            >
-              Cancelar Lote
-            </Button>
-            <Button 
-              onClick={handleBatchCorrection}
-              disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Processando...
-                </>
-              ) : currentBatchIndex === batchImages.length - 1 ? (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Finalizar Último Aluno
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Próximo Aluno ({currentBatchIndex + 2}/{batchImages.length})
-                </>
-              )}
-            </Button>
+            {currentBatchIndex >= batchImages.length ? (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={async () => {
+                    setShowBatchProcessing(false);
+                    setBatchImages([]);
+                    setSelectedImage(null);
+                    setCurrentBatchIndex(0);
+                    setCompletedCorrections([]);
+                    await reloadOnlyImages();
+                  }}
+                >
+                  Fechar
+                </Button>
+                <Button 
+                  onClick={() => handleExportExcel('general')}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Exportar Relatório Geral
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button 
+                  variant="outline" 
+                  onClick={() => {
+                    if (confirm('Você tem correções não finalizadas. Deseja realmente sair?')) {
+                      setShowBatchProcessing(false);
+                      setBatchImages([]);
+                      setSelectedImage(null);
+                      setCurrentBatchIndex(0);
+                      setCompletedCorrections([]);
+                    }
+                  }}
+                  disabled={isProcessing}
+                >
+                  Cancelar Lote
+                </Button>
+                <Button 
+                  onClick={handleBatchCorrection}
+                  disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
+                  className="bg-green-600 hover:bg-green-700"
+                >
+                  {isProcessing ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Processando...
+                    </>
+                  ) : currentBatchIndex === batchImages.length - 1 ? (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Finalizar Último Aluno
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="w-4 h-4 mr-2" />
+                      Próximo Aluno ({currentBatchIndex + 2}/{batchImages.length})
+                    </>
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>

@@ -7,7 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Progress } from '../ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../ui/tabs';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '../ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Separator } from '../ui/separator';
 import { Textarea } from '../ui/textarea';
 import { Label } from '../ui/label';
@@ -15,51 +15,31 @@ import { Checkbox } from '../ui/checkbox';
 import { 
   CheckCircle, Clock, Search, Eye, Download, FileText, Target, TrendingUp, Award, XCircle, AlertCircle,
   Loader2, RefreshCw, GraduationCap, Star, Save, X, PieChart, Clipboard, Send, Image as ImageIcon, ZoomIn, UserX,
-  Camera, Scan
+  Camera, Scan, FileSpreadsheet
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 
-type GradingStatus = 'pending' | 'graded' | 'reviewed' | 'not_submitted';
-type SubjectPerformance = { subject: string; totalQuestions: number; correctAnswers: number; percentage: number };
-type QuestionWeight = { questionIndex: number; weight: number; subject: string };
-type DetailedSubmission = {
-  id: string; examId: string; examTitle: string; studentId: string; studentName: string; studentEmail: string;
-  studentClass: string; studentGrade: string; answers: number[]; correctAnswers: number[]; score: number;
-  totalQuestions: number; percentage: number; subjectPerformances: SubjectPerformance[]; timeSpent: number;
-  submittedAt: string; gradingStatus: GradingStatus; feedback?: string; reviewNotes?: string;
-  questionWeights?: QuestionWeight[]; applicationId?: string; correctionType?: string;
-};
-type Exam = {
-  id: string; title: string; description: string; questionsPerSubject: number; timeLimit: number;
-  subjects: string[]; totalQuestions: number; questions: any[]; userId: string; createdAt: string;
-  status: 'Rascunho' | 'Ativo' | 'Arquivado';
-};
-type Application = {
-  id: string; examId: string; examTitle: string; studentIds: string[]; applicationMethod: string;
-  status: string; createdAt: string; appliedCount: number; completedCount: number;
-};
-type Student = { id: string; name: string; email: string; class: string; grade: string };
-
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
-  const [exams, setExams] = useState<Exam[]>([]);
-  const [applications, setApplications] = useState<Application[]>([]);
-  const [students, setStudents] = useState<Student[]>([]);
-  const [submissions, setSubmissions] = useState<DetailedSubmission[]>([]);
+  const [exams, setExams] = useState([]);
+  const [applications, setApplications] = useState([]);
+  const [students, setStudents] = useState([]);
+  const [submissions, setSubmissions] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterExam, setFilterExam] = useState('all');
   const [filterApplication, setFilterApplication] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
   const [filterCorrectionType, setFilterCorrectionType] = useState('all');
-  const [selectedSubmissions, setSelectedSubmissions] = useState<string[]>([]);
-  const [selectedSubmission, setSelectedSubmission] = useState<DetailedSubmission | null>(null);
+  const [selectedSubmissions, setSelectedSubmissions] = useState([]);
+  const [selectedSubmission, setSelectedSubmission] = useState(null);
   const [reviewing, setReviewing] = useState(false);
   const [reviewNotes, setReviewNotes] = useState('');
   const [feedback, setFeedback] = useState('');
   const [uploadingImage, setUploadingImage] = useState(false);
-  const [answerSheetImages, setAnswerSheetImages] = useState<any[]>([]);
-  const [selectedImagePreview, setSelectedImagePreview] = useState<string | null>(null);
+  const [answerSheetImages, setAnswerSheetImages] = useState([]);
+  const [selectedImagePreview, setSelectedImagePreview] = useState(null);
+  const [showExportDialog, setShowExportDialog] = useState(false);
 
   useEffect(() => {
     loadDataProgressively();
@@ -70,8 +50,8 @@ export function GradeExamsPage() {
     else if (examId) setFilterExam(examId);
   }, []);
 
-  const calculateSubjectPerformances = (studentAnswers: number[], correctAnswers: number[], questionWeights: QuestionWeight[]): SubjectPerformance[] => {
-    const performanceBySubject: { [key: string]: { correct: number; total: number } } = {};
+  const calculateSubjectPerformances = (studentAnswers, correctAnswers, questionWeights) => {
+    const performanceBySubject = {};
     questionWeights.forEach((qw, idx) => {
       const subject = qw.subject;
       if (!performanceBySubject[subject]) performanceBySubject[subject] = { correct: 0, total: 0 };
@@ -84,11 +64,11 @@ export function GradeExamsPage() {
     }));
   };
 
-  const transformSubmissions = (rawSubmissions: any[], examsList: Exam[]): DetailedSubmission[] => {
+  const transformSubmissions = (rawSubmissions, examsList) => {
     return rawSubmissions.map(sub => {
       const exam = examsList.find(e => e.id === sub.examId);
-      const correctAnswers = exam?.questions?.map((q: any) => q.correctAnswer) || sub.correctAnswers || [];
-      const questionWeights = exam?.questions?.map((q: any, idx: number) => ({
+      const correctAnswers = exam?.questions?.map((q) => q.correctAnswer) || sub.correctAnswers || [];
+      const questionWeights = exam?.questions?.map((q, idx) => ({
         questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
       })) || sub.questionWeights || [];
       
@@ -113,7 +93,7 @@ export function GradeExamsPage() {
         subjectPerformances,
         timeSpent: sub.timeSpent || 0,
         submittedAt: sub.submittedAt || new Date().toISOString(),
-        gradingStatus: sub.gradingStatus || 'graded' as GradingStatus,
+        gradingStatus: sub.gradingStatus || 'graded',
         feedback: sub.feedback,
         reviewNotes: sub.reviewNotes,
         questionWeights,
@@ -123,9 +103,9 @@ export function GradeExamsPage() {
     });
   };
 
-  const createNotSubmittedEntry = (student: Student, exam: Exam, applicationId: string): DetailedSubmission => {
-    const correctAnswers = exam.questions?.map((q: any) => q.correctAnswer) || [];
-    const questionWeights = exam.questions?.map((q: any, idx: number) => ({
+  const createNotSubmittedEntry = (student, exam, applicationId) => {
+    const correctAnswers = exam.questions?.map((q) => q.correctAnswer) || [];
+    const questionWeights = exam.questions?.map((q, idx) => ({
       questionIndex: idx, weight: q.weight || 1, subject: q.subject || 'Geral'
     })) || [];
     return {
@@ -154,12 +134,12 @@ export function GradeExamsPage() {
   const loadDataProgressively = async () => {
     try {
       setLoading(true);
-      let examsList: Exam[] = [];
+      let examsList = [];
       
       try {
         console.log('=== GradePage: Loading exams ===');
         const examsRes = await apiService.getExams();
-        examsList = (examsRes.exams || []).filter((e: any) => e && e.id && e.title);
+        examsList = (examsRes.exams || []).filter((e) => e && e.id && e.title);
         console.log(`✓ Loaded ${examsList.length} exams for grading`);
         setExams(examsList);
       } catch (error) {
@@ -168,11 +148,11 @@ export function GradeExamsPage() {
         toast.error('Erro ao carregar simulados');
       }
 
-      let studentsList: Student[] = [];
+      let studentsList = [];
       try {
         console.log('=== GradePage: Loading students ===');
         const studentsRes = await apiService.getStudents();
-        studentsList = (studentsRes.students || []).filter((s: any) => s && s.id);
+        studentsList = (studentsRes.students || []).filter((s) => s && s.id);
         console.log(`✓ Loaded ${studentsList.length} students`);
         setStudents(studentsList);
       } catch (error) {
@@ -180,11 +160,11 @@ export function GradeExamsPage() {
         setStudents([]);
       }
       
-      let applicationsList: Application[] = [];
+      let applicationsList = [];
       try {
         console.log('=== GradePage: Loading applications ===');
         const applicationsRes = await apiService.getApplications();
-        applicationsList = (applicationsRes.applications || []).filter((a: any) => a && a.id);
+        applicationsList = (applicationsRes.applications || []).filter((a) => a && a.id);
         console.log(`✓ Loaded ${applicationsList.length} applications`);
         setApplications(applicationsList);
       } catch (error) {
@@ -195,16 +175,16 @@ export function GradeExamsPage() {
       try {
         console.log('=== GradePage: Loading submissions ===');
         const submissionsRes = await apiService.getSubmissions();
-        const realSubmissionsList = (submissionsRes.submissions || []).filter((s: any) => s && s.id);
+        const realSubmissionsList = (submissionsRes.submissions || []).filter((s) => s && s.id);
         console.log(`✓ Loaded ${realSubmissionsList.length} submissions from API`);
         
         const imageSubmissions = realSubmissionsList.filter(
-          (s: any) => s.correctionType === 'manual-image' || s.correctionType === 'manual-image-batch'
+          (s) => s.correctionType === 'manual-image' || s.correctionType === 'manual-image-batch'
         );
         console.log(`✓ Found ${imageSubmissions.length} answer sheet submissions`);
         
         const transformedSubmissions = transformSubmissions(realSubmissionsList, examsList);
-        const notSubmittedEntries: DetailedSubmission[] = [];
+        const notSubmittedEntries = [];
         
         applicationsList.forEach(app => {
           const exam = examsList.find(e => e.id === app.examId);
@@ -215,7 +195,7 @@ export function GradeExamsPage() {
             if (!student) return;
             
             const hasSubmission = realSubmissionsList.some(
-              (sub: any) => sub.studentId === studentId && sub.examId === app.examId
+              (sub) => sub.studentId === studentId && sub.examId === app.examId
             );
             
             if (!hasSubmission) {
@@ -244,7 +224,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const formatDate = (dateString: string) => {
+  const formatDate = (dateString) => {
     return new Date(dateString).toLocaleDateString('pt-BR', {
       day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
     });
@@ -271,7 +251,137 @@ export function GradeExamsPage() {
 
   const stats = getGradingStats();
 
-  const getPerformanceBadge = (percentage: number, status: GradingStatus) => {
+  const generateExcelExport = (submissionsList, type = 'all', subject = null) => {
+    // Filtrar apenas submissões reais (não "não realizados")
+    const validSubmissions = submissionsList.filter(s => s.gradingStatus !== 'not_submitted');
+    
+    if (validSubmissions.length === 0) {
+      toast.error('Nenhuma submissão válida para exportar');
+      return null;
+    }
+
+    // Organizar por matéria
+    const bySubject = {};
+    
+    validSubmissions.forEach(submission => {
+      submission.subjectPerformances.forEach(subj => {
+        if (!bySubject[subj.subject]) {
+          bySubject[subj.subject] = [];
+        }
+        bySubject[subj.subject].push({
+          aluno: submission.studentName,
+          turma: submission.studentClass,
+          acertos: subj.correctAnswers,
+          total: subj.totalQuestions,
+          percentual: subj.percentage,
+          notaGeral: submission.percentage
+        });
+      });
+    });
+
+    const generateCSV = (data, subjectName) => {
+      let csv = `Matéria: ${subjectName}\n`;
+      csv += `Total de Alunos: ${data.length}\n`;
+      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
+      csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
+      
+      data.forEach(row => {
+        csv += `"${row.aluno}","${row.turma}",${row.acertos},${row.total},${row.percentual}%\n`;
+      });
+      
+      // Adicionar estatísticas
+      const avgPercentage = Math.round(data.reduce((sum, row) => sum + row.percentual, 0) / data.length);
+      csv += `\nMédia da Turma,,,${avgPercentage}%\n`;
+      
+      return csv;
+    };
+
+    if (type === 'all') {
+      // Planilha geral
+      let csv = `RELATÓRIO GERAL DE CORREÇÕES\n`;
+      csv += `Total de Alunos: ${validSubmissions.length}\n`;
+      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
+      csv += 'Aluno,Turma,Simulado,Nota,Percentual,Tipo de Correção\n';
+      
+      validSubmissions.forEach(sub => {
+        const correctionType = sub.correctionType === 'manual-image' ? 'Cartão Individual' :
+                              sub.correctionType === 'manual-image-batch' ? 'Cartão Lote' : 'Online';
+        csv += `"${sub.studentName}","${sub.studentClass}","${sub.examTitle}",${sub.score}/${sub.totalQuestions},${sub.percentage}%,"${correctionType}"\n`;
+      });
+      
+      csv += `\n\nDETALHAMENTO POR MATÉRIA\n\n`;
+      
+      Object.entries(bySubject).forEach(([subjectName, data]) => {
+        csv += `\n${subjectName}\n`;
+        csv += 'Aluno,Turma,Acertos,Total,Percentual,Nota Geral\n';
+        data.forEach(row => {
+          csv += `"${row.aluno}","${row.turma}",${row.acertos},${row.total},${row.percentual}%,${row.notaGeral}%\n`;
+        });
+        const avgPercentage = Math.round(data.reduce((sum, row) => sum + row.percentual, 0) / data.length);
+        csv += `Média da Matéria,,,,${avgPercentage}%\n`;
+      });
+      
+      return csv;
+    } else if (type === 'subject' && subject) {
+      // Planilha específica de matéria
+      return generateCSV(bySubject[subject] || [], subject);
+    }
+    
+    return null;
+  };
+
+  const downloadExcel = (content, filename) => {
+    if (!content) return;
+    
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    const url = URL.createObjectURL(blob);
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    
+    toast.success(`✅ Planilha exportada: ${filename}`);
+  };
+
+  const getUniqueSubjects = (submissionsList) => {
+    const subjects = new Set();
+    submissionsList.forEach(sub => {
+      if (sub.gradingStatus !== 'not_submitted') {
+        sub.subjectPerformances.forEach(perf => {
+          subjects.add(perf.subject);
+        });
+      }
+    });
+    return Array.from(subjects).sort();
+  };
+
+  const handleExportExcel = (type, subject = null) => {
+    const validSubmissions = filteredSubmissions.filter(s => s.gradingStatus !== 'not_submitted');
+    
+    if (validSubmissions.length === 0) {
+      toast.error('Nenhuma correção disponível para exportar');
+      return;
+    }
+
+    const content = generateExcelExport(validSubmissions, type, subject);
+    if (!content) return;
+    
+    const timestamp = new Date().toISOString().split('T')[0];
+    
+    let filename;
+    if (type === 'all') {
+      filename = `Relatorio_Geral_${timestamp}.csv`;
+    } else if (type === 'subject' && subject) {
+      filename = `${subject.replace(/\s/g, '_')}_${timestamp}.csv`;
+    }
+    
+    downloadExcel(content, filename);
+  };
+
+  const getPerformanceBadge = (percentage, status) => {
     if (status === 'not_submitted') return <Badge className="bg-gray-100 text-gray-800">Não Realizado</Badge>;
     if (percentage >= 80) return <Badge className="bg-emerald-100 text-emerald-800">Excelente</Badge>;
     else if (percentage >= 70) return <Badge className="bg-green-100 text-green-800">Muito Bom</Badge>;
@@ -280,7 +390,7 @@ export function GradeExamsPage() {
     else return <Badge className="bg-red-100 text-red-800">Insuficiente</Badge>;
   };
 
-  const getGradingStatusBadge = (status: GradingStatus) => {
+  const getGradingStatusBadge = (status) => {
     switch (status) {
       case 'not_submitted': return <Badge variant="outline" className="text-gray-600 border-gray-300">Não Submetido</Badge>;
       case 'pending': return <Badge variant="outline" className="text-orange-600 border-orange-300">Pendente</Badge>;
@@ -290,7 +400,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const getCorrectionTypeBadge = (correctionType?: string) => {
+  const getCorrectionTypeBadge = (correctionType) => {
     if (!correctionType || correctionType === 'online') {
       return <Badge variant="outline" className="text-blue-600 border-blue-300">Online</Badge>;
     }
@@ -335,7 +445,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const handleSelectSubmission = (submissionId: string, checked: boolean) => {
+  const handleSelectSubmission = (submissionId, checked) => {
     if (checked) setSelectedSubmissions(prev => [...prev, submissionId]);
     else setSelectedSubmissions(prev => prev.filter(id => id !== submissionId));
   };
@@ -343,7 +453,7 @@ export function GradeExamsPage() {
   const selectAllSubmissions = () => setSelectedSubmissions(filteredSubmissions.map(s => s.id));
   const clearAllSubmissions = () => setSelectedSubmissions([]);
 
-  const handleReviewSubmission = async (submission: DetailedSubmission) => {
+  const handleReviewSubmission = async (submission) => {
     setSelectedSubmission(submission);
     setReviewNotes(submission.reviewNotes || '');
     setFeedback(submission.feedback || '');
@@ -366,7 +476,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const handleUploadAnswerSheet = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadAnswerSheet = async (event) => {
     if (!selectedSubmission) return;
     
     const file = event.target.files?.[0];
@@ -383,7 +493,7 @@ export function GradeExamsPage() {
       setUploadingImage(true);
       const reader = new FileReader();
       reader.onload = async (e) => {
-        const base64Data = e.target?.result as string;
+        const base64Data = e.target?.result;
         try {
           const response = await apiService.uploadAnswerSheet(
             selectedSubmission.id, 
@@ -415,7 +525,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const handleDeleteAnswerSheet = async (imageId: string) => {
+  const handleDeleteAnswerSheet = async (imageId) => {
     if (!window.confirm('Tem certeza que deseja excluir esta imagem?')) return;
     try {
       const response = await apiService.deleteAnswerSheet(imageId);
@@ -444,7 +554,7 @@ export function GradeExamsPage() {
       });
       if (response.success) {
         setSubmissions(prev => prev.map(sub => sub.id === selectedSubmission.id ? 
-          { ...sub, reviewNotes, feedback, gradingStatus: 'reviewed' as GradingStatus } : sub
+          { ...sub, reviewNotes, feedback, gradingStatus: 'reviewed' } : sub
         ));
         setSelectedSubmission(null);
         toast.success('✅ Revisão salva com sucesso!');
@@ -457,7 +567,7 @@ export function GradeExamsPage() {
     }
   };
 
-  const handleExportIndividual = async (submission: DetailedSubmission) => {
+  const handleExportIndividual = async (submission) => {
     try {
       const dataStr = JSON.stringify(submission, null, 2);
       const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
@@ -528,9 +638,13 @@ export function GradeExamsPage() {
             <RefreshCw className="w-4 h-4 mr-2" />
             Atualizar
           </Button>
-          <Button variant="outline" onClick={handleBulkExport} disabled={selectedSubmissions.length === 0}>
-            <Download className="w-4 h-4 mr-2" />
-            Exportar Selecionados
+          <Button 
+            variant="outline" 
+            onClick={() => setShowExportDialog(true)}
+            disabled={filteredSubmissions.filter(s => s.gradingStatus !== 'not_submitted').length === 0}
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Exportar Excel
           </Button>
         </div>
       </div>
@@ -811,7 +925,7 @@ export function GradeExamsPage() {
                             <Checkbox
                               checked={selectedSubmissions.includes(submission.id)}
                               onCheckedChange={(checked) => 
-                                handleSelectSubmission(submission.id, checked as boolean)
+                                handleSelectSubmission(submission.id, checked)
                               }
                             />
                           </TableCell>
@@ -893,6 +1007,89 @@ export function GradeExamsPage() {
         </TabsContent>
       </Tabs>
 
+      {/* Dialog de Exportação Excel */}
+      <Dialog open={showExportDialog} onOpenChange={setShowExportDialog}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <FileSpreadsheet className="w-5 h-5 mr-2" />
+              Exportar Planilhas Excel
+            </DialogTitle>
+            <DialogDescription>
+              Escolha o tipo de relatório que deseja exportar
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <Card className="border-green-200 bg-green-50">
+              <CardContent className="p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h4 className="font-medium text-green-900">Relatório Geral</h4>
+                    <p className="text-sm text-green-800 mt-1">
+                      Inclui todas as matérias com detalhamento completo
+                    </p>
+                  </div>
+                  <Button 
+                    onClick={() => {
+                      handleExportExcel('all');
+                      setShowExportDialog(false);
+                    }}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Exportar
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Separator />
+
+            <div>
+              <h4 className="font-medium text-slate-900 mb-3">Exportar por Matéria</h4>
+              <div className="grid grid-cols-2 gap-3">
+                {getUniqueSubjects(filteredSubmissions).map(subject => (
+                  <Card key={subject} className="border-2 hover:border-blue-300 transition-colors">
+                    <CardContent className="p-4">
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium text-sm">{subject}</span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            handleExportExcel('subject', subject);
+                            setShowExportDialog(false);
+                          }}
+                        >
+                          <Download className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            </div>
+
+            {getUniqueSubjects(filteredSubmissions).length === 0 && (
+              <div className="text-center py-8">
+                <AlertCircle className="w-12 h-12 mx-auto text-gray-400 mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma matéria disponível para exportação
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="flex justify-end pt-4 border-t">
+            <Button variant="outline" onClick={() => setShowExportDialog(false)}>
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Revisão de Submissão */}
       {selectedSubmission && (
         <Dialog open={!!selectedSubmission} onOpenChange={() => setSelectedSubmission(null)}>
           <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
@@ -1083,6 +1280,7 @@ export function GradeExamsPage() {
         </Dialog>
       )}
 
+      {/* Dialog de Preview de Imagem */}
       {selectedImagePreview && (
         <Dialog open={!!selectedImagePreview} onOpenChange={() => setSelectedImagePreview(null)}>
           <DialogContent className="max-w-7xl max-h-[95vh] p-2">
