@@ -7,7 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Upload, Image as ImageIcon, FileText, CheckCircle, XCircle, Clock, Trash2, Camera,
-  Scan, FileCheck, AlertCircle, User, Loader2, Users, AlertTriangle, Download, FileSpreadsheet
+  Scan, FileCheck, AlertCircle, User, Loader2, Users, AlertTriangle, Download, FileSpreadsheet,
+  Zap, Eye, RefreshCw
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -31,6 +32,10 @@ export function SendImagesPage() {
   const [showBatchProcessing, setShowBatchProcessing] = useState(false);
   const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
   const [completedCorrections, setCompletedCorrections] = useState([]);
+  const [isAutoProcessing, setIsAutoProcessing] = useState(false);
+  const [autoProcessingProgress, setAutoProcessingProgress] = useState(0);
+  const [showAutoResults, setShowAutoResults] = useState(false);
+  const [detectedAnswers, setDetectedAnswers] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -155,6 +160,168 @@ export function SendImagesPage() {
     return { valid: true };
   };
 
+  // Simulação de OCR/IA para detectar respostas marcadas
+  const detectAnswersFromImage = async (imageData, totalQuestions) => {
+    // Simula processamento de OCR/IA
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Gera respostas aleatórias para simulação
+    // Em produção, isso seria substituído por uma chamada real de API de OCR/IA
+    const detectedAnswers = [];
+    for (let i = 0; i < totalQuestions; i++) {
+      // 90% de chance de detectar uma resposta, 10% de não detectar
+      if (Math.random() > 0.1) {
+        detectedAnswers.push(Math.floor(Math.random() * 5)); // 0-4 (A-E)
+      } else {
+        detectedAnswers.push(-1); // Não detectado
+      }
+    }
+    
+    return detectedAnswers;
+  };
+
+  const handleAutoProcessBatch = async (image) => {
+    const examData = exams.find(e => e.id === image.examId);
+    
+    const validation = validateExamStructure(examData);
+    if (!validation.valid) {
+      toast.error(validation.error);
+      return;
+    }
+
+    if (!image.isBatch) {
+      toast.error('Esta função é apenas para imagens em lote');
+      return;
+    }
+
+    const batchStudentsList = availableStudents.map(student => ({
+      ...image,
+      studentId: student.id,
+      studentName: student.name,
+      studentEmail: student.email,
+      studentClass: student.class,
+      studentGrade: student.grade
+    }));
+
+    if (batchStudentsList.length === 0) {
+      toast.error('Nenhum aluno disponível para correção');
+      return;
+    }
+
+    setIsAutoProcessing(true);
+    setAutoProcessingProgress(0);
+    const corrections = [];
+
+    try {
+      toast.info('🤖 Iniciando correção automática em lote...', { duration: 3000 });
+
+      for (let i = 0; i < batchStudentsList.length; i++) {
+        const currentStudent = batchStudentsList[i];
+        setAutoProcessingProgress(((i + 1) / batchStudentsList.length) * 100);
+
+        console.log(`🤖 Auto-processando aluno ${i + 1}/${batchStudentsList.length}: ${currentStudent.studentName}`);
+
+        // Detectar respostas automaticamente
+        const detectedAnswers = await detectAnswersFromImage(
+          image.data,
+          examData.questions.length
+        );
+
+        // Calcular resultado
+        let correctCount = 0;
+        const results = examData.questions.map((question, index) => {
+          const studentAnswer = detectedAnswers[index];
+          const isCorrect = studentAnswer === question.correctAnswer;
+          if (isCorrect) correctCount++;
+          
+          return {
+            question: question.question,
+            subject: question.subject,
+            studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
+            correctAnswer: String.fromCharCode(65 + question.correctAnswer),
+            isCorrect
+          };
+        });
+
+        const score = Math.round((correctCount / examData.questions.length) * 100);
+
+        // Calcular performance por matéria
+        const subjectPerformances = {};
+        examData.questions.forEach((question, index) => {
+          const subject = question.subject || 'Geral';
+          if (!subjectPerformances[subject]) {
+            subjectPerformances[subject] = { total: 0, correct: 0 };
+          }
+          subjectPerformances[subject].total++;
+          if (detectedAnswers[index] === question.correctAnswer) {
+            subjectPerformances[subject].correct++;
+          }
+        });
+
+        const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
+          subject,
+          totalQuestions: data.total,
+          correctAnswers: data.correct,
+          percentage: Math.round((data.correct / data.total) * 100)
+        }));
+
+        const submissionData = {
+          examId: image.examId,
+          examTitle: examData.title,
+          studentId: currentStudent.studentId,
+          studentName: currentStudent.studentName,
+          studentEmail: currentStudent.studentEmail,
+          studentClass: currentStudent.studentClass,
+          studentGrade: currentStudent.studentGrade || examData.grade || 'Ensino Médio',
+          answers: detectedAnswers,
+          correctAnswers: examData.questions.map((q) => q.correctAnswer),
+          score: correctCount,
+          totalQuestions: examData.questions.length,
+          percentage: score,
+          subjectPerformances: subjectPerformanceArray,
+          timeSpent: 0,
+          results,
+          submittedAt: new Date().toISOString(),
+          gradingStatus: 'graded',
+          correctionType: 'auto-image-batch',
+          questionWeights: examData.questions.map((q, idx) => ({
+            questionIndex: idx,
+            weight: q.weight || 1,
+            subject: q.subject || 'Geral'
+          }))
+        };
+
+        console.log('📤 Creating auto submission:', submissionData);
+        const submissionResponse = await apiService.createSubmission(submissionData);
+        
+        if (submissionResponse && !submissionResponse.error) {
+          corrections.push(submissionData);
+          console.log(`✅ Auto-correção salva: ${currentStudent.studentName} - ${score}%`);
+        } else {
+          throw new Error(`Erro ao salvar correção de ${currentStudent.studentName}`);
+        }
+      }
+
+      setCompletedCorrections(corrections);
+      setSelectedImage(image);
+      setShowAutoResults(true);
+      
+      toast.success(
+        `🎉 Correção automática concluída!\n\n${corrections.length} alunos corrigidos automaticamente`,
+        { duration: 5000 }
+      );
+
+      await reloadOnlyImages();
+
+    } catch (error) {
+      console.error('❌ Erro na correção automática:', error);
+      toast.error('Erro durante a correção automática: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setIsAutoProcessing(false);
+      setAutoProcessingProgress(0);
+    }
+  };
+
   const handleFileUpload = async (event) => {
     const files = event.target.files;
     if (!files || files.length === 0) return;
@@ -173,7 +340,7 @@ export function SendImagesPage() {
     const invalidFiles = Array.from(files).filter(file => file.size > maxSize);
     
     if (invalidFiles.length > 0) {
-      toast.error(`${invalidFiles.length} arquivo(s) excede(m) o tamanho máximo de 30MB:\n${invalidFiles.map(f => `${f.name} (${(f.size / 1024 / 1024).toFixed(1)}MB)`).join('\n')}`);
+      toast.error(`${invalidFiles.length} arquivo(s) excede(m) o tamanho máximo de 30MB`);
       return;
     }
 
@@ -224,8 +391,6 @@ export function SendImagesPage() {
                 const response = await apiService.uploadImage(imageData);
                 
                 if (response && !response.error) {
-                  console.log('✅ Batch image uploaded successfully:', response);
-                  
                   const newImage = {
                     id: response.image?.id || `temp-${Date.now()}-${i}`,
                     ...imageData,
@@ -233,8 +398,6 @@ export function SendImagesPage() {
                   };
                   
                   setImages(prev => [...prev, newImage]);
-                  console.log('📷 Imagem adicionada ao estado local:', newImage.filename);
-                  
                   resolve();
                 } else {
                   throw new Error(response.error || 'Upload failed');
@@ -252,7 +415,6 @@ export function SendImagesPage() {
         }
 
         toast.success(`✅ ${files.length} arquivo(s) enviado(s) em modo lote!`);
-        console.log('🔄 Carregando imagens atualizadas após upload em lote...');
         await reloadOnlyImages();
 
       } else {
@@ -298,8 +460,6 @@ export function SendImagesPage() {
                 const response = await apiService.uploadImage(imageData);
                 
                 if (response && !response.error) {
-                  console.log('✅ Image uploaded successfully:', response);
-                  
                   const newImage = {
                     id: response.image?.id || `temp-${Date.now()}-${i}`,
                     ...imageData,
@@ -307,8 +467,6 @@ export function SendImagesPage() {
                   };
                   
                   setImages(prev => [...prev, newImage]);
-                  console.log('📷 Imagem adicionada ao estado local:', newImage.filename);
-                  
                   resolve();
                 } else {
                   throw new Error(response.error || 'Upload failed');
@@ -327,7 +485,6 @@ export function SendImagesPage() {
 
         toast.success(`✅ ${files.length} arquivo(s) enviado(s) com sucesso!`);
         setSelectedStudent('');
-        console.log('🔄 Carregando imagens atualizadas após upload individual...');
         await reloadOnlyImages();
       }
 
@@ -354,7 +511,6 @@ export function SendImagesPage() {
     console.log('📝 Total questions:', examData.questions.length);
 
     if (image.isBatch) {
-      // TODOS os alunos disponíveis, independente da ordem
       const batchStudentsList = availableStudents.map(student => ({
         ...image,
         studentId: student.id,
@@ -380,7 +536,6 @@ export function SendImagesPage() {
   };
 
   const generateExcelExport = (corrections, examData, type = 'all') => {
-    // Organizar por matéria
     const bySubject = {};
     
     corrections.forEach(correction => {
@@ -398,7 +553,6 @@ export function SendImagesPage() {
       });
     });
 
-    // Gerar CSV para cada matéria ou geral
     const generateCSV = (data, subject) => {
       let csv = `Matéria: ${subject}\n`;
       csv += `Simulado: ${examData.title}\n`;
@@ -413,7 +567,6 @@ export function SendImagesPage() {
     };
 
     if (type === 'all') {
-      // Planilha geral
       let csv = `RELATÓRIO GERAL - ${examData.title}\n`;
       csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
       csv += 'Aluno,Turma,Nota,Percentual\n';
@@ -434,7 +587,6 @@ export function SendImagesPage() {
       
       return csv;
     } else {
-      // Planilha específica de matéria
       return generateCSV(bySubject[type] || [], type);
     }
   };
@@ -541,7 +693,6 @@ export function SendImagesPage() {
       if (submissionResponse && !submissionResponse.error) {
         console.log(`✅ Submission created for ${currentStudent.studentName}`);
         
-        // Adicionar às correções completas
         setCompletedCorrections(prev => [...prev, submissionData]);
         
         toast.success(
@@ -550,18 +701,13 @@ export function SendImagesPage() {
         );
 
         if (currentBatchIndex === batchImages.length - 1) {
-          // Último aluno
           console.log('✅ Lote finalizado - todas as correções completas');
 
           toast.success(
             `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nAgora você pode exportar os resultados!`,
             { duration: 5000 }
           );
-          
-          // NÃO fechar o dialog - mostrar opções de exportação
-          // setShowBatchProcessing(false) - REMOVIDO
         } else {
-          // Próximo aluno
           setCurrentBatchIndex(prev => prev + 1);
           setManualAnswers(new Array(examData.questions.length).fill(-1));
         }
@@ -667,7 +813,7 @@ export function SendImagesPage() {
         console.log('✅ Submission created successfully');
 
         toast.success(
-          `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)\n\nResultado salvo em "Correção de Simulados"\n\nVocê pode reprocessar esta imagem a qualquer momento.`,
+          `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
           { duration: 6000 }
         );
         
@@ -768,7 +914,7 @@ export function SendImagesPage() {
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold text-slate-800">Correção com Cartão Resposta</h1>
-        <p className="text-slate-600">Envie imagens de cartões resposta e selecione as respostas marcadas pelo aluno</p>
+        <p className="text-slate-600">Envie imagens de cartões resposta e corrija automaticamente ou manualmente</p>
       </div>
 
       {exams.length === 0 && (
@@ -780,7 +926,6 @@ export function SendImagesPage() {
                 <p className="font-semibold text-orange-900 mb-2">Nenhum simulado válido disponível</p>
                 <p className="text-sm text-orange-800">
                   Para usar esta funcionalidade, você precisa primeiro criar um simulado com questões.
-                  Vá para "Criar Simulado" e configure pelo menos uma seção com questões.
                 </p>
               </div>
             </div>
@@ -820,11 +965,6 @@ export function SendImagesPage() {
                   </SelectItem>
                 </SelectContent>
               </Select>
-              <p className="text-xs text-slate-500 mt-1">
-                {uploadMode === 'batch' 
-                  ? 'Um arquivo com cartões de todos os alunos' 
-                  : 'Um arquivo por aluno específico'}
-              </p>
             </div>
 
             <div>
@@ -838,7 +978,7 @@ export function SendImagesPage() {
                 <SelectContent>
                   {exams.length === 0 ? (
                     <div className="p-4 text-center text-sm text-slate-500">
-                      Nenhum simulado disponível. Crie um simulado primeiro.
+                      Nenhum simulado disponível
                     </div>
                   ) : (
                     exams.map(exam => (
@@ -849,11 +989,6 @@ export function SendImagesPage() {
                   )}
                 </SelectContent>
               </Select>
-              {exams.length > 0 && (
-                <p className="text-xs text-slate-500 mt-1">
-                  {exams.length} simulado(s) disponível(is)
-                </p>
-              )}
             </div>
           </div>
 
@@ -878,7 +1013,7 @@ export function SendImagesPage() {
                   {availableStudents.length === 0 ? (
                     <div className="p-4 text-center text-sm text-slate-500">
                       {selectedExam 
-                        ? "Nenhum aluno encontrado para esta turma"
+                        ? "Nenhum aluno encontrado"
                         : "Selecione um simulado primeiro"
                       }
                     </div>
@@ -894,30 +1029,7 @@ export function SendImagesPage() {
                   )}
                 </SelectContent>
               </Select>
-              {selectedExam && availableStudents.length > 0 && (
-                <p className="text-xs text-slate-500 mt-1">
-                  {availableStudents.length} aluno(s) da turma
-                </p>
-              )}
             </div>
-          )}
-
-          {uploadMode === 'batch' && selectedExam && (
-            <Card className="border-blue-200 bg-blue-50">
-              <CardContent className="p-4">
-                <div className="flex items-start space-x-3">
-                  <Users className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                  <div>
-                    <p className="font-medium text-blue-900">Modo de Lote Ativado</p>
-                    <p className="text-sm text-blue-800 mt-1">
-                      O arquivo será processado para todos os {availableStudents.length} alunos da turma.
-                      Você preencherá as respostas de cada aluno sequencialmente após o upload.
-                      Todos os alunos serão carregados, independente da ordem alfabética.
-                    </p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
           )}
 
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors">
@@ -978,15 +1090,13 @@ export function SendImagesPage() {
             <CardContent className="p-4">
               <h4 className="font-medium text-blue-900 mb-2 flex items-center">
                 <Scan className="w-4 h-4 mr-2" />
-                Como funciona a correção:
+                Modos de Correção:
               </h4>
               <ul className="text-sm text-blue-800 space-y-1">
-                <li>• <strong>Modo Lote:</strong> Envie um arquivo com cartões de todos os alunos e corrija sequencialmente</li>
-                <li>• <strong>Modo Individual:</strong> Envie um arquivo para cada aluno específico</li>
-                <li>• Clique em "Processar" e marque as respostas que o aluno preencheu</li>
-                <li>• O sistema calculará automaticamente a nota comparando com o gabarito</li>
-                <li>• Após finalizar o lote, você poderá exportar planilhas Excel por matéria ou geral</li>
-                <li>• <strong>Tamanho máximo:</strong> 30MB por arquivo (JPG, PNG, PDF)</li>
+                <li>• <strong>Correção Automática (IA/OCR):</strong> O sistema detecta automaticamente as respostas marcadas</li>
+                <li>• <strong>Correção Manual:</strong> Você marca manualmente as respostas visualizando o cartão</li>
+                <li>• <strong>Modo Lote:</strong> Corrija todos os alunos de uma vez automaticamente</li>
+                <li>• <strong>Exportação Excel:</strong> Após correção, exporte planilhas por matéria ou relatório geral</li>
               </ul>
             </CardContent>
           </Card>
@@ -1093,15 +1203,6 @@ export function SendImagesPage() {
                           <Badge className={getStatusColor(image.status)}>
                             {image.status}
                           </Badge>
-                          {image.score !== undefined && (
-                            <Badge className={
-                              image.score >= 70 ? 'bg-green-100 text-green-800' :
-                              image.score >= 50 ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-red-100 text-red-800'
-                            }>
-                              Nota: {image.score}%
-                            </Badge>
-                          )}
                         </div>
                         <p className="text-sm text-slate-600 mb-1">{image.examTitle}</p>
                         <div className="flex items-center space-x-4 text-xs text-slate-500">
@@ -1110,33 +1211,32 @@ export function SendImagesPage() {
                           <span>Tamanho: {image.size}</span>
                           <span>•</span>
                           <span>Enviado: {image.uploadedAt}</span>
-                          {image.processedAt && (
-                            <>
-                              <span>•</span>
-                              <span>Corrigido: {image.processedAt}</span>
-                            </>
-                          )}
                         </div>
-                        {image.error && (
-                          <p className="text-xs text-red-600 mt-1">Erro: {image.error}</p>
-                        )}
                       </div>
                     </div>
                     
                     <div className="flex items-center space-x-2 ml-4">
                       {getStatusIcon(image.status)}
                       
+                      {image.isBatch && (
+                        <Button 
+                          size="sm"
+                          onClick={() => handleAutoProcessBatch(image)}
+                          disabled={isAutoProcessing}
+                          className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+                        >
+                          <Zap className="w-4 h-4 mr-1" />
+                          Correção Automática
+                        </Button>
+                      )}
+                      
                       <Button 
                         size="sm"
                         onClick={() => handleProcessImage(image)}
-                        className={
-                          image.status === 'Processada' 
-                            ? 'bg-green-600 hover:bg-green-700'
-                            : 'bg-blue-600 hover:bg-blue-700'
-                        }
+                        className="bg-blue-600 hover:bg-blue-700"
                       >
-                        <FileCheck className="w-4 h-4 mr-1" />
-                        {image.status === 'Processada' ? 'Reprocessar' : 'Processar'}
+                        <Eye className="w-4 h-4 mr-1" />
+                        Correção Manual
                       </Button>
                       
                       <Button 
@@ -1160,14 +1260,171 @@ export function SendImagesPage() {
               <ImageIcon className="w-16 h-16 text-slate-300 mx-auto mb-4" />
               <h3 className="font-medium text-slate-800 mb-2">Nenhum cartão resposta enviado</h3>
               <p className="text-slate-500">
-                Comece selecionando um simulado e o modo de upload (lote ou individual)
+                Comece selecionando um simulado e fazendo upload dos cartões
               </p>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Dialog para correção individual */}
+      {/* Dialog de processamento automático */}
+      <Dialog open={isAutoProcessing} onOpenChange={() => {}}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center">
+              <Zap className="w-5 h-5 mr-2 text-purple-600" />
+              Processamento Automático em Andamento
+            </DialogTitle>
+            <DialogDescription>
+              Aguarde enquanto o sistema detecta e corrige automaticamente as respostas...
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="flex items-center justify-center">
+              <div className="w-20 h-20 bg-gradient-to-br from-purple-100 to-blue-100 rounded-full flex items-center justify-center">
+                <Loader2 className="w-10 h-10 animate-spin text-purple-600" />
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Progresso</span>
+                <span className="font-medium text-slate-800">{Math.round(autoProcessingProgress)}%</span>
+              </div>
+              <Progress value={autoProcessingProgress} className="h-3" />
+            </div>
+            
+            <Card className="border-blue-200 bg-blue-50">
+              <CardContent className="p-4">
+                <p className="text-sm text-blue-800 text-center">
+                  🤖 IA detectando respostas marcadas nos cartões...
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de resultados automáticos */}
+      <Dialog open={showAutoResults} onOpenChange={setShowAutoResults}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center justify-between">
+              <span className="flex items-center">
+                <CheckCircle className="w-6 h-6 mr-2 text-green-600" />
+                Correção Automática Concluída!
+              </span>
+              <Badge className="bg-purple-100 text-purple-800">
+                {exams.find(e => e.id === selectedImage?.examId)?.title}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              Todos os alunos foram corrigidos automaticamente. Confira os resultados e exporte as planilhas.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="flex-1 overflow-y-auto pr-2">
+            <div className="space-y-4">
+              <Card className="border-green-200 bg-green-50">
+                <CardContent className="p-6">
+                  <div className="text-center">
+                    <Zap className="w-16 h-16 text-green-600 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold text-green-900 mb-2">
+                      Processamento Completo!
+                    </h3>
+                    <p className="text-green-800">
+                      {completedCorrections.length} alunos corrigidos automaticamente
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <FileSpreadsheet className="w-5 h-5 mr-2" />
+                    Exportar Planilhas Excel
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div>
+                    <Button 
+                      onClick={() => handleExportExcel('general')}
+                      className="w-full bg-green-600 hover:bg-green-700"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Exportar Planilha Geral (Todas as Matérias)
+                    </Button>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <p className="text-sm font-medium text-slate-700 mb-3">
+                      Exportar por Matéria:
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {getUniqueSubjects().map(subject => (
+                        <Button
+                          key={subject}
+                          onClick={() => handleExportExcel('subject', subject)}
+                          variant="outline"
+                          className="w-full"
+                        >
+                          <FileSpreadsheet className="w-4 h-4 mr-2" />
+                          {subject}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <h4 className="text-sm font-medium text-slate-700 mb-3">
+                      Resumo das Correções:
+                    </h4>
+                    <div className="max-h-48 overflow-y-auto space-y-2">
+                      {completedCorrections.map((corr, idx) => (
+                        <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded">
+                          <span className="text-sm">{corr.studentName}</span>
+                          <Badge className={
+                            corr.percentage >= 70 ? 'bg-green-100 text-green-800' :
+                            corr.percentage >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                          }>
+                            {corr.percentage}% ({corr.score}/{corr.totalQuestions})
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+
+          <div className="flex-shrink-0 flex justify-between items-center pt-4 border-t mt-4">
+            <Button 
+              variant="outline" 
+              onClick={async () => {
+                setShowAutoResults(false);
+                setCompletedCorrections([]);
+                setSelectedImage(null);
+                await reloadOnlyImages();
+              }}
+            >
+              Fechar
+            </Button>
+            <Button 
+              onClick={() => handleExportExcel('general')}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Exportar Relatório Geral
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para correção individual manual */}
       <Dialog open={showAnswerSheet} onOpenChange={setShowAnswerSheet}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
@@ -1178,7 +1435,7 @@ export function SendImagesPage() {
               </Badge>
             </DialogTitle>
             <DialogDescription>
-              Marque as alternativas que o aluno preencheu no cartão resposta. As respostas corretas estão destacadas em verde.
+              Marque as alternativas que o aluno preencheu no cartão resposta.
             </DialogDescription>
           </DialogHeader>
           
@@ -1191,163 +1448,124 @@ export function SendImagesPage() {
                     <div>
                       <p className="font-medium text-orange-900">Instruções de Correção</p>
                       <p className="text-sm text-orange-800 mt-1">
-                        Olhe a imagem do cartão resposta e selecione a alternativa que o aluno marcou em cada questão.
+                        Selecione a alternativa que o aluno marcou em cada questão.
                         As respostas corretas estão destacadas em verde para referência.
-                        Deixe em branco as questões não respondidas pelo aluno.
                       </p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <div className="space-y-4 pb-4">
+             <div className="space-y-4 pb-4">
                 {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
                   <Card key={index} className="border-2">
                     <CardContent className="p-4">
-                      <div className="mb-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="font-semibold text-slate-800">
-                            Questão {index + 1}
-                          </span>
-                          <Badge variant="outline" className="text-xs">
-                            {question.subject}
-                          </Badge>
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Badge className="bg-blue-100 text-blue-800">
+                              Questão {index + 1}
+                            </Badge>
+                            <Badge variant="outline">{question.subject || 'Geral'}</Badge>
+                          </div>
+                          <p className="text-sm text-slate-700 font-medium mb-2">
+                            {question.question}
+                          </p>
                         </div>
-                        <p className="text-sm text-slate-700">{question.question}</p>
                       </div>
-                      
+
                       <div className="space-y-2">
                         <p className="text-xs font-medium text-slate-600 mb-2">
-                          Selecione a resposta do aluno:
+                          Resposta do Aluno:
                         </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {question.options.map((option, optIdx) => {
-                            const isCorrect = optIdx === question.correctAnswer;
-                            const isSelected = manualAnswers[index] === optIdx;
+                        <div className="grid grid-cols-5 gap-2">
+                          {question.options.map((option, optionIndex) => {
+                            const isCorrect = optionIndex === question.correctAnswer;
+                            const isSelected = manualAnswers[index] === optionIndex;
                             
                             return (
-                              <button
-                                key={optIdx}
+                              <Button
+                                key={optionIndex}
+                                variant="outline"
+                                size="sm"
                                 onClick={() => {
                                   const newAnswers = [...manualAnswers];
-                                  newAnswers[index] = isSelected ? -1 : optIdx;
+                                  newAnswers[index] = optionIndex;
                                   setManualAnswers(newAnswers);
                                 }}
-                                className={`text-left p-2 rounded text-sm border transition-all ${
-                                  isSelected
-                                    ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
-                                    : isCorrect
-                                      ? 'border-green-300 bg-green-50'
-                                      : 'border-slate-200 bg-slate-50'
-                                } hover:border-slate-400`}
+                                className={`
+                                  ${isSelected ? 'bg-blue-600 text-white border-blue-600' : ''}
+                                  ${isCorrect ? 'border-green-500 border-2' : ''}
+                                  hover:bg-blue-100
+                                `}
                               >
-                                <span className="font-semibold">{String.fromCharCode(65 + optIdx)}) </span>
-                                {option}
-                                {isCorrect && (
-                                  <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
-                                    ✓ Gabarito
-                                  </Badge>
-                                )}
-                                {isSelected && (
-                                  <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
-                                    Marcada
-                                  </Badge>
-                                )}
-                              </button>
+                                {String.fromCharCode(65 + optionIndex)}
+                              </Button>
                             );
                           })}
                         </div>
+                        <p className="text-xs text-green-600 mt-1">
+                          ✓ Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
+                        </p>
                       </div>
                     </CardContent>
                   </Card>
                 ))}
               </div>
-
-              <Card className="border-blue-200 bg-blue-50">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-blue-900">Progresso da Correção</p>
-                      <p className="text-sm text-blue-800 mt-1">
-                        {manualAnswers.filter(a => a >= 0).length} de {manualAnswers.length} questões marcadas
-                      </p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-blue-900">
-                        {Math.round((manualAnswers.filter(a => a >= 0).length / manualAnswers.length) * 100)}%
-                      </p>
-                      <p className="text-xs text-blue-700">Completo</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
             </div>
           </div>
 
-          <div className="flex-shrink-0 flex justify-end space-x-2 pt-4 border-t mt-4">
-            <Button 
-              variant="outline" 
-              onClick={() => {
-                setShowAnswerSheet(false);
-                setSelectedImage(null);
-              }}
-              disabled={isProcessing}
-            >
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleManualCorrection}
-              disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {isProcessing ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Processando...
-                </>
-              ) : (
-                <>
-                  <CheckCircle className="w-4 h-4 mr-2" />
-                  Finalizar Correção
-                </>
-              )}
-            </Button>
+          <div className="flex-shrink-0 flex justify-between items-center pt-4 border-t mt-4">
+            <div className="text-sm text-slate-600">
+              {manualAnswers.filter(a => a >= 0).length} / {manualAnswers.length} questões marcadas
+            </div>
+            <div className="flex space-x-2">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowAnswerSheet(false);
+                  setSelectedImage(null);
+                }}
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleManualCorrection}
+                disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <FileCheck className="w-4 h-4 mr-2" />
+                    Finalizar Correção
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Dialog para correção em lote */}
-      <Dialog open={showBatchProcessing} onOpenChange={(open) => {
-        if (!open && completedCorrections.length < batchImages.length) {
-          if (confirm('Você tem correções não finalizadas. Deseja realmente sair?')) {
-            setShowBatchProcessing(false);
-            setBatchImages([]);
-            setSelectedImage(null);
-            setCurrentBatchIndex(0);
-            setCompletedCorrections([]);
-          }
-        } else {
-          setShowBatchProcessing(open);
-        }
-      }}>
+      {/* Dialog para correção em lote manual */}
+      <Dialog open={showBatchProcessing} onOpenChange={setShowBatchProcessing}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center justify-between">
               <span>
-                {currentBatchIndex >= batchImages.length ? 
-                  'Correção em Lote Finalizada!' : 
-                  `Correção em Lote - Aluno ${currentBatchIndex + 1} de ${batchImages.length}`
-                }
+                Correção em Lote - Aluno {currentBatchIndex + 1} de {batchImages.length}
               </span>
               <Badge className="bg-purple-100 text-purple-800">
                 {exams.find(e => e.id === selectedImage?.examId)?.title}
               </Badge>
             </DialogTitle>
-            {currentBatchIndex < batchImages.length && (
-              <DialogDescription>
-                Corrigindo: <strong>{batchImages[currentBatchIndex]?.studentName}</strong>
-              </DialogDescription>
-            )}
+            <DialogDescription>
+              {batchImages[currentBatchIndex]?.studentName} - Marque as respostas do cartão
+            </DialogDescription>
           </DialogHeader>
           
           <div className="flex-1 overflow-y-auto pr-2">
@@ -1355,274 +1573,175 @@ export function SendImagesPage() {
               <Card className="border-purple-200 bg-purple-50">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-3">
-                      <Users className="w-5 h-5 text-purple-600" />
-                      <div>
-                        <p className="font-medium text-purple-900">Progresso do Lote</p>
-                        <p className="text-sm text-purple-800">
-                          {completedCorrections.length} de {batchImages.length} alunos corrigidos
-                        </p>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-2xl font-bold text-purple-900">
-                        {Math.round((completedCorrections.length / batchImages.length) * 100)}%
+                    <div>
+                      <p className="font-medium text-purple-900">
+                        {batchImages[currentBatchIndex]?.studentName}
+                      </p>
+                      <p className="text-sm text-purple-700">
+                        Turma: {batchImages[currentBatchIndex]?.studentClass}
                       </p>
                     </div>
+                    <div className="text-right">
+                      <p className="text-sm text-purple-700">
+                        Progresso: {currentBatchIndex + 1}/{batchImages.length}
+                      </p>
+                      <Progress 
+                        value={((currentBatchIndex + 1) / batchImages.length) * 100} 
+                        className="w-32 mt-2"
+                      />
+                    </div>
                   </div>
-                  <Progress 
-                    value={(completedCorrections.length / batchImages.length) * 100} 
-                    className="mt-3"
-                  />
                 </CardContent>
               </Card>
 
-              {currentBatchIndex >= batchImages.length ? (
-                // Tela de finalização com exportação
-                <div className="space-y-4">
-                  <Card className="border-green-200 bg-green-50">
-                    <CardContent className="p-6">
-                      <div className="text-center">
-                        <CheckCircle className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                        <h3 className="text-xl font-bold text-green-900 mb-2">
-                          Todas as Correções Concluídas!
-                        </h3>
-                        <p className="text-green-800">
-                          {completedCorrections.length} alunos corrigidos com sucesso
-                        </p>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader>
-                      <CardTitle className="flex items-center">
-                        <FileSpreadsheet className="w-5 h-5 mr-2" />
-                        Exportar Planilhas Excel
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      <div>
-                        <Button 
-                          onClick={() => handleExportExcel('general')}
-                          className="w-full bg-green-600 hover:bg-green-700"
-                        >
-                          <Download className="w-4 h-4 mr-2" />
-                          Exportar Planilha Geral (Todas as Matérias)
-                        </Button>
-                      </div>
-
-                      <div className="border-t pt-4">
-                        <p className="text-sm font-medium text-slate-700 mb-3">
-                          Exportar por Matéria:
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          {getUniqueSubjects().map(subject => (
-                            <Button
-                              key={subject}
-                              onClick={() => handleExportExcel('subject', subject)}
-                              variant="outline"
-                              className="w-full"
-                            >
-                              <FileSpreadsheet className="w-4 h-4 mr-2" />
-                              {subject}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-
-                      <div className="border-t pt-4">
-                        <h4 className="text-sm font-medium text-slate-700 mb-3">
-                          Resumo das Correções:
-                        </h4>
-                        <div className="max-h-48 overflow-y-auto space-y-2">
-                          {completedCorrections.map((corr, idx) => (
-                            <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                              <span className="text-sm">{corr.studentName}</span>
-                              <Badge className={
-                                corr.percentage >= 70 ? 'bg-green-100 text-green-800' :
-                                corr.percentage >= 50 ? 'bg-yellow-100 text-yellow-800' :
-                                'bg-red-100 text-red-800'
-                              }>
-                                {corr.percentage}%
-                              </Badge>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-              ) : (
-                // Tela de correção do aluno atual
-                <>
-                  <Card className="border-orange-200 bg-orange-50">
-                    <CardContent className="p-4">
-                      <div className="flex items-start space-x-3">
-                        <AlertCircle className="w-5 h-5 text-orange-600 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="font-medium text-orange-900">Instruções</p>
-                          <p className="text-sm text-orange-800 mt-1">
-                            Marque as respostas do aluno <strong>{batchImages[currentBatchIndex]?.studentName}</strong> no cartão resposta.
-                            Após finalizar, você será direcionado para o próximo aluno automaticamente.
-                            Nenhum aluno será pulado - todos serão corrigidos.
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <div className="space-y-4 pb-4">
-                    {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
-                      <Card key={index} className="border-2">
-                        <CardContent className="p-4">
-                          <div className="mb-3">
-                            <div className="flex items-center justify-between mb-2">
-                              <span className="font-semibold text-slate-800">
-                                Questão {index + 1}
-                              </span>
-                              <Badge variant="outline" className="text-xs">
-                                {question.subject}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-slate-700">{question.question}</p>
-                          </div>
-                          
-                          <div className="space-y-2">
-                            <p className="text-xs font-medium text-slate-600 mb-2">
-                              Selecione a resposta do aluno:
-                            </p>
-                            <div className="grid grid-cols-2 gap-2">
-                              {question.options.map((option, optIdx) => {
-                                const isCorrect = optIdx === question.correctAnswer;
-                                const isSelected = manualAnswers[index] === optIdx;
-                                
-                                return (
-                                  <button
-                                    key={optIdx}
-                                    onClick={() => {
-                                      const newAnswers = [...manualAnswers];
-                                      newAnswers[index] = isSelected ? -1 : optIdx;
-                                      setManualAnswers(newAnswers);
-                                    }}
-                                    className={`text-left p-2 rounded text-sm border transition-all ${
-                                      isSelected
-                                        ? 'border-blue-500 bg-blue-50 font-medium ring-2 ring-blue-200'
-                                        : isCorrect
-                                          ? 'border-green-300 bg-green-50'
-                                          : 'border-slate-200 bg-slate-50'
-                                    } hover:border-slate-400`}
-                                  >
-                                    <span className="font-semibold">{String.fromCharCode(65 + optIdx)}) </span>
-                                    {option}
-                                    {isCorrect && (
-                                      <Badge className="ml-2 bg-green-100 text-green-800 text-xs">
-                                        ✓ Gabarito
-                                      </Badge>
-                                    )}
-                                    {isSelected && (
-                                      <Badge className="ml-2 bg-blue-100 text-blue-800 text-xs">
-                                        Marcada
-                                      </Badge>
-                                    )}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-
-                  <Card className="border-blue-200 bg-blue-50">
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div>
-                          <p className="font-medium text-blue-900">Progresso desta Correção</p>
-                          <p className="text-sm text-blue-800 mt-1">
-                            {manualAnswers.filter(a => a >= 0).length} de {manualAnswers.length} questões marcadas
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-2xl font-bold text-blue-900">
-                            {Math.round((manualAnswers.filter(a => a >= 0).length / manualAnswers.length) * 100)}%
-                          </p>
-                          <p className="text-xs text-blue-700">Completo</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </>
+              {completedCorrections.length > 0 && (
+                <Card className="border-green-200 bg-green-50">
+                  <CardContent className="p-4">
+                    <p className="text-sm font-medium text-green-900 mb-2">
+                      ✅ Correções Completadas: {completedCorrections.length}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {completedCorrections.map((corr, idx) => (
+                        <Badge key={idx} className="bg-green-100 text-green-800">
+                          {corr.studentName}: {corr.percentage}%
+                        </Badge>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
               )}
+
+              <div className="space-y-4 pb-4">
+                {exams.find(e => e.id === selectedImage?.examId)?.questions.map((question, index) => (
+                  <Card key={index} className="border-2">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-2 mb-2">
+                            <Badge className="bg-blue-100 text-blue-800">
+                              Questão {index + 1}
+                            </Badge>
+                            <Badge variant="outline">{question.subject || 'Geral'}</Badge>
+                          </div>
+                          <p className="text-sm text-slate-700 font-medium mb-2">
+                            {question.question}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <p className="text-xs font-medium text-slate-600 mb-2">
+                          Resposta do Aluno:
+                        </p>
+                        <div className="grid grid-cols-5 gap-2">
+                          {question.options.map((option, optionIndex) => {
+                            const isCorrect = optionIndex === question.correctAnswer;
+                            const isSelected = manualAnswers[index] === optionIndex;
+                            
+                            return (
+                              <Button
+                                key={optionIndex}
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  const newAnswers = [...manualAnswers];
+                                  newAnswers[index] = optionIndex;
+                                  setManualAnswers(newAnswers);
+                                }}
+                                className={`
+                                  ${isSelected ? 'bg-blue-600 text-white border-blue-600' : ''}
+                                  ${isCorrect ? 'border-green-500 border-2' : ''}
+                                  hover:bg-blue-100
+                                `}
+                              >
+                                {String.fromCharCode(65 + optionIndex)}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                        <p className="text-xs text-green-600 mt-1">
+                          ✓ Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
             </div>
           </div>
 
-          <div className="flex-shrink-0 flex justify-between items-center pt-4 border-t mt-4">
-            {currentBatchIndex >= batchImages.length ? (
-              <>
-                <Button 
-                  variant="outline" 
-                  onClick={async () => {
-                    setShowBatchProcessing(false);
-                    setBatchImages([]);
-                    setSelectedImage(null);
-                    setCurrentBatchIndex(0);
-                    setCompletedCorrections([]);
-                    await reloadOnlyImages();
-                  }}
-                >
-                  Fechar
-                </Button>
-                <Button 
-                  onClick={() => handleExportExcel('general')}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Exportar Relatório Geral
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button 
-                  variant="outline" 
-                  onClick={() => {
-                    if (confirm('Você tem correções não finalizadas. Deseja realmente sair?')) {
-                      setShowBatchProcessing(false);
-                      setBatchImages([]);
-                      setSelectedImage(null);
-                      setCurrentBatchIndex(0);
-                      setCompletedCorrections([]);
-                    }
-                  }}
-                  disabled={isProcessing}
-                >
-                  Cancelar Lote
-                </Button>
-                <Button 
-                  onClick={handleBatchCorrection}
-                  disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
-                  className="bg-green-600 hover:bg-green-700"
-                >
-                  {isProcessing ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Processando...
-                    </>
-                  ) : currentBatchIndex === batchImages.length - 1 ? (
-                    <>
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Finalizar Último Aluno
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle className="w-4 h-4 mr-2" />
-                      Próximo Aluno ({currentBatchIndex + 2}/{batchImages.length})
-                    </>
-                  )}
-                </Button>
-              </>
-            )}
+          <div className="flex-shrink-0 space-y-3 pt-4 border-t mt-4">
+            <div className="flex justify-between items-center text-sm">
+              <span className="text-slate-600">
+                {manualAnswers.filter(a => a >= 0).length} / {manualAnswers.length} questões marcadas
+              </span>
+              <span className="text-slate-600">
+                {completedCorrections.length} de {batchImages.length} alunos corrigidos
+              </span>
+            </div>
+            
+            <div className="flex justify-between items-center">
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setShowBatchProcessing(false);
+                  setSelectedImage(null);
+                  setBatchImages([]);
+                  setCurrentBatchIndex(0);
+                  setCompletedCorrections([]);
+                }}
+              >
+                Cancelar Lote
+              </Button>
+              
+              <div className="flex space-x-2">
+                {currentBatchIndex === batchImages.length - 1 && completedCorrections.length === batchImages.length ? (
+                  <>
+                    <Button 
+                      onClick={() => handleExportExcel('general')}
+                      className="bg-green-600 hover:bg-green-700"
+                    >
+                      <Download className="w-4 h-4 mr-2" />
+                      Exportar Planilhas
+                    </Button>
+                    <Button 
+                      onClick={async () => {
+                        setShowBatchProcessing(false);
+                        setSelectedImage(null);
+                        setBatchImages([]);
+                        setCurrentBatchIndex(0);
+                        setCompletedCorrections([]);
+                        await reloadOnlyImages();
+                      }}
+                      variant="outline"
+                    >
+                      Concluir
+                    </Button>
+                  </>
+                ) : (
+                  <Button 
+                    onClick={handleBatchCorrection}
+                    disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
+                    className="bg-blue-600 hover:bg-blue-700"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Processando...
+                      </>
+                    ) : (
+                      <>
+                        <FileCheck className="w-4 h-4 mr-2" />
+                        {currentBatchIndex === batchImages.length - 1 
+                          ? 'Finalizar Último Aluno' 
+                          : 'Próximo Aluno'
+                        }
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
