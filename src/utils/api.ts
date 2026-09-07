@@ -11,9 +11,9 @@ class ApiService {
     };
   }
 
-  private async request(endpoint: string, options: RequestInit = {}) {
+  private async request(endpoint: string, options: RequestInit = {}, timeoutMs = 10000) {
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
     
     try {
       console.log(`API Request starting: ${endpoint}`);
@@ -430,9 +430,30 @@ class ApiService {
     return this.request('/grading/queue');
   }
 
+  async deleteSubmission(submissionId: string) {
+    return this.request(`/submissions/${submissionId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Health check
   async checkHealth() {
     return this.request('/health');
+  }
+
+  // AI-powered correction (Gemini)
+  async detectAnswersAI(imageData: string, totalQuestions: number, optionsPerQuestion = 5) {
+    return this.request('/ai/detect-answers', {
+      method: 'POST',
+      body: JSON.stringify({ imageData, totalQuestions, optionsPerQuestion }),
+    }, 45000);
+  }
+
+  async gradeEssayAI(question: string, studentAnswer: string, expectedAnswer?: string, maxScore = 1) {
+    return this.request('/ai/grade-essay', {
+      method: 'POST',
+      body: JSON.stringify({ question, studentAnswer, expectedAnswer, maxScore }),
+    }, 30000);
   }
 }
 

@@ -297,8 +297,8 @@ export function QuestionBankPage() {
     setShowExportDialog(true);
   };
 
-  const handleQuickExport = () => {
-    quickExport('questions', filteredQuestions);
+  const handleQuickExport = async () => {
+    await quickExport('questions', filteredQuestions);
   };
 
   const handleImportQuestions = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -406,7 +406,7 @@ export function QuestionBankPage() {
               variant="outline"
               size="sm"
               onClick={handleQuickExport}
-              className="border-blue-200 text-blue-700 hover:bg-blue-50 text-xs lg:text-sm"
+              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 text-xs lg:text-sm"
               disabled={filteredQuestions.length === 0}
             >
               <Download className="w-4 h-4 mr-1 lg:mr-2" />
@@ -417,7 +417,7 @@ export function QuestionBankPage() {
               variant="outline"
               size="sm"
               onClick={handleExportQuestions}
-              className="border-blue-200 text-blue-700 hover:bg-blue-50"
+              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50"
               disabled={filteredQuestions.length === 0}
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -427,7 +427,7 @@ export function QuestionBankPage() {
           <Button 
             onClick={() => setShowAddForm(!showAddForm)}
             size="sm"
-            className="bg-blue-600 hover:bg-blue-700 text-xs lg:text-sm"
+            className="bg-amber-500 hover:bg-amber-600 text-zinc-900 text-xs lg:text-sm"
           >
             <Plus className="w-4 h-4 mr-1 lg:mr-2" />
             <span className="hidden sm:inline">Nova Questão</span>
@@ -598,7 +598,7 @@ export function QuestionBankPage() {
                         name="correctAnswer" 
                         checked={newQuestion.correctAnswer === index}
                         onChange={() => setNewQuestion(prev => ({ ...prev, correctAnswer: index }))}
-                        className="w-4 h-4 text-blue-600"
+                        className="w-4 h-4 text-zinc-800"
                         title="Marcar como resposta correta"
                       />
                       <span className="w-6 h-6 bg-slate-100 rounded-full flex items-center justify-center text-sm font-medium">
@@ -623,8 +623,8 @@ export function QuestionBankPage() {
             )}
             
             {newQuestion.questionType === 'essay' && (
-              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                <p className="text-sm text-blue-800">
+              <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-4">
+                <p className="text-sm text-zinc-900">
                   <strong>Questão Dissertativa:</strong> As respostas dos alunos precisarão ser corrigidas manualmente pelo professor.
                   Esta questão não contará para a pontuação automática.
                 </p>
@@ -645,7 +645,7 @@ export function QuestionBankPage() {
                 Cancelar
               </Button>
               <Button 
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-zinc-800 hover:bg-zinc-900"
                 onClick={handleCreateQuestion}
                 disabled={loading}
               >
@@ -677,11 +677,11 @@ export function QuestionBankPage() {
               <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start space-y-4 lg:space-y-0">
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2 mb-3">
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700 text-xs">
+                    <Badge variant="outline" className="bg-zinc-50 text-zinc-900 text-xs">
                       {question.subject}
                     </Badge>
                     {question.grade && (
-                      <Badge variant="outline" className="bg-indigo-50 text-indigo-700 text-xs">
+                      <Badge variant="outline" className="bg-zinc-50 text-zinc-900 text-xs">
                         {question.grade}
                       </Badge>
                     )}
@@ -691,7 +691,7 @@ export function QuestionBankPage() {
                     <Badge variant="outline" className="text-xs">
                       {question.type}
                     </Badge>
-                    <Badge variant="outline" className="bg-purple-50 text-purple-700 text-xs">
+                    <Badge variant="outline" className="bg-teal-50 text-teal-700 text-xs">
                       Peso: {question.weight || 1.0}
                     </Badge>
                   </div>
@@ -769,7 +769,7 @@ export function QuestionBankPage() {
               </p>
               <Button 
                 onClick={() => setShowAddForm(true)}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-zinc-800 hover:bg-zinc-900"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Criar Primeira Questão

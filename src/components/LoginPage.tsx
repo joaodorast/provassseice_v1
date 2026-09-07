@@ -5,6 +5,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './ui/tabs';
 import { toast } from 'sonner@2.0.3';
+import seiceLogo from '../assets/seice-logo.png';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { User } from '../App';
 import { supabase } from '../utils/supabase-client';
@@ -17,6 +18,34 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '' });
   const [signupForm, setSignupForm] = useState({ name: '', email: '', password: '', confirmPassword: '' });
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [forgotPasswordEmail, setForgotPasswordEmail] = useState('');
+  const [isSendingReset, setIsSendingReset] = useState(false);
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSendingReset(true);
+
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(forgotPasswordEmail, {
+        redirectTo: window.location.origin,
+      });
+
+      if (error) {
+        toast.error('Erro ao enviar email de recuperação: ' + error.message);
+        return;
+      }
+
+      toast.success('Se este email estiver cadastrado, você receberá um link para redefinir sua senha.');
+      setShowForgotPassword(false);
+      setForgotPasswordEmail('');
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      toast.error('Erro interno ao solicitar recuperação de senha');
+    } finally {
+      setIsSendingReset(false);
+    }
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -115,13 +144,16 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
-      <div className="w-full max-w-sm lg:max-w-md">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-zinc-100/60 to-slate-100 flex items-center justify-center p-4 relative overflow-hidden">
+      <div className="pointer-events-none absolute -top-24 -right-24 w-72 h-72 rounded-full bg-zinc-200/40 blur-3xl" />
+      <div className="pointer-events-none absolute -bottom-24 -left-24 w-72 h-72 rounded-full bg-seice-gold-soft/50 blur-3xl" />
+
+      <div className="w-full max-w-sm lg:max-w-md relative">
         <div className="text-center mb-6 lg:mb-8">
-          <div className="seice-gradient w-16 h-16 lg:w-20 lg:h-20 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-            <span className="text-white font-bold text-2xl lg:text-3xl">S</span>
+          <div className="relative w-20 h-20 lg:w-24 lg:h-24 rounded-2xl bg-white flex items-center justify-center mx-auto mb-4 shadow-xl shadow-black/10 ring-1 ring-slate-200 overflow-hidden">
+            <img src={seiceLogo} alt="Logo SEICE" className="w-full h-full object-contain p-1" />
           </div>
-          <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-2">
+          <h1 className="text-2xl lg:text-3xl font-bold text-slate-800 mb-2 tracking-tight">
             Sistema SEICE
           </h1>
           <p className="text-sm lg:text-base text-slate-600">
@@ -129,7 +161,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
           </p>
         </div>
 
-        <Card className="seice-card">
+        <Card className="seice-card border-t-2 border-t-seice-gold-light shadow-xl shadow-slate-900/5">
           <CardHeader className="text-center p-4 lg:p-6">
             <CardTitle className="text-lg lg:text-xl text-slate-800">Acesso ao Sistema</CardTitle>
             <CardDescription className="text-sm lg:text-base text-slate-600">
@@ -144,42 +176,90 @@ export function LoginPage({ onLogin }: LoginPageProps) {
               </TabsList>
               
               <TabsContent value="login">
-                <form onSubmit={handleLogin} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="login-email">Email</Label>
-                    <Input
-                      id="login-email"
-                      type="email"
-                      placeholder="seu@email.com"
-                      value={loginForm.email}
-                      onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
-                      required
-                    />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <Label htmlFor="login-password">Senha</Label>
-                    <Input
-                      id="login-password"
-                      type="password"
-                      placeholder="Sua senha"
-                      value={loginForm.password}
-                      onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
-                      required
-                    />
-                  </div>
-                  
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
-                    {isLoading ? (
-                      <div className="flex items-center space-x-2">
-                        <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
-                        <span>Entrando...</span>
+                {showForgotPassword ? (
+                  <form onSubmit={handleForgotPassword} className="space-y-4">
+                    <p className="text-sm text-slate-600">
+                      Informe seu email para receber um link de redefinição de senha.
+                    </p>
+                    <div className="space-y-2">
+                      <Label htmlFor="forgot-email">Email</Label>
+                      <Input
+                        id="forgot-email"
+                        type="email"
+                        placeholder="seu@email.com"
+                        value={forgotPasswordEmail}
+                        onChange={(e) => setForgotPasswordEmail(e.target.value)}
+                        required
+                      />
+                    </div>
+
+                    <Button type="submit" className="w-full bg-zinc-900 hover:bg-zinc-800" disabled={isSendingReset}>
+                      {isSendingReset ? (
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                          <span>Enviando...</span>
+                        </div>
+                      ) : (
+                        'Enviar link de recuperação'
+                      )}
+                    </Button>
+
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="w-full"
+                      onClick={() => setShowForgotPassword(false)}
+                    >
+                      Voltar ao login
+                    </Button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleLogin} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="login-email">Email</Label>
+                      <Input
+                        id="login-email"
+                        type="email"
+                        placeholder="seu@email.com"
+                        value={loginForm.email}
+                        onChange={(e) => setLoginForm({ ...loginForm, email: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between">
+                        <Label htmlFor="login-password">Senha</Label>
+                        <button
+                          type="button"
+                          className="text-xs text-amber-600 hover:underline"
+                          onClick={() => setShowForgotPassword(true)}
+                        >
+                          Esqueci minha senha
+                        </button>
                       </div>
-                    ) : (
-                      'Entrar no Sistema'
-                    )}
-                  </Button>
-                </form>
+                      <Input
+                        id="login-password"
+                        type="password"
+                        placeholder="Sua senha"
+                        value={loginForm.password}
+                        onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                        required
+                      />
+                    </div>
+
+                    <Button type="submit" className="w-full bg-zinc-900 hover:bg-zinc-800" disabled={isLoading}>
+                      {isLoading ? (
+                        <div className="flex items-center space-x-2">
+                          <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
+                          <span>Entrando...</span>
+                        </div>
+                      ) : (
+                        'Entrar no Sistema'
+                      )}
+                    </Button>
+                  </form>
+                )}
               </TabsContent>
               
               <TabsContent value="signup">
@@ -232,7 +312,7 @@ export function LoginPage({ onLogin }: LoginPageProps) {
                     />
                   </div>
                   
-                  <Button type="submit" className="w-full bg-blue-600 hover:bg-blue-700" disabled={isLoading}>
+                  <Button type="submit" className="w-full bg-zinc-900 hover:bg-zinc-800" disabled={isLoading}>
                     {isLoading ? (
                       <div className="flex items-center space-x-2">
                         <div className="animate-spin rounded-full h-4 w-4 border-2 border-white border-t-transparent"></div>
@@ -249,12 +329,12 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         </Card>
         
         <div className="text-center mt-4 lg:mt-6 text-xs lg:text-sm text-slate-500">
-          <div className="flex items-center justify-center space-x-2 mb-2">
-            <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+          <div className="inline-flex items-center justify-center space-x-1.5 mb-2 bg-white/70 border border-slate-200 rounded-full px-3 py-1">
+            <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full"></div>
             <span>Sistema Online</span>
           </div>
           <p className="text-xs lg:text-sm">Plataforma completa para avaliações educacionais</p>
-          <p className="text-xs mt-1">© 2024 Sistema SEICE - Versão 2.1.0</p>
+          <p className="text-xs mt-1 text-slate-400">© 2024 Sistema SEICE</p>
         </div>
       </div>
     </div>

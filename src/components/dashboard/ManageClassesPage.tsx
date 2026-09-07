@@ -200,8 +200,8 @@ export function ManageClassesPage() {
                 <p className="text-sm text-slate-600">Total de Turmas</p>
                 <h3 className="text-2xl font-bold text-slate-800 mt-1">{classes.length}</h3>
               </div>
-              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-                <GraduationCap className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
+                <GraduationCap className="w-6 h-6 text-zinc-800" />
               </div>
             </div>
           </CardContent>
@@ -232,8 +232,8 @@ export function ManageClassesPage() {
                   {new Set(classes.map(c => c.grade)).size}
                 </h3>
               </div>
-              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
-                <BookOpen className="w-6 h-6 text-purple-600" />
+              <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-teal-600" />
               </div>
             </div>
           </CardContent>
@@ -348,7 +348,7 @@ export function ManageClassesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

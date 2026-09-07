@@ -487,7 +487,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
         <Button 
           onClick={handleCreateSimulado}
           disabled={!canCreateSimulado() || loading}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="bg-zinc-800 hover:bg-zinc-900"
         >
           <Save className="w-4 h-4 mr-2" />
           {loading ? 'Salvando...' : 'Salvar Simulado'}
@@ -500,7 +500,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             <div 
               className={`w-10 h-10 rounded-full flex items-center justify-center font-semibold ${
                 step <= currentStep 
-                  ? 'bg-blue-600 text-white shadow-md' 
+                  ? 'bg-zinc-800 text-white shadow-md' 
                   : 'bg-slate-200 text-slate-500'
               }`}
             >
@@ -602,13 +602,13 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
       {currentStep === 2 && (
         <div className="space-y-6">
-          <Card className="border-blue-200 bg-blue-50">
+          <Card className="border-zinc-200 bg-zinc-50">
             <CardContent className="p-4">
               <div className="flex items-start space-x-3">
-                <FileText className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+                <FileText className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p className="font-medium text-blue-900">Organize seu simulado em seções</p>
-                  <p className="text-sm text-blue-800 mt-1">
+                  <p className="font-medium text-zinc-900">Organize seu simulado em seções</p>
+                  <p className="text-sm text-zinc-900 mt-1">
                     Crie seções como "Português", "Matemática", etc. Em cada seção você pode adicionar questões novas ou do banco.
                   </p>
                 </div>
@@ -618,7 +618,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold text-slate-800">Seções do Simulado</h3>
-            <Button onClick={handleAddSection} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
               <Plus className="w-4 h-4 mr-2" />
               Adicionar Seção
             </Button>
@@ -632,7 +632,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                 <p className="text-slate-600 mb-6">
                   Comece criando seções para organizar as questões do seu simulado.
                 </p>
-                <Button onClick={handleAddSection} className="bg-blue-600 hover:bg-blue-700">
+                <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
                   <Plus className="w-4 h-4 mr-2" />
                   Criar Primeira Seção
                 </Button>
@@ -654,7 +654,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Badge className="bg-blue-100 text-blue-800">
+                        <Badge className="bg-zinc-100 text-zinc-900">
                           {section.questions.length} questões
                         </Badge>
                         <Badge className="bg-green-100 text-green-800">
@@ -712,12 +712,12 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                                   <Badge variant="outline">
                                     Q{qIndex + 1}
                                   </Badge>
-                                  <Badge className="bg-purple-100 text-purple-800">
+                                  <Badge className="bg-teal-100 text-teal-800">
                                     {question.points}pt{question.points !== 1 && 's'}
                                   </Badge>
                                   <Badge className={
                                     question.type === 'essay' 
-                                      ? 'bg-indigo-100 text-indigo-800'
+                                      ? 'bg-zinc-100 text-zinc-900'
                                       : 'bg-cyan-100 text-cyan-800'
                                   }>
                                     {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
@@ -730,7 +730,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                                     {question.difficulty}
                                   </Badge>
                                   {question.fromBank && (
-                                    <Badge className="bg-purple-100 text-purple-800">
+                                    <Badge className="bg-teal-100 text-teal-800">
                                       Banco
                                     </Badge>
                                   )}
@@ -782,7 +782,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                                 </div>
                               )}
                               {question.type === 'essay' && (
-                                <div className="bg-indigo-50 text-indigo-800 p-2 rounded text-xs">
+                                <div className="bg-zinc-50 text-zinc-900 p-2 rounded text-xs">
                                   Questão dissertativa - Resposta em texto livre
                                 </div>
                               )}
@@ -815,15 +815,15 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             </div>
           )}
 
-          <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">
+          <Card className="bg-gradient-to-r from-zinc-50 to-teal-50 border-zinc-200">
             <CardContent className="p-6">
               <div className="grid grid-cols-3 gap-6 text-center">
                 <div>
-                  <p className="text-3xl font-bold text-blue-600">{getTotalQuestions()}</p>
+                  <p className="text-3xl font-bold text-zinc-800">{getTotalQuestions()}</p>
                   <p className="text-sm text-slate-600 mt-1">Questões</p>
                 </div>
                 <div>
-                  <p className="text-3xl font-bold text-purple-600">{getTotalPoints()}</p>
+                  <p className="text-3xl font-bold text-teal-600">{getTotalPoints()}</p>
                   <p className="text-sm text-slate-600 mt-1">Pontos</p>
                 </div>
                 <div>
@@ -855,7 +855,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             setCurrentStep(Math.min(2, currentStep + 1));
           }}
           disabled={currentStep === 2}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="bg-zinc-800 hover:bg-zinc-900"
         >
           Próximo
         </Button>
@@ -904,7 +904,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
               </Button>
               <Button 
                 onClick={handleSaveSection}
-                className="bg-blue-600 hover:bg-blue-700"
+                className="bg-zinc-800 hover:bg-zinc-900"
               >
                 {editingSection ? 'Salvar' : 'Criar Seção'}
               </Button>
@@ -1041,8 +1041,8 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
               )}
 
               {newQuestion.type === 'essay' && (
-                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                  <p className="text-sm text-indigo-800">
+                <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-4">
+                  <p className="text-sm text-zinc-900">
                     <strong>Questão Dissertativa:</strong> O aluno responderá em texto livre. Você poderá corrigir manualmente após a aplicação do simulado.
                   </p>
                 </div>
@@ -1056,7 +1056,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             </Button>
             <Button 
               onClick={handleSaveQuestion}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-zinc-800 hover:bg-zinc-900"
             >
               {editingQuestionId ? 'Salvar Alterações' : 'Adicionar Questão'}
             </Button>
@@ -1115,7 +1115,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
               {getFilteredBankQuestions().length} questão(ões) encontrada(s)
             </div>
 
-            <div className="flex-1 overflow-y-auto pr-2">
+            <div className="flex-1 min-h-0 overflow-y-auto pr-2">
               <div className="space-y-3">
                 {getFilteredBankQuestions().length === 0 ? (
                   <div className="text-center py-12">
@@ -1129,7 +1129,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                   getFilteredBankQuestions().map(question => (
                     <Card 
                       key={question.id}
-                      className="hover:border-blue-300 transition-all"
+                      className="hover:border-zinc-300 transition-all"
                     >
                       <CardContent className="p-4">
                         <div className="flex items-start justify-between mb-3 gap-3">
@@ -1137,7 +1137,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                             <Badge variant="outline" className="whitespace-nowrap">{question.subject}</Badge>
                             <Badge className={
                               question.type === 'essay' 
-                                ? 'bg-indigo-100 text-indigo-800'
+                                ? 'bg-zinc-100 text-zinc-900'
                                 : 'bg-cyan-100 text-cyan-800'
                             }>
                               {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
@@ -1149,7 +1149,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                             }>
                               {question.difficulty}
                             </Badge>
-                            <Badge className="bg-purple-100 text-purple-800">
+                            <Badge className="bg-teal-100 text-teal-800">
                               {question.points} pt{question.points !== 1 && 's'}
                             </Badge>
                             {question.tags && question.tags.length > 0 && (
@@ -1161,7 +1161,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                           <Button
                             size="sm"
                             onClick={() => handleAddQuestionFromBank(question)}
-                            className="bg-blue-600 hover:bg-blue-700 whitespace-nowrap flex-shrink-0"
+                            className="bg-amber-500 hover:bg-amber-600 text-zinc-900 whitespace-nowrap flex-shrink-0"
                           >
                             <Plus className="w-4 h-4 mr-2" />
                             Adicionar
@@ -1189,7 +1189,7 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
                         )}
                         
                         {question.type === 'essay' && (
-                          <div className="bg-indigo-50 text-indigo-800 p-2 rounded text-xs">
+                          <div className="bg-zinc-50 text-zinc-900 p-2 rounded text-xs">
                             Questão dissertativa - Resposta em texto livre
                           </div>
                         )}

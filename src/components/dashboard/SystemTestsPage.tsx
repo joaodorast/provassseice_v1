@@ -370,7 +370,7 @@ export function SystemTestsPage() {
       case 'error':
         return <XCircle className="w-5 h-5 text-red-600" />;
       case 'running':
-        return <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />;
+        return <Loader2 className="w-5 h-5 text-zinc-800 animate-spin" />;
       default:
         return <AlertCircle className="w-5 h-5 text-gray-400" />;
     }
@@ -383,7 +383,7 @@ export function SystemTestsPage() {
       case 'error':
         return <Badge className="bg-red-100 text-red-800">Falhou</Badge>;
       case 'running':
-        return <Badge className="bg-blue-100 text-blue-800">Executando...</Badge>;
+        return <Badge className="bg-zinc-100 text-zinc-900">Executando...</Badge>;
       default:
         return <Badge className="bg-gray-100 text-gray-600">Pendente</Badge>;
     }
@@ -407,13 +407,13 @@ export function SystemTestsPage() {
       </div>
 
       {/* Connection Info */}
-      <Card className="border-purple-200 bg-purple-50">
+      <Card className="border-teal-200 bg-teal-50">
         <CardContent className="pt-6">
           <div className="flex items-start space-x-3">
-            <Database className="w-5 h-5 text-purple-600 mt-0.5 flex-shrink-0" />
+            <Database className="w-5 h-5 text-teal-600 mt-0.5 flex-shrink-0" />
             <div className="flex-1">
-              <h3 className="font-semibold text-purple-900 mb-2">🔗 Informações de Conexão</h3>
-              <div className="text-sm text-purple-800 space-y-1 bg-purple-100 p-3 rounded font-mono">
+              <h3 className="font-semibold text-teal-900 mb-2">🔗 Informações de Conexão</h3>
+              <div className="text-sm text-teal-800 space-y-1 bg-teal-100 p-3 rounded font-mono">
                 <p><strong>Project ID:</strong> {projectId}</p>
                 <p><strong>Backend URL:</strong> https://{projectId}.supabase.co/functions/v1/make-server-83358821</p>
                 <p><strong>Health Check:</strong> /health</p>
@@ -425,7 +425,7 @@ export function SystemTestsPage() {
                     const startTime = Date.now();
                     try {
                       const url = `https://${projectId}.supabase.co/functions/v1/make-server-83358821/health`;
-                      console.log('%c[TESTE DIRETO] Iniciando...', 'color: purple; font-weight: bold;');
+                      console.log('%c[TESTE DIRETO] Iniciando...', 'color: teal; font-weight: bold;');
                       console.log('URL:', url);
                       console.log('Tempo:', new Date().toISOString());
                       
@@ -479,7 +479,7 @@ export function SystemTestsPage() {
                       });
                     }
                   }}
-                  className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors text-sm"
+                  className="px-4 py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 transition-colors text-sm"
                 >
                   Testar Conexão Direta
                 </button>
@@ -492,7 +492,7 @@ export function SystemTestsPage() {
                       description: 'Cole no navegador ou Postman para testar'
                     });
                   }}
-                  className="px-4 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 transition-colors text-sm"
+                  className="px-4 py-2 bg-teal-100 text-teal-700 rounded-lg hover:bg-teal-200 transition-colors text-sm"
                 >
                   Copiar URL
                 </button>
@@ -533,7 +533,7 @@ export function SystemTestsPage() {
                 <p className="text-sm text-slate-600">Total de Testes</p>
                 <p className="text-2xl font-bold text-slate-900">{tests.length}</p>
               </div>
-              <FileText className="w-8 h-8 text-blue-600" />
+              <FileText className="w-8 h-8 text-zinc-800" />
             </div>
           </CardContent>
         </Card>
@@ -569,7 +569,7 @@ export function SystemTestsPage() {
                 <p className="text-sm text-slate-600">Tempo Total</p>
                 <p className="text-2xl font-bold text-slate-900">{totalDuration}ms</p>
               </div>
-              <BarChart3 className="w-8 h-8 text-purple-600" />
+              <BarChart3 className="w-8 h-8 text-teal-600" />
             </div>
           </CardContent>
         </Card>
@@ -588,7 +588,7 @@ export function SystemTestsPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">Progresso dos Testes</span>
-                <span className="font-semibold text-blue-600">
+                <span className="font-semibold text-zinc-800">
                   {completedCount}/{tests.length} ({Math.round(progress)}%)
                 </span>
               </div>
@@ -600,7 +600,7 @@ export function SystemTestsPage() {
             <Button 
               onClick={runAllTests}
               disabled={isRunning}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-zinc-800 hover:bg-zinc-900"
             >
               {isRunning ? (
                 <>
@@ -690,15 +690,15 @@ export function SystemTestsPage() {
       )}
 
       {/* Instructions */}
-      <Card className="border-blue-200 bg-blue-50">
+      <Card className="border-zinc-200 bg-zinc-50">
         <CardHeader>
-          <CardTitle className="text-blue-900">ℹ️ Como Usar</CardTitle>
+          <CardTitle className="text-zinc-900">ℹ️ Como Usar</CardTitle>
         </CardHeader>
-        <CardContent className="text-blue-800 space-y-2">
+        <CardContent className="text-zinc-900 space-y-2">
           <p>1. <strong>Executar Todos os Testes:</strong> Clique no botão "Executar Todos os Testes" para testar todas as funcionalidades.</p>
           <p>2. <strong>Verificar Resultados:</strong> Veja o status de cada teste (verde = passou, vermelho = falhou).</p>
           <p>3. <strong>Resetar:</strong> Clique em "Resetar" para limpar os resultados e executar novamente.</p>
-          <p className="mt-4 pt-4 border-t border-blue-200">
+          <p className="mt-4 pt-4 border-t border-zinc-200">
             <strong>⚠️ Atenção:</strong> Os testes criarão dados reais no sistema (questões, alunos, simulados de teste). 
             Você pode deletá-los depois se desejar.
           </p>

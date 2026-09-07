@@ -5,6 +5,9 @@ import { AlertCircle, RefreshCw } from 'lucide-react';
 
 interface Props {
   children: ReactNode;
+  /** 'fullscreen' (default) covers the whole viewport - use for top-level crashes.
+   *  'inline' fits inside existing layout (e.g. a page area) so surrounding UI like the sidebar stays visible. */
+  variant?: 'fullscreen' | 'inline';
 }
 
 interface State {
@@ -35,20 +38,24 @@ export class ErrorBoundary extends Component<Props, State> {
 
   public render() {
     if (this.state.hasError) {
+      const isInline = this.props.variant === 'inline';
+
       return (
-        <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
+        <div className={isInline ? 'flex items-center justify-center p-4 py-12' : 'min-h-screen bg-slate-50 flex items-center justify-center p-4'}>
           <Card className="w-full max-w-md">
             <CardHeader>
               <CardTitle className="flex items-center text-red-600">
                 <AlertCircle className="w-5 h-5 mr-2" />
-                Erro no Sistema
+                {isInline ? 'Erro ao carregar esta página' : 'Erro no Sistema'}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-muted-foreground">
-                Ocorreu um erro inesperado no sistema SEICE.
+                {isInline
+                  ? 'Ocorreu um erro inesperado nesta página. O restante do sistema continua funcionando normalmente.'
+                  : 'Ocorreu um erro inesperado no sistema SEICE.'}
               </p>
-              
+
               {this.state.error && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-md">
                   <p className="text-sm text-red-800 font-mono">
@@ -56,16 +63,16 @@ export class ErrorBoundary extends Component<Props, State> {
                   </p>
                 </div>
               )}
-              
+
               <div className="flex space-x-2">
-                <Button 
+                <Button
                   onClick={this.handleReset}
                   variant="outline"
                   className="flex-1"
                 >
                   Tentar Novamente
                 </Button>
-                <Button 
+                <Button
                   onClick={this.handleReload}
                   className="flex-1"
                 >
@@ -73,7 +80,7 @@ export class ErrorBoundary extends Component<Props, State> {
                   Recarregar Página
                 </Button>
               </div>
-              
+
               <p className="text-xs text-muted-foreground text-center">
                 Se o problema persistir, contate o suporte técnico.
               </p>

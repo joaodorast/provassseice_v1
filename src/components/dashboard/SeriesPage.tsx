@@ -243,8 +243,8 @@ export function SeriesPage() {
     setShowExportDialog(true);
   };
 
-  const handleQuickExport = () => {
-    quickExport('series', processedSeries);
+  const handleQuickExport = async () => {
+    await quickExport('series', processedSeries);
   };
 
   const handleImportSeries = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -356,7 +356,7 @@ export function SeriesPage() {
             <Button 
               variant="outline" 
               onClick={handleQuickExport} 
-              className="border-blue-200 text-blue-700 hover:bg-blue-50 h-10"
+              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 h-10"
               disabled={filteredSeries.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
@@ -365,7 +365,7 @@ export function SeriesPage() {
             <Button 
               variant="outline"
               onClick={handleExportSeries}
-              className="border-blue-200 text-blue-700 hover:bg-blue-50 h-10"
+              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 h-10"
               disabled={filteredSeries.length === 0}
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -583,8 +583,8 @@ export function SeriesPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center space-x-3">
-              <div className="bg-blue-100 w-10 h-10 rounded-lg flex items-center justify-center">
-                <Users className="w-5 h-5 text-blue-600" />
+              <div className="bg-zinc-100 w-10 h-10 rounded-lg flex items-center justify-center">
+                <Users className="w-5 h-5 text-zinc-800" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Total de Alunos</p>
@@ -597,8 +597,8 @@ export function SeriesPage() {
         <Card>
           <CardContent className="p-4">
             <div className="flex items-center space-x-3">
-              <div className="bg-purple-100 w-10 h-10 rounded-lg flex items-center justify-center">
-                <Calendar className="w-5 h-5 text-purple-600" />
+              <div className="bg-teal-100 w-10 h-10 rounded-lg flex items-center justify-center">
+                <Calendar className="w-5 h-5 text-teal-600" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Ano Letivo</p>
@@ -613,7 +613,7 @@ export function SeriesPage() {
       {loading ? (
         <Card>
           <CardContent className="flex items-center justify-center py-12">
-            <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+            <Loader2 className="w-8 h-8 animate-spin text-zinc-800" />
           </CardContent>
         </Card>
       ) : (
@@ -627,7 +627,7 @@ export function SeriesPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="rounded-md border overflow-hidden">
+              <div className="rounded-md border overflow-hidden overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>

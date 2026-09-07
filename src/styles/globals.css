@@ -1,52 +1,59 @@
+@import "tailwindcss";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
   --font-size: 16px;
-  /* SEICE Brand Colors */
-  --seice-blue-primary: #1e40af;
-  --seice-blue-secondary: #3b82f6;
-  --seice-blue-light: #60a5fa;
-  --seice-slate-dark: #1e293b;
-  --seice-slate-medium: #334155;
-  --seice-slate-light: #f1f5f9;
-  
-  --background: #f8fafc;
-  --foreground: #0f172a;
+  /* SEICE Brand Colors - preto, cinza, branco e dourado (identidade da logo) */
+  --seice-black: #0a0a0a;
+  --seice-charcoal: #18181b;
+  --seice-slate-dark: #27272a;
+  --seice-slate-medium: #52525b;
+  --seice-slate-light: #f4f4f5;
+  --seice-gold: #b45309;
+  --seice-gold-light: #f59e0b;
+  --seice-gold-bright: #facc15;
+  --seice-gold-soft: #fef3c7;
+  --seice-teal: #0d9488;
+  --seice-teal-light: #14b8a6;
+
+  --background: #e4e4e7;
+  --foreground: #18181b;
   --card: #ffffff;
-  --card-foreground: #0f172a;
+  --card-foreground: #18181b;
   --popover: #ffffff;
-  --popover-foreground: #0f172a;
-  --primary: #1e40af;
+  --popover-foreground: #18181b;
+  --primary: #18181b;
   --primary-foreground: #ffffff;
-  --secondary: #e2e8f0;
-  --secondary-foreground: #334155;
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --accent: #e2e8f0;
-  --accent-foreground: #1e293b;
+  --secondary: #f4f4f5;
+  --secondary-foreground: #27272a;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
-  --border: #e2e8f0;
+  --border: #e4e4e7;
   --input: transparent;
-  --input-background: #f8fafc;
-  --switch-background: #cbd5e1;
+  --input-background: #fafafa;
+  --switch-background: #d4d4d8;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
-  --ring: #3b82f6;
-  --chart-1: #1e40af;
-  --chart-2: #3b82f6;
-  --chart-3: #60a5fa;
-  --chart-4: #93c5fd;
-  --chart-5: #dbeafe;
+  --ring: #f59e0b;
+  --chart-1: #18181b;
+  --chart-2: #f59e0b;
+  --chart-3: #0d9488;
+  --chart-4: #71717a;
+  --chart-5: #facc15;
   --radius: 0.75rem;
-  --sidebar: #1e293b;
+  --sidebar: #0a0a0a;
   --sidebar-foreground: #ffffff;
-  --sidebar-primary: #1e40af;
-  --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #334155;
-  --sidebar-accent-foreground: #f1f5f9;
-  --sidebar-border: #334155;
-  --sidebar-ring: #3b82f6;
+  --sidebar-primary: #f59e0b;
+  --sidebar-primary-foreground: #18181b;
+  --sidebar-accent: #27272a;
+  --sidebar-accent-foreground: #f4f4f5;
+  --sidebar-border: #27272a;
+  --sidebar-ring: #f59e0b;
 }
 
 .dark {
@@ -87,6 +94,14 @@
 }
 
 @theme inline {
+  --color-seice-black: var(--seice-black);
+  --color-seice-charcoal: var(--seice-charcoal);
+  --color-seice-gold: var(--seice-gold);
+  --color-seice-gold-light: var(--seice-gold-light);
+  --color-seice-gold-bright: var(--seice-gold-bright);
+  --color-seice-gold-soft: var(--seice-gold-soft);
+  --color-seice-teal: var(--seice-teal);
+  --color-seice-teal-light: var(--seice-teal-light);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -132,8 +147,14 @@
     @apply border-border outline-ring/50;
   }
 
+  html, body, #root {
+    height: 100%;
+    min-height: 100vh;
+  }
+
   body {
     @apply bg-background text-foreground;
+    margin: 0;
   }
 }
 
@@ -243,61 +264,85 @@ html {
 /* SEICE Custom Styles */
 @layer components {
   .seice-gradient {
-    background: linear-gradient(135deg, #1e40af 0%, #3b82f6 100%);
+    background: linear-gradient(135deg, #18181b 0%, #3f3f46 100%);
   }
-  
+
+  .seice-gold-gradient {
+    background: linear-gradient(135deg, #b45309 0%, #f59e0b 100%);
+  }
+
   .seice-card {
     @apply bg-white rounded-xl shadow-sm border border-slate-200 hover:shadow-md transition-shadow duration-200;
   }
-  
+
   .seice-sidebar {
-    background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+    background: linear-gradient(180deg, #0a0a0a 0%, #18181b 100%);
   }
-  
+
   .seice-button-primary {
-    @apply bg-blue-600 hover:bg-blue-700 text-white font-medium px-3 py-2 lg:px-4 lg:py-2 rounded-lg shadow-sm transition-colors duration-200 text-sm lg:text-base;
+    @apply bg-zinc-900 hover:bg-zinc-800 text-white font-medium px-3 py-2 lg:px-4 lg:py-2 rounded-lg shadow-sm hover:shadow-md transition-all duration-200 text-sm lg:text-base;
   }
-  
+
   .seice-button-secondary {
     @apply bg-slate-100 hover:bg-slate-200 text-slate-700 font-medium px-3 py-2 lg:px-4 lg:py-2 rounded-lg transition-colors duration-200 text-sm lg:text-base;
   }
-  
+
   .seice-input {
-    @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm lg:text-base;
+    @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-sm lg:text-base;
   }
-  
+
   .seice-badge-success {
     @apply bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs font-medium;
   }
-  
+
   .seice-badge-warning {
-    @apply bg-yellow-100 text-yellow-800 px-2 py-1 rounded-full text-xs font-medium;
+    @apply bg-amber-100 text-amber-800 px-2 py-1 rounded-full text-xs font-medium;
   }
-  
+
   .seice-badge-error {
     @apply bg-red-100 text-red-800 px-2 py-1 rounded-full text-xs font-medium;
   }
-  
+
   .seice-badge-info {
-    @apply bg-blue-100 text-blue-800 px-2 py-1 rounded-full text-xs font-medium;
+    @apply bg-slate-100 text-slate-800 px-2 py-1 rounded-full text-xs font-medium;
   }
-  
+
   .seice-nav-item {
-    @apply flex items-center space-x-2 lg:space-x-3 px-3 py-2 lg:px-4 lg:py-3 rounded-xl text-slate-300 hover:bg-slate-700 hover:text-white transition-all duration-200;
+    @apply flex items-center space-x-2 lg:space-x-3 px-3 py-2 lg:px-4 lg:py-3 rounded-xl text-slate-300 hover:bg-white/10 hover:text-white transition-all duration-200;
   }
-  
+
   .seice-nav-item.active {
-    @apply bg-blue-600 text-white shadow-lg;
+    @apply bg-amber-500 text-zinc-900 shadow-lg shadow-black/30;
   }
-  
+
   .seice-header {
-    @apply bg-white border-b border-slate-200 px-4 py-3 lg:px-8 lg:py-4 shadow-sm;
+    @apply bg-white/90 backdrop-blur-sm border-b border-slate-200 px-4 py-3 lg:px-8 lg:py-4 shadow-sm;
   }
-  
+
   .seice-content {
     @apply flex-1 bg-slate-50 p-4 lg:p-8;
   }
-  
+
+  .no-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  .seice-content-bg {
+    background-color: var(--background);
+    background-image:
+      radial-gradient(circle at 100% 0%, rgba(245, 158, 11, 0.08), transparent 42%),
+      radial-gradient(circle at 0% 100%, rgba(24, 24, 27, 0.05), transparent 38%);
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+  }
+
   .seice-footer {
     @apply bg-white border-t border-slate-200 px-4 py-3 lg:px-8 lg:py-4;
   }

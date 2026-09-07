@@ -339,7 +339,7 @@ export function ApplyExamsPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-3 text-blue-600" />
+          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-3 text-zinc-800" />
           <p className="text-sm text-muted-foreground">Carregando simulados e alunos...</p>
         </div>
       </div>
@@ -461,7 +461,7 @@ export function ApplyExamsPage() {
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                         <div className="flex items-center">
-                          <Target className="w-4 h-4 mr-2 text-blue-600" />
+                          <Target className="w-4 h-4 mr-2 text-zinc-800" />
                           <span>{getSelectedExam()?.totalQuestions || 0} questões</span>
                         </div>
                         <div className="flex items-center">
@@ -469,7 +469,7 @@ export function ApplyExamsPage() {
                           <span>{getSelectedExam()?.timeLimit} min</span>
                         </div>
                         <div className="flex items-center">
-                          <BookOpen className="w-4 h-4 mr-2 text-purple-600" />
+                          <BookOpen className="w-4 h-4 mr-2 text-teal-600" />
                           <span>{getSelectedExam()?.subjects?.length || 0} matérias</span>
                         </div>
                         <div className="flex items-center">
@@ -511,13 +511,13 @@ export function ApplyExamsPage() {
                     <div 
                       className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
                         applicationMethod === 'online' 
-                          ? 'border-blue-500 bg-blue-50 ring-2 ring-blue-200' 
-                          : 'border-border hover:border-blue-300'
+                          ? 'border-zinc-500 bg-zinc-50 ring-2 ring-zinc-200' 
+                          : 'border-border hover:border-zinc-300'
                       }`}
                       onClick={() => setApplicationMethod('online')}
                     >
                       <div className="text-center">
-                        <Link className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                        <Link className="w-8 h-8 mx-auto mb-2 text-zinc-800" />
                         <h3 className="font-medium">Online</h3>
                         <p className="text-sm text-muted-foreground">Link direto para os alunos</p>
                         <div className="mt-2 text-xs text-muted-foreground">
@@ -551,13 +551,13 @@ export function ApplyExamsPage() {
                     <div 
                       className={`p-4 border rounded-lg cursor-pointer transition-all hover:shadow-sm ${
                         applicationMethod === 'hybrid' 
-                          ? 'border-purple-500 bg-purple-50 ring-2 ring-purple-200' 
-                          : 'border-border hover:border-purple-300'
+                          ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-200' 
+                          : 'border-border hover:border-teal-300'
                       }`}
                       onClick={() => setApplicationMethod('hybrid')}
                     >
                       <div className="text-center">
-                        <QrCode className="w-8 h-8 mx-auto mb-2 text-purple-600" />
+                        <QrCode className="w-8 h-8 mx-auto mb-2 text-teal-600" />
                         <h3 className="font-medium">Híbrido</h3>
                         <p className="text-sm text-muted-foreground">Online + QR Code</p>
                         <div className="mt-2 text-xs text-muted-foreground">
@@ -1004,9 +1004,9 @@ export function ApplyExamsPage() {
                         <div className="space-y-1">
                           <p className="text-xs text-muted-foreground">Método</p>
                           <div className="flex items-center">
-                            {app.applicationMethod === 'online' && <Link className="w-4 h-4 mr-1 text-blue-600" />}
+                            {app.applicationMethod === 'online' && <Link className="w-4 h-4 mr-1 text-zinc-800" />}
                             {app.applicationMethod === 'print' && <Printer className="w-4 h-4 mr-1 text-green-600" />}
-                            {app.applicationMethod === 'hybrid' && <QrCode className="w-4 h-4 mr-1 text-purple-600" />}
+                            {app.applicationMethod === 'hybrid' && <QrCode className="w-4 h-4 mr-1 text-teal-600" />}
                             <span className="text-sm font-medium capitalize">{app.applicationMethod}</span>
                           </div>
                         </div>

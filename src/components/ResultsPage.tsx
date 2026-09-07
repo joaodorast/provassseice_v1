@@ -25,7 +25,7 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
 
   const getPerformanceColor = (percentage: number) => {
     if (percentage >= 80) return 'text-green-600 dark:text-green-400';
-    if (percentage >= 70) return 'text-blue-600 dark:text-blue-400';
+    if (percentage >= 70) return 'text-zinc-800 dark:text-zinc-400';
     if (percentage >= 50) return 'text-yellow-600 dark:text-yellow-400';
     return 'text-red-600 dark:text-red-400';
   };
@@ -131,8 +131,8 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
                 
                 <div className="space-y-1">
                   <div className="flex items-center justify-center">
-                    <Target className="w-5 h-5 text-blue-600 mr-2" />
-                    <span className="text-2xl text-blue-600">
+                    <Target className="w-5 h-5 text-zinc-800 mr-2" />
+                    <span className="text-2xl text-zinc-800">
                       {submission.totalWeight ? submission.totalWeight.toFixed(1) : submission.totalQuestions}
                     </span>
                   </div>
@@ -144,8 +144,8 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
                 {submission.totalWeight && (
                   <div className="space-y-1">
                     <div className="flex items-center justify-center">
-                      <Target className="w-5 h-5 text-purple-600 mr-2" />
-                      <span className="text-2xl text-purple-600">{submission.totalQuestions}</span>
+                      <Target className="w-5 h-5 text-teal-600 mr-2" />
+                      <span className="text-2xl text-teal-600">{submission.totalQuestions}</span>
                     </div>
                     <p className="text-sm text-muted-foreground">Questões</p>
                   </div>
@@ -186,12 +186,12 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
                         )}
                       </Badge>
                       {result.weight && result.weight !== 1.0 && (
-                        <Badge variant="outline" className="bg-purple-50 text-purple-700">
+                        <Badge variant="outline" className="bg-teal-50 text-teal-700">
                           Peso: {result.weight}
                         </Badge>
                       )}
                       {result.pointsEarned !== undefined && (
-                        <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                        <Badge variant="outline" className="bg-zinc-50 text-zinc-900">
                           {result.pointsEarned.toFixed(1)} / {result.weight?.toFixed(1) || '1.0'} pts
                         </Badge>
                       )}
@@ -232,9 +232,9 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
                   </div>
                   
                   {result.explanation && (
-                    <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                      <h5 className="text-sm mb-2 text-blue-800 dark:text-blue-200">Explicação:</h5>
-                      <p className="text-sm text-blue-700 dark:text-blue-300">
+                    <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-900 rounded-lg p-4">
+                      <h5 className="text-sm mb-2 text-zinc-900 dark:text-zinc-200">Explicação:</h5>
+                      <p className="text-sm text-zinc-900 dark:text-zinc-300">
                         {result.explanation}
                       </p>
                     </div>

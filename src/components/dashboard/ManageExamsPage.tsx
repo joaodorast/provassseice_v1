@@ -767,7 +767,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       <div className="space-y-6">
         <div className="flex items-center justify-center py-12">
           <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-4 border-blue-600 border-t-transparent mx-auto mb-4"></div>
+            <div className="animate-spin rounded-full h-12 w-12 border-4 border-zinc-800 border-t-transparent mx-auto mb-4"></div>
             <p className="text-slate-600">Carregando simulados...</p>
           </div>
         </div>
@@ -793,7 +793,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             {loading ? 'Carregando...' : 'Atualizar'}
           </Button>
           {onCreateExam && (
-            <Button onClick={onCreateExam} className="bg-blue-600 hover:bg-blue-700">
+            <Button onClick={onCreateExam} className="bg-zinc-800 hover:bg-zinc-900">
               <Plus className="w-4 h-4 mr-2" />
               Novo Simulado
             </Button>
@@ -805,7 +805,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Total de Simulados</CardTitle>
-            <BookOpen className="h-5 w-5 text-blue-600" />
+            <BookOpen className="h-5 w-5 text-zinc-800" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-slate-800">{totalQuestions}</div>
@@ -816,7 +816,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium text-slate-600">Aplicações</CardTitle>
-            <Users className="h-5 w-5 text-purple-600" />
+            <Users className="h-5 w-5 text-teal-600" />
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold text-slate-800">{submissions.length}</div>
@@ -879,7 +879,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             </Select>
           </div>
 
-          <div className="border rounded-lg overflow-hidden">
+          <div className="border rounded-lg overflow-hidden overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow className="bg-slate-50">
@@ -932,7 +932,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                               variant="ghost"
                               size="sm"
                               onClick={() => handleEditClassClick(exam)}
-                              className="h-6 w-6 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              className="h-6 w-6 p-0 text-zinc-800 hover:text-zinc-900 hover:bg-zinc-50"
                               title="Alterar turma"
                             >
                               <Edit className="w-3 h-3" />
@@ -969,8 +969,8 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                       <TableCell>
                         <Badge className={
                           exam.type === 'simulado' 
-                            ? 'bg-blue-100 text-blue-800' 
-                            : 'bg-purple-100 text-purple-800'
+                            ? 'bg-zinc-100 text-zinc-900' 
+                            : 'bg-teal-100 text-teal-800'
                         }>
                           {exam.type === 'simulado' ? 'Simulado' : 'Avaliação'}
                         </Badge>
@@ -1001,7 +1001,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                             size="sm" 
                             title="Editar Título"
                             onClick={() => handleEditClick(exam)}
-                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            className="text-zinc-800 hover:text-zinc-900 hover:bg-zinc-50"
                           >
                             <Edit className="w-4 h-4" />
                           </Button>
@@ -1067,7 +1067,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                 }
               </p>
               {!searchTerm && filterSubject === 'all' && filterType === 'all' && onCreateExam && (
-                <Button onClick={onCreateExam} className="bg-blue-600 hover:bg-blue-700">
+                <Button onClick={onCreateExam} className="bg-zinc-800 hover:bg-zinc-900">
                   <Plus className="w-4 h-4 mr-2" />
                   Criar Primeiro Simulado
                 </Button>
@@ -1078,13 +1078,13 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
       </Card>
 
       {exams.length > 0 && (
-        <Card className="border-blue-200 bg-blue-50">
+        <Card className="border-zinc-200 bg-zinc-50">
           <CardContent className="p-4">
             <div className="flex items-start space-x-3">
-              <QrCode className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
+              <QrCode className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
               <div>
-                <p className="font-medium text-blue-900">✨ Cartões Resposta Automatizados</p>
-                <p className="text-sm text-blue-800 mt-1">
+                <p className="font-medium text-zinc-900">✨ Cartões Resposta Automatizados</p>
+                <p className="text-sm text-zinc-900 mt-1">
                   Clique no ícone <strong>QR Code</strong> para gerar automaticamente todos os cartões resposta 
                   da turma selecionada. Os cartões virão pré-preenchidos com <strong>nome do aluno, matrícula e turma</strong>.
                   Cada cartão terá um QR Code único para identificação do estudante na correção automática.
@@ -1100,7 +1100,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Edit className="w-5 h-5 text-blue-600" />
+              <Edit className="w-5 h-5 text-zinc-800" />
               Editar Simulado
             </DialogTitle>
             <DialogDescription>
@@ -1155,7 +1155,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             <Button
               onClick={handleSaveEdit}
               disabled={saveLoading || !editTitle.trim()}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-zinc-800 hover:bg-zinc-900"
             >
               {saveLoading ? (
                 <>
@@ -1178,7 +1178,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
         <DialogContent className="sm:max-w-[500px]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Users className="w-5 h-5 text-purple-600" />
+              <Users className="w-5 h-5 text-teal-600" />
               Alterar Turma do Simulado
             </DialogTitle>
             <DialogDescription>
@@ -1231,7 +1231,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
               </Select>
               
               {selectedClass && (
-                <div className="mt-2 p-2 bg-blue-50 border border-blue-200 rounded text-xs text-blue-800">
+                <div className="mt-2 p-2 bg-zinc-50 border border-zinc-200 rounded text-xs text-zinc-900">
                   <p className="font-medium">
                     ✓ {students.filter(s => s.class === selectedClass).length} alunos nesta turma
                   </p>
@@ -1270,7 +1270,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
             <Button
               onClick={handleSaveClassEdit}
               disabled={saveClassLoading || !selectedClass || classes.length === 0}
-              className="bg-purple-600 hover:bg-purple-700"
+              className="bg-teal-600 hover:bg-teal-700"
             >
               {saveClassLoading ? (
                 <>

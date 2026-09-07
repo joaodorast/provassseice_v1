@@ -194,7 +194,7 @@ export function EvaluationPage() {
         </div>
         <Button 
           onClick={() => setShowCreateForm(true)}
-          className="bg-blue-600 hover:bg-blue-700"
+          className="bg-zinc-800 hover:bg-zinc-900"
         >
           <Plus className="w-4 h-4 mr-2" />
           Nova Avaliação
@@ -206,8 +206,8 @@ export function EvaluationPage() {
         <Card className="seice-card">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <FileText className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 bg-zinc-100 rounded-lg flex items-center justify-center">
+                <FileText className="w-6 h-6 text-zinc-800" />
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-600">Total de Avaliações</p>
@@ -252,8 +252,8 @@ export function EvaluationPage() {
         <Card className="seice-card">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <QrCode className="w-6 h-6 text-purple-600" />
+              <div className="w-12 h-12 bg-teal-100 rounded-lg flex items-center justify-center">
+                <QrCode className="w-6 h-6 text-teal-600" />
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-600">Cartões com QR Code</p>
@@ -277,7 +277,7 @@ export function EvaluationPage() {
                     <Badge className={getStatusColor(exam.status)}>
                       {exam.status}
                     </Badge>
-                    <Badge variant="outline" className="bg-blue-50 text-blue-700">
+                    <Badge variant="outline" className="bg-zinc-50 text-zinc-900">
                       {exam.subject}
                     </Badge>
                     <Badge variant="outline">
@@ -314,7 +314,7 @@ export function EvaluationPage() {
                     variant="ghost" 
                     size="sm"
                     onClick={() => handleGenerateQR(exam)}
-                    className="text-purple-600 hover:text-purple-700"
+                    className="text-teal-600 hover:text-teal-700"
                   >
                     <QrCode className="w-4 h-4" />
                   </Button>
@@ -322,7 +322,7 @@ export function EvaluationPage() {
                     variant="ghost" 
                     size="sm"
                     onClick={() => handlePrintExam(exam)}
-                    className="text-blue-600 hover:text-blue-700"
+                    className="text-zinc-800 hover:text-zinc-900"
                   >
                     <Printer className="w-4 h-4" />
                   </Button>
@@ -423,7 +423,7 @@ export function EvaluationPage() {
             </p>
             <Button 
               onClick={() => setShowCreateForm(true)}
-              className="bg-blue-600 hover:bg-blue-700"
+              className="bg-zinc-800 hover:bg-zinc-900"
             >
               <Plus className="w-4 h-4 mr-2" />
               Criar Primeira Avaliação

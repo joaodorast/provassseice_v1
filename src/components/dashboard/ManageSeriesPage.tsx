@@ -134,11 +134,11 @@ export function ManageSeriesPage() {
       </div>
 
       {/* Info Card */}
-      <Card className="border-blue-200 bg-blue-50">
+      <Card className="border-zinc-200 bg-zinc-50">
         <CardContent className="p-4">
           <div className="flex items-start space-x-3">
-            <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-            <div className="text-sm text-blue-800">
+            <AlertCircle className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
+            <div className="text-sm text-zinc-900">
               <p className="font-medium mb-1">💡 Sobre Séries/Anos Escolares</p>
               <p>As séries cadastradas aqui serão usadas em:</p>
               <ul className="list-disc list-inside mt-2 space-y-1">
@@ -246,8 +246,8 @@ export function ManageSeriesPage() {
                 <p className="text-sm text-slate-600">Total de Séries</p>
                 <h3 className="text-2xl font-bold text-slate-800 mt-1">{series.length}</h3>
               </div>
-              <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
-                <BookOpen className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
+                <BookOpen className="w-6 h-6 text-zinc-800" />
               </div>
             </div>
           </CardContent>
@@ -278,8 +278,8 @@ export function ManageSeriesPage() {
                   {series.filter(s => s.includes('EM')).length}
                 </h3>
               </div>
-              <div className="w-12 h-12 rounded-full bg-purple-100 flex items-center justify-center">
-                <GraduationCap className="w-6 h-6 text-purple-600" />
+              <div className="w-12 h-12 rounded-full bg-teal-100 flex items-center justify-center">
+                <GraduationCap className="w-6 h-6 text-teal-600" />
               </div>
             </div>
           </CardContent>

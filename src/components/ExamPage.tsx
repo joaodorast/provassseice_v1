@@ -293,9 +293,9 @@ export function ExamPage({ exam, onBack, onComplete }: ExamPageProps) {
                 
                 {exam.questions[currentQuestion].questionType === 'essay' ? (
                   <div className="space-y-3">
-                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-start space-x-2">
-                      <FileText className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
-                      <p className="text-xs lg:text-sm text-blue-800">
+                    <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-3 flex items-start space-x-2">
+                      <FileText className="w-4 h-4 text-zinc-800 mt-0.5 flex-shrink-0" />
+                      <p className="text-xs lg:text-sm text-zinc-900">
                         <strong>Questão Dissertativa:</strong> Digite sua resposta completa no campo abaixo. Esta questão será corrigida manualmente pelo professor.
                       </p>
                     </div>

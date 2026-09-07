@@ -66,9 +66,9 @@ export function ExcelExportDialog({
       };
 
       const exporter = new ExcelExporter();
-      
+
       if (exportFormat === 'xlsx') {
-        exporter.export(exportOptions);
+        await exporter.export(exportOptions);
       } else {
         // Para CSV, usar uma implementação mais simples
         exportAsCSV(exportOptions);
@@ -268,14 +268,14 @@ export function ExcelExportDialog({
           </div>
 
           {/* Informações do Export */}
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+          <div className="bg-zinc-50 border border-zinc-200 rounded-lg p-4">
             <div className="flex items-start gap-3">
-              <FileSpreadsheet className="h-5 w-5 text-blue-600 mt-0.5" />
+              <FileSpreadsheet className="h-5 w-5 text-zinc-800 mt-0.5" />
               <div className="space-y-1">
-                <p className="text-sm font-medium text-blue-900">
+                <p className="text-sm font-medium text-zinc-900">
                   Resumo da Exportação
                 </p>
-                <ul className="text-xs text-blue-700 space-y-1">
+                <ul className="text-xs text-zinc-900 space-y-1">
                   <li>• {data.length} registros para exportar</li>
                   <li>• {selectedColumns.length} colunas selecionadas</li>
                   <li>• Formato: {exportFormat.toUpperCase()}</li>

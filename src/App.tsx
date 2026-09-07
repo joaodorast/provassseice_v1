@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { LoginPage } from './components/LoginPage';
+import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { MainDashboard } from './components/MainDashboard';
 import { LoadingProvider } from './components/LoadingProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -53,13 +54,17 @@ export type Submission = {
 function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [showPasswordReset, setShowPasswordReset] = useState(false);
 
   useEffect(() => {
     initializeAuth();
-    
+
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
+      if (event === 'PASSWORD_RECOVERY') {
+        setShowPasswordReset(true);
+        setLoading(false);
+      } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
         localStorage.setItem('access_token', session.access_token);
         setUser(session.user as User);
         setLoading(false);
@@ -160,6 +165,17 @@ function App() {
       setLoading(false);
     }
   };
+
+  if (showPasswordReset) {
+    return (
+      <ErrorBoundary>
+        <LoadingProvider>
+          <ResetPasswordPage onDone={() => setShowPasswordReset(false)} />
+          <Toaster />
+        </LoadingProvider>
+      </ErrorBoundary>
+    );
+  }
 
   if (loading) {
     return (

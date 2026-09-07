@@ -38,6 +38,8 @@ import {
 import { toast } from 'sonner@2.0.3';
 import { User, Exam, Submission } from '../../App';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import { apiService } from '../../utils/api';
+import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 
 type ConfigurationPageProps = {
   user: User;
@@ -350,8 +352,143 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
     }
   };
 
-  const handleExportData = () => {
-    toast.success('Dados exportados com sucesso!');
+  const EXAM_EXPORT_COLUMNS: ExcelColumn[] = [
+    { header: 'ID', key: 'id', width: 12, type: 'text' },
+    { header: 'Título', key: 'title', width: 35, type: 'text' },
+    { header: 'Total de Questões', key: 'totalQuestions', width: 16, type: 'number' },
+    { header: 'Status', key: 'status', width: 14, type: 'text' },
+    { header: 'Data de Criação', key: 'createdAt', width: 18, type: 'date' },
+  ];
+
+  const RESULT_EXPORT_COLUMNS: ExcelColumn[] = [
+    { header: 'Aluno', key: 'studentName', width: 28, type: 'text' },
+    { header: 'Email', key: 'studentEmail', width: 30, type: 'text' },
+    { header: 'Simulado', key: 'examTitle', width: 30, type: 'text' },
+    { header: 'Data', key: 'submittedAt', width: 18, type: 'date' },
+    { header: 'Acertos', key: 'score', width: 12, type: 'number' },
+    { header: 'Total', key: 'totalQuestions', width: 12, type: 'number' },
+    { header: 'Percentual', key: 'percentage', width: 14, type: 'percentage' },
+  ];
+
+  const handleExportData = async () => {
+    setLoading(true);
+    try {
+      const [examsResult, submissionsResult] = await Promise.all([
+        apiService.getExams().catch(() => ({ exams: [] })),
+        apiService.getSubmissions().catch(() => ({ submissions: [] })),
+      ]);
+
+      const exams = examsResult?.exams || [];
+      const submissions = submissionsResult?.submissions || [];
+
+      const exporter = new ExcelExporter();
+      const timestamp = new Date().toISOString().split('T')[0];
+
+      await exporter.exportMultiSheet(
+        [
+          {
+            title: 'Simulados Cadastrados',
+            sheetName: 'Simulados',
+            includeStats: false,
+            columns: EXAM_EXPORT_COLUMNS,
+            data: exams.map((exam: any) => ({
+              id: exam.id,
+              title: exam.title,
+              totalQuestions: exam.questions?.length || 0,
+              status: exam.status || 'ativo',
+              createdAt: exam.createdAt,
+            })),
+          },
+          {
+            title: 'Resultados de Simulados',
+            sheetName: 'Resultados',
+            includeStats: true,
+            columns: RESULT_EXPORT_COLUMNS,
+            data: submissions,
+          },
+        ],
+        `Dados_Sistema_SEICE_${timestamp}`
+      );
+
+      toast.success('Dados exportados com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar dados:', error);
+      toast.error('Erro ao exportar dados. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportResults = async () => {
+    setLoading(true);
+    try {
+      const submissionsResult = await apiService.getSubmissions().catch(() => ({ submissions: [] }));
+      const submissions = submissionsResult?.submissions || [];
+
+      const exporter = new ExcelExporter();
+      const timestamp = new Date().toISOString().split('T')[0];
+
+      await exporter.export({
+        title: 'Resultados de Simulados',
+        subtitle: 'Exportação completa de resultados do sistema',
+        includeStats: true,
+        columns: RESULT_EXPORT_COLUMNS,
+        data: submissions,
+        filename: `Resultados_${timestamp}`,
+      });
+
+      toast.success('Resultados exportados com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar resultados:', error);
+      toast.error('Erro ao exportar resultados. Tente novamente.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportSettings = async () => {
+    try {
+      const exporter = new ExcelExporter();
+      const timestamp = new Date().toISOString().split('T')[0];
+
+      const settingsRows = [
+        { categoria: 'Perfil', chave: 'Nome', valor: profileData.name },
+        { categoria: 'Perfil', chave: 'Email', valor: profileData.email },
+        { categoria: 'Perfil', chave: 'Instituição', valor: profileData.institution },
+        { categoria: 'Perfil', chave: 'Cargo', valor: profileData.position },
+        { categoria: 'Sistema', chave: 'Tempo Limite Padrão (min)', valor: String(systemSettings.defaultTimeLimit) },
+        { categoria: 'Sistema', chave: 'Permitir Revisar Respostas', valor: systemSettings.allowReviewAnswers ? 'Sim' : 'Não' },
+        { categoria: 'Sistema', chave: 'Embaralhar Questões', valor: systemSettings.shuffleQuestions ? 'Sim' : 'Não' },
+        { categoria: 'Sistema', chave: 'Mostrar Respostas Corretas', valor: systemSettings.showCorrectAnswers ? 'Sim' : 'Não' },
+        { categoria: 'Sistema', chave: 'Idioma', valor: systemSettings.language },
+        { categoria: 'Sistema', chave: 'Fuso Horário', valor: systemSettings.timezone },
+        { categoria: 'Notificações', chave: 'Email em Nova Submissão', valor: notifications.emailOnSubmission ? 'Sim' : 'Não' },
+        { categoria: 'Notificações', chave: 'Email em Novo Aluno', valor: notifications.emailOnNewStudent ? 'Sim' : 'Não' },
+        { categoria: 'Notificações', chave: 'Relatório Semanal por Email', valor: notifications.emailWeeklyReport ? 'Sim' : 'Não' },
+        { categoria: 'Segurança', chave: 'Autenticação de Dois Fatores', valor: security.twoFactorAuth ? 'Sim' : 'Não' },
+        { categoria: 'Segurança', chave: 'Tempo de Sessão (min)', valor: String(security.sessionTimeout) },
+        { categoria: 'Séries Cadastradas', chave: '—', valor: series.join(', ') || 'Nenhuma' },
+        { categoria: 'Matérias Cadastradas', chave: '—', valor: subjects.join(', ') || 'Nenhuma' },
+      ];
+
+      await exporter.export({
+        title: 'Configurações do Sistema',
+        subtitle: `Usuário: ${profileData.name || user.email}`,
+        includeStats: false,
+        columns: [
+          { header: 'Categoria', key: 'categoria', width: 22, type: 'text' },
+          { header: 'Item', key: 'chave', width: 32, type: 'text' },
+          { header: 'Valor', key: 'valor', width: 40, type: 'text' },
+        ],
+        data: settingsRows,
+        filename: `Configuracoes_${timestamp}`,
+      });
+
+      toast.success('Configurações exportadas com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar configurações:', error);
+      toast.error('Erro ao exportar configurações. Tente novamente.');
+    }
   };
 
   const handleImportData = () => {
@@ -913,8 +1050,8 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                       subjects.map((subject, index) => (
                         <div key={index} className="flex items-center justify-between p-3 hover:bg-slate-50">
                           <div className="flex items-center space-x-3">
-                            <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                              <BookOpen className="w-4 h-4 text-blue-600" />
+                            <div className="w-8 h-8 rounded-full bg-zinc-100 flex items-center justify-center">
+                              <BookOpen className="w-4 h-4 text-zinc-800" />
                             </div>
                             <span className="font-medium">{subject}</span>
                           </div>
@@ -932,9 +1069,9 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                   </div>
                 </div>
 
-                <Card className="border-blue-200 bg-blue-50">
+                <Card className="border-zinc-200 bg-zinc-50">
                   <CardContent className="p-3">
-                    <p className="text-xs text-blue-800">
+                    <p className="text-xs text-zinc-900">
                       💡 Dica: As matérias cadastradas aqui aparecerão automaticamente no Banco de Questões e nos Simulados.
                     </p>
                   </CardContent>
@@ -1271,11 +1408,11 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                   <Download className="w-4 h-4 mr-2" />
                   Exportar Todos os Dados
                 </Button>
-                <Button className="w-full" variant="outline" onClick={handleExportData}>
+                <Button className="w-full" variant="outline" onClick={handleExportResults}>
                   <Download className="w-4 h-4 mr-2" />
                   Exportar Apenas Resultados
                 </Button>
-                <Button className="w-full" variant="outline" onClick={handleExportData}>
+                <Button className="w-full" variant="outline" onClick={handleExportSettings}>
                   <Download className="w-4 h-4 mr-2" />
                   Exportar Configurações
                 </Button>

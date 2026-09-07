@@ -316,14 +316,14 @@ export function ManageStudentsPage() {
                 </p>
               </div>
               
-              <Card className="border-blue-200 bg-blue-50">
+              <Card className="border-zinc-200 bg-zinc-50">
                 <CardContent className="p-4">
                   <div className="flex items-start space-x-2">
-                    <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5 flex-shrink-0" />
-                    <div className="text-sm text-blue-800">
+                    <AlertCircle className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-zinc-900">
                       <p className="font-medium mb-1">Formato do arquivo:</p>
                       <p>O arquivo deve conter as colunas na seguinte ordem:</p>
-                      <p className="font-mono text-xs mt-1 bg-blue-100 p-2 rounded">
+                      <p className="font-mono text-xs mt-1 bg-zinc-100 p-2 rounded">
                         NOME | EMAIL | TURMA | TURNO | MATRICULA
                       </p>
                     </div>
@@ -479,7 +479,7 @@ export function ManageStudentsPage() {
             </Select>
           </div>
 
-          <div className="border rounded-lg">
+          <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>

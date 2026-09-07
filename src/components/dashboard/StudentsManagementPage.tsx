@@ -213,7 +213,7 @@ export function StudentsManagementPage() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-8 w-8 border-4 border-blue-600 border-t-transparent"></div>
+        <div className="animate-spin rounded-full h-8 w-8 border-4 border-zinc-800 border-t-transparent"></div>
       </div>
     );
   }
@@ -231,7 +231,7 @@ export function StudentsManagementPage() {
             <Plus className="w-4 h-4 mr-2" />
             Nova Turma
           </Button>
-          <Button onClick={() => setShowCreateStudent(true)} className="bg-blue-600 hover:bg-blue-700">
+          <Button onClick={() => setShowCreateStudent(true)} className="bg-zinc-800 hover:bg-zinc-900">
             <UserPlus className="w-4 h-4 mr-2" />
             Novo Aluno
           </Button>
@@ -243,8 +243,8 @@ export function StudentsManagementPage() {
         <Card className="seice-card">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <Users className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 bg-zinc-100 rounded-lg flex items-center justify-center">
+                <Users className="w-6 h-6 text-zinc-800" />
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-600">Total de Alunos</p>
@@ -287,8 +287,8 @@ export function StudentsManagementPage() {
         <Card className="seice-card">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center">
-                <Users className="w-6 h-6 text-purple-600" />
+              <div className="w-12 h-12 bg-teal-100 rounded-lg flex items-center justify-center">
+                <Users className="w-6 h-6 text-teal-600" />
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-600">Média por Turma</p>
@@ -381,6 +381,7 @@ export function StudentsManagementPage() {
           </div>
         </CardHeader>
         <CardContent>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
@@ -427,6 +428,7 @@ export function StudentsManagementPage() {
               ))}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
 
@@ -477,7 +479,7 @@ export function StudentsManagementPage() {
               <Button variant="outline" onClick={() => setShowCreateStudent(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleCreateStudent} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleCreateStudent} className="bg-zinc-800 hover:bg-zinc-900">
                 Criar Aluno
               </Button>
             </div>
@@ -514,7 +516,7 @@ export function StudentsManagementPage() {
               <Button variant="outline" onClick={() => setShowCreateClass(false)}>
                 Cancelar
               </Button>
-              <Button onClick={handleCreateClass} className="bg-blue-600 hover:bg-blue-700">
+              <Button onClick={handleCreateClass} className="bg-zinc-800 hover:bg-zinc-900">
                 Criar Turma
               </Button>
             </div>

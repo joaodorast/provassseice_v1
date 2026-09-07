@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
+import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
@@ -252,18 +253,9 @@ export function GradeExamsPage() {
 
   const stats = getGradingStats();
 
-  const generateExcelExport = (submissionsList, type = 'all', subject = null) => {
-    // Filtrar apenas submissões reais (não "não realizados")
-    const validSubmissions = submissionsList.filter(s => s.gradingStatus !== 'not_submitted');
-    
-    if (validSubmissions.length === 0) {
-      toast.error('Nenhuma submissão válida para exportar');
-      return null;
-    }
+  const buildSubjectBreakdown = (validSubmissions) => {
+    const bySubject: Record<string, any[]> = {};
 
-    // Organizar por matéria
-    const bySubject = {};
-    
     validSubmissions.forEach(submission => {
       submission.subjectPerformances.forEach(subj => {
         if (!bySubject[subj.subject]) {
@@ -280,110 +272,17 @@ export function GradeExamsPage() {
       });
     });
 
-    const generateCSV = (data, subjectName) => {
-      let csv = `Matéria: ${subjectName}\n`;
-      csv += `Total de Alunos: ${data.length}\n`;
-      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
-      csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
-      
-      data.forEach(row => {
-        csv += `"${row.aluno}","${row.turma}",${row.acertos},${row.total},${row.percentual}%\n`;
-      });
-      
-      // Adicionar estatísticas
-      const avgPercentage = Math.round(data.reduce((sum, row) => sum + row.percentual, 0) / data.length);
-      csv += `\nMédia da Turma,,,${avgPercentage}%\n`;
-      
-      return csv;
-    };
-
-    if (type === 'all') {
-      // Planilha geral
-      let csv = `RELATÓRIO GERAL DE CORREÇÕES\n`;
-      csv += `Total de Alunos: ${validSubmissions.length}\n`;
-      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
-      csv += 'Aluno,Turma,Simulado,Nota,Percentual,Tipo de Correção\n';
-      
-      validSubmissions.forEach(sub => {
-        const correctionType = sub.correctionType === 'manual-image' ? 'Cartão Individual' :
-                              sub.correctionType === 'manual-image-batch' ? 'Cartão Lote' : 'Online';
-        csv += `"${sub.studentName}","${sub.studentClass}","${sub.examTitle}",${sub.score}/${sub.totalQuestions},${sub.percentage}%,"${correctionType}"\n`;
-      });
-      
-      csv += `\n\nDETALHAMENTO POR MATÉRIA\n\n`;
-      
-      Object.entries(bySubject).forEach(([subjectName, data]) => {
-        csv += `\n${subjectName}\n`;
-        csv += 'Aluno,Turma,Acertos,Total,Percentual,Nota Geral\n';
-        data.forEach(row => {
-          csv += `"${row.aluno}","${row.turma}",${row.acertos},${row.total},${row.percentual}%,${row.notaGeral}%\n`;
-        });
-        const avgPercentage = Math.round(data.reduce((sum, row) => sum + row.percentual, 0) / data.length);
-        csv += `Média da Matéria,,,,${avgPercentage}%\n`;
-      });
-      
-      return csv;
-    } else if (type === 'subject' && subject) {
-      // Planilha específica de matéria
-      if (!bySubject[subject]) {
-        toast.error(`Matéria "${subject}" não encontrada`);
-        return null;
-      }
-      return generateCSV(bySubject[subject] || [], subject);
-    }
-    
-    return null;
+    return bySubject;
   };
 
-  const downloadExcel = (content, filename, format = 'csv') => {
-    if (!content) return;
-    
-    let blob, extension;
-    
-    if (format === 'xlsx') {
-      // Converter CSV para formato Excel-friendly
-      const rows = content.split('\n').map(row => row.split(','));
-      
-      // Criar HTML table para Excel
-      let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
-      html += '<head><meta charset="UTF-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet>';
-      html += '<x:Name>Relatório</x:Name><x:WorksheetOptions><x:DisplayGridlines/></x:WorksheetOptions></x:ExcelWorksheet>';
-      html += '</x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]--></head><body><table>';
-      
-      rows.forEach(row => {
-        html += '<tr>';
-        row.forEach(cell => {
-          html += `<td>${cell.replace(/"/g, '')}</td>`;
-        });
-        html += '</tr>';
-      });
-      
-      html += '</table></body></html>';
-      
-      blob = new Blob(['\ufeff', html], { 
-        type: 'application/vnd.ms-excel;charset=utf-8;' 
-      });
-      extension = '.xls';
-    } else {
-      blob = new Blob(['\ufeff', content], { 
-        type: 'text/csv;charset=utf-8;' 
-      });
-      extension = '.csv';
-    }
-    
-    const filenameWithExt = filename.replace(/\.(csv|xls|xlsx)$/i, '') + extension;
-    
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filenameWithExt);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    
-    toast.success(`✅ Planilha exportada: ${filenameWithExt}`);
-  };
+  const SUBJECT_SHEET_COLUMNS: ExcelColumn[] = [
+    { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
+    { header: 'Turma', key: 'turma', width: 15, type: 'text' },
+    { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
+    { header: 'Total', key: 'total', width: 12, type: 'number' },
+    { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
+    { header: 'Nota Geral', key: 'notaGeral', width: 14, type: 'percentage' },
+  ];
 
   const getUniqueSubjects = (submissionsList) => {
     const subjects = new Set();
@@ -397,34 +296,90 @@ export function GradeExamsPage() {
     return Array.from(subjects).sort();
   };
 
-  const handleExportExcel = (type, subject = null) => {
-    const validSubmissions = filteredSubmissions.filter(s => s.gradingStatus !== 'not_submitted');
-    
+  const handleExportExcel = async (type, subject = null, submissionsOverride = null, filenamePrefix = null) => {
+    const sourceSubmissions = submissionsOverride || filteredSubmissions;
+    const validSubmissions = sourceSubmissions.filter(s => s.gradingStatus !== 'not_submitted');
+
     if (validSubmissions.length === 0) {
       toast.error('Nenhuma correção disponível para exportar');
       return;
     }
 
-    const content = generateExcelExport(validSubmissions, type, subject);
-    if (!content) return;
-    
     const timestamp = new Date().toISOString().split('T')[0];
-    
-    let filename;
-    if (type === 'all') {
-      filename = `Relatorio_Geral_${timestamp}`;
-    } else if (type === 'subject' && subject) {
-      filename = `${subject.replace(/\s/g, '_')}_${timestamp}`;
+    const exporter = new ExcelExporter();
+    const prefix = filenamePrefix || 'Relatorio_Geral';
+
+    try {
+      if (type === 'all') {
+        const bySubject = buildSubjectBreakdown(validSubmissions);
+
+        const resumoSheet = {
+          title: 'Relatório Geral de Correções',
+          subtitle: `Total de alunos: ${validSubmissions.length}`,
+          sheetName: 'Resumo Geral',
+          includeStats: true,
+          columns: [
+            { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
+            { header: 'Turma', key: 'turma', width: 15, type: 'text' },
+            { header: 'Simulado', key: 'simulado', width: 30, type: 'text' },
+            { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
+            { header: 'Total Questões', key: 'totalQuestoes', width: 14, type: 'number' },
+            { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
+            { header: 'Tipo de Correção', key: 'tipoCorrecao', width: 20, type: 'text' },
+          ] as ExcelColumn[],
+          data: validSubmissions.map(sub => ({
+            aluno: sub.studentName,
+            turma: sub.studentClass,
+            simulado: sub.examTitle,
+            acertos: sub.score,
+            totalQuestoes: sub.totalQuestions,
+            percentual: sub.percentage,
+            tipoCorrecao: sub.correctionType === 'manual-image' ? 'Cartão Individual' :
+              sub.correctionType === 'manual-image-batch' ? 'Cartão Lote' : 'Online',
+          })),
+        };
+
+        const subjectSheets = Object.entries(bySubject).map(([subjectName, data]) => ({
+          title: `Detalhamento — ${subjectName}`,
+          sheetName: subjectName,
+          includeStats: true,
+          columns: SUBJECT_SHEET_COLUMNS,
+          data,
+        }));
+
+        await exporter.exportMultiSheet([resumoSheet, ...subjectSheets], `${prefix}_${timestamp}`);
+      } else if (type === 'subject' && subject) {
+        const bySubject = buildSubjectBreakdown(validSubmissions);
+        const data = bySubject[subject];
+
+        if (!data) {
+          toast.error(`Matéria "${subject}" não encontrada`);
+          return;
+        }
+
+        await exporter.export({
+          title: `Correções — ${subject}`,
+          subtitle: `Total de alunos: ${data.length}`,
+          includeStats: true,
+          columns: SUBJECT_SHEET_COLUMNS,
+          data,
+          filename: filenamePrefix ? `${filenamePrefix}_${subject.replace(/\s/g, '_')}_${timestamp}` : `${subject.replace(/\s/g, '_')}_${timestamp}`,
+        });
+      }
+
+      toast.success('✅ Planilha exportada com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar planilha:', error);
+      toast.error('Erro ao exportar planilha. Tente novamente.');
     }
-    
-    downloadExcel(content, filename, 'xlsx');
   };
+
 
   const getPerformanceBadge = (percentage, status) => {
     if (status === 'not_submitted') return <Badge className="bg-gray-100 text-gray-800">Não Realizado</Badge>;
     if (percentage >= 80) return <Badge className="bg-emerald-100 text-emerald-800">Excelente</Badge>;
     else if (percentage >= 70) return <Badge className="bg-green-100 text-green-800">Muito Bom</Badge>;
-    else if (percentage >= 60) return <Badge className="bg-blue-100 text-blue-800">Bom</Badge>;
+    else if (percentage >= 60) return <Badge className="bg-zinc-100 text-zinc-900">Bom</Badge>;
     else if (percentage >= 50) return <Badge className="bg-yellow-100 text-yellow-800">Regular</Badge>;
     else return <Badge className="bg-red-100 text-red-800">Insuficiente</Badge>;
   };
@@ -433,7 +388,7 @@ export function GradeExamsPage() {
     switch (status) {
       case 'not_submitted': return <Badge variant="outline" className="text-gray-600 border-gray-300">Não Submetido</Badge>;
       case 'pending': return <Badge variant="outline" className="text-orange-600 border-orange-300">Pendente</Badge>;
-      case 'graded': return <Badge variant="outline" className="text-blue-600 border-blue-300">Corrigida</Badge>;
+      case 'graded': return <Badge variant="outline" className="text-zinc-800 border-zinc-300">Corrigida</Badge>;
       case 'reviewed': return <Badge variant="outline" className="text-green-600 border-green-300">Revisada</Badge>;
       default: return <Badge variant="outline">Desconhecido</Badge>;
     }
@@ -441,11 +396,11 @@ export function GradeExamsPage() {
 
   const getCorrectionTypeBadge = (correctionType) => {
     if (!correctionType || correctionType === 'online') {
-      return <Badge variant="outline" className="text-blue-600 border-blue-300">Online</Badge>;
+      return <Badge variant="outline" className="text-zinc-800 border-zinc-300">Online</Badge>;
     }
     if (correctionType === 'manual-image') {
       return (
-        <Badge variant="outline" className="text-purple-600 border-purple-300">
+        <Badge variant="outline" className="text-teal-600 border-teal-300">
           <Camera className="w-3 h-3 mr-1" />
           Cartão Individual
         </Badge>
@@ -453,7 +408,7 @@ export function GradeExamsPage() {
     }
     if (correctionType === 'manual-image-batch') {
       return (
-        <Badge variant="outline" className="text-purple-600 border-purple-300">
+        <Badge variant="outline" className="text-teal-600 border-teal-300">
           <Scan className="w-3 h-3 mr-1" />
           Cartão Lote
         </Badge>
@@ -733,7 +688,7 @@ export function GradeExamsPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-3 text-blue-600" />
+          <Loader2 className="w-6 h-6 animate-spin mx-auto mb-3 text-zinc-800" />
           <p className="text-sm text-muted-foreground">Carregando dados de correção...</p>
         </div>
       </div>
@@ -753,7 +708,7 @@ export function GradeExamsPage() {
               ✓ {submissions.length} submissões totais
             </Badge>
             {stats.imageCorrections > 0 && (
-              <Badge variant="outline" className="text-purple-600 border-purple-300">
+              <Badge variant="outline" className="text-teal-600 border-teal-300">
                 <Camera className="w-3 h-3 mr-1" />
                 {stats.imageCorrections} correção(ões) de cartão resposta
               </Badge>
@@ -916,10 +871,10 @@ export function GradeExamsPage() {
                 </div>
 
                 <div className="text-center">
-                  <div className="flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mx-auto mb-3">
-                    <Target className="w-8 h-8 text-blue-600" />
+                  <div className="flex items-center justify-center w-16 h-16 bg-zinc-100 rounded-full mx-auto mb-3">
+                    <Target className="w-8 h-8 text-zinc-800" />
                   </div>
-                  <div className="text-2xl font-bold text-blue-600">
+                  <div className="text-2xl font-bold text-zinc-800">
                     {submissions.filter(s => s.percentage >= 60 && s.percentage < 70 && s.gradingStatus !== 'not_submitted').length}
                   </div>
                   <p className="text-sm text-muted-foreground">Bom (60-69%)</p>
@@ -1000,8 +955,8 @@ export function GradeExamsPage() {
               </div>
 
               {selectedSubmissions.length > 0 && (
-                <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg mb-6">
-                  <span className="text-sm text-blue-800 font-medium">
+                <div className="flex items-center justify-between bg-zinc-50 p-4 rounded-lg mb-6">
+                  <span className="text-sm text-zinc-900 font-medium">
                     {selectedSubmissions.length} submissão(ões) selecionada(s)
                   </span>
                   <div className="flex space-x-2">
@@ -1063,7 +1018,7 @@ export function GradeExamsPage() {
                           key={submission.id} 
                           className={
                             submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' : 
-                            (submission.correctionType === 'manual-image' || submission.correctionType === 'manual-image-batch') ? 'bg-purple-50' : 
+                            (submission.correctionType === 'manual-image' || submission.correctionType === 'manual-image-batch') ? 'bg-teal-50' : 
                             ''
                           }
                         >
@@ -1217,7 +1172,7 @@ export function GradeExamsPage() {
               <p className="text-sm text-slate-600 mb-3">Clique em qualquer matéria para exportar apenas ela</p>
               <div className="grid grid-cols-2 gap-3">
                 {getUniqueSubjects(filteredSubmissions).map(subject => (
-                  <Card key={subject} className="border-2 hover:border-blue-300 transition-colors cursor-pointer"
+                  <Card key={subject} className="border-2 hover:border-zinc-300 transition-colors cursor-pointer"
                     onClick={() => {
                       handleExportExcel('subject', subject);
                       setShowExportDialog(false);
@@ -1284,14 +1239,7 @@ export function GradeExamsPage() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    const content = generateExcelExport([selectedSubmission], 'all');
-                    if (content) {
-                      const timestamp = new Date().toISOString().split('T')[0];
-                      const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Completo_${timestamp}`;
-                      downloadExcel(content, filename, 'xlsx');
-                    }
-                  }}
+                  onClick={() => handleExportExcel('all', null, [selectedSubmission], `${selectedSubmission.studentName.replace(/\s/g, '_')}_Completo`)}
                 >
                   <FileSpreadsheet className="w-4 h-4 mr-2" />
                   Exportar Completo (XLSX)
@@ -1310,13 +1258,13 @@ export function GradeExamsPage() {
               ) : (
                 <>
                   {(selectedSubmission.correctionType === 'manual-image' || selectedSubmission.correctionType === 'manual-image-batch') && (
-                    <Card className="border-purple-200 bg-purple-50">
+                    <Card className="border-teal-200 bg-teal-50">
                       <CardContent className="p-4">
                         <div className="flex items-center gap-3">
-                          <Camera className="w-5 h-5 text-purple-600" />
+                          <Camera className="w-5 h-5 text-teal-600" />
                           <div>
-                            <p className="font-medium text-purple-900">Correção de Cartão Resposta</p>
-                            <p className="text-sm text-purple-800">
+                            <p className="font-medium text-teal-900">Correção de Cartão Resposta</p>
+                            <p className="text-sm text-teal-800">
                               Corrigido manualmente através de imagem
                               {selectedSubmission.correctionType === 'manual-image-batch' && ' (lote)'}
                             </p>
@@ -1354,14 +1302,7 @@ export function GradeExamsPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => {
-                            const content = generateExcelExport([selectedSubmission], 'all');
-                            if (content) {
-                              const timestamp = new Date().toISOString().split('T')[0];
-                              const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_Geral_${timestamp}`;
-                              downloadExcel(content, filename, 'xlsx');
-                            }
-                          }}
+                          onClick={() => handleExportExcel('all', null, [selectedSubmission], `${selectedSubmission.studentName.replace(/\s/g, '_')}_Geral`)}
                         >
                           <FileSpreadsheet className="w-3 h-3 mr-1" />
                           Exportar Geral (XLSX)
@@ -1377,14 +1318,7 @@ export function GradeExamsPage() {
                               <Button
                                 variant="ghost"
                                 size="sm"
-                                onClick={() => {
-                                  const content = generateExcelExport([selectedSubmission], 'subject', subject.subject);
-                                  if (content) {
-                                    const timestamp = new Date().toISOString().split('T')[0];
-                                    const filename = `${selectedSubmission.studentName.replace(/\s/g, '_')}_${subject.subject.replace(/\s/g, '_')}_${timestamp}`;
-                                    downloadExcel(content, filename, 'xlsx');
-                                  }
-                                }}
+                                onClick={() => handleExportExcel('subject', subject.subject, [selectedSubmission], selectedSubmission.studentName.replace(/\s/g, '_'))}
                               >
                                 <Download className="w-3 h-3" />
                               </Button>

@@ -206,9 +206,9 @@ export function ReportsPage() {
       case 'excel':
         return <FileSpreadsheet className="w-4 h-4 text-green-600" />;
       case 'csv':
-        return <FileText className="w-4 h-4 text-blue-600" />;
+        return <FileText className="w-4 h-4 text-zinc-800" />;
       default:
-        return <Eye className="w-4 h-4 text-purple-600" />;
+        return <Eye className="w-4 h-4 text-teal-600" />;
     }
   };
 
@@ -217,13 +217,13 @@ export function ReportsPage() {
       case 'auditoria':
         return 'bg-red-100 text-red-800';
       case 'banco':
-        return 'bg-blue-100 text-blue-800';
+        return 'bg-zinc-100 text-zinc-900';
       case 'aplicacao':
         return 'bg-green-100 text-green-800';
       case 'correcao':
         return 'bg-yellow-100 text-yellow-800';
       case 'gestao':
-        return 'bg-purple-100 text-purple-800';
+        return 'bg-teal-100 text-teal-800';
       default:
         return 'bg-gray-100 text-gray-800';
     }
@@ -319,7 +319,7 @@ export function ReportsPage() {
                     <TableRow key={report.id} className="hover:bg-muted/50">
                       <TableCell className="font-medium">
                         <div className="flex items-center">
-                          <report.icon className="w-5 h-5 text-blue-600" />
+                          <report.icon className="w-5 h-5 text-zinc-800" />
                         </div>
                       </TableCell>
                       
@@ -399,7 +399,7 @@ export function ReportsPage() {
             <CardContent className="p-4">
               <div className="flex items-start space-x-3">
                 <div className="flex-shrink-0">
-                  <report.icon className="w-8 h-8 text-blue-600" />
+                  <report.icon className="w-8 h-8 text-zinc-800" />
                 </div>
                 
                 <div className="flex-1 min-w-0">
@@ -473,7 +473,7 @@ export function ReportsPage() {
             <Card key={category.value} className="hover:shadow-md transition-shadow cursor-pointer" onClick={() => setCategoryFilter(category.value)}>
               <CardHeader className="pb-2 md:pb-3">
                 <CardTitle className="flex items-center text-sm md:text-base">
-                  <Icon className="w-4 h-4 md:w-5 md:h-5 mr-2 text-blue-600 flex-shrink-0" />
+                  <Icon className="w-4 h-4 md:w-5 md:h-5 mr-2 text-zinc-800 flex-shrink-0" />
                   <span className="truncate">{category.label}</span>
                 </CardTitle>
               </CardHeader>
@@ -504,19 +504,19 @@ export function ReportsPage() {
       </div>
 
       {/* Help Text */}
-      <Card className="bg-blue-50 border-blue-200">
+      <Card className="bg-zinc-50 border-zinc-200">
         <CardContent className="pt-4 md:pt-6">
           <div className="flex items-start space-x-3">
             <div className="seice-gradient w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0">
               <FileText className="w-4 h-4 text-white" />
             </div>
             <div>
-              <h4 className="font-medium text-blue-900 mb-1 text-sm md:text-base">Como usar os relatórios</h4>
-              <p className="text-xs md:text-sm text-blue-800 mb-2 md:mb-3">
+              <h4 className="font-medium text-zinc-900 mb-1 text-sm md:text-base">Como usar os relatórios</h4>
+              <p className="text-xs md:text-sm text-zinc-900 mb-2 md:mb-3">
                 Clique em "Executar" ao lado de cada relatório para gerar e baixar automaticamente. 
                 Os relatórios são gerados com os dados mais recentes do sistema.
               </p>
-              <ul className="text-xs md:text-sm text-blue-700 space-y-1">
+              <ul className="text-xs md:text-sm text-zinc-900 space-y-1">
                 <li>• <strong>PDF:</strong> Ideal para visualização e impressão</li>
                 <li>• <strong>Excel:</strong> Para análise avançada e manipulação de dados</li>
                 <li className="hidden sm:list-item">• <strong>CSV:</strong> Para importação em outros sistemas</li>

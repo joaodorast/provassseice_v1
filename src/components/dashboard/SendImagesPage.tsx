@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
+import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
@@ -160,24 +161,55 @@ export function SendImagesPage() {
     return { valid: true };
   };
 
-  // Simulação de OCR/IA para detectar respostas marcadas
-  const detectAnswersFromImage = async (imageData, totalQuestions) => {
-    // Simula processamento de OCR/IA
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Gera respostas aleatórias para simulação
-    // Em produção, isso seria substituído por uma chamada real de API de OCR/IA
-    const detectedAnswers = [];
-    for (let i = 0; i < totalQuestions; i++) {
-      // 90% de chance de detectar uma resposta, 10% de não detectar
-      if (Math.random() > 0.1) {
-        detectedAnswers.push(Math.floor(Math.random() * 5)); // 0-4 (A-E)
-      } else {
-        detectedAnswers.push(-1); // Não detectado
-      }
+  // Reduz o tamanho da imagem antes de enviar para a IA (evita payloads enormes e erros)
+  const resizeImageForAI = (dataUrl, maxDimension = 1600, quality = 0.85) => {
+    if (!dataUrl?.startsWith('data:image/')) {
+      // Não é uma imagem (ex: PDF) - envia como está
+      return Promise.resolve(dataUrl);
     }
-    
-    return detectedAnswers;
+
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        let { width, height } = img;
+        if (width > maxDimension || height > maxDimension) {
+          if (width > height) {
+            height = Math.round((height / width) * maxDimension);
+            width = maxDimension;
+          } else {
+            width = Math.round((width / height) * maxDimension);
+            height = maxDimension;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(dataUrl); // Se falhar, envia a imagem original
+      img.src = dataUrl;
+    });
+  };
+
+  // Limita o tamanho de mensagens de erro para não exibir textos enormes/ilegíveis
+  const friendlyErrorMessage = (error, fallback = 'Erro desconhecido') => {
+    const message = (error?.message || fallback).toString();
+    return message.length > 200 ? message.slice(0, 200) + '…' : message;
+  };
+
+  // Detecta respostas marcadas na folha de respostas usando IA (Gemini)
+  const detectAnswersFromImage = async (imageData, totalQuestions, optionsPerQuestion = 5) => {
+    const resizedImage = await resizeImageForAI(imageData);
+    const response = await apiService.detectAnswersAI(resizedImage, totalQuestions, optionsPerQuestion);
+
+    if (!response || response.error || !Array.isArray(response.answers)) {
+      throw new Error(friendlyErrorMessage({ message: response?.error }, 'Falha ao detectar respostas com IA'));
+    }
+
+    return response.answers;
   };
 
   const handleAutoProcessBatch = async (image) => {
@@ -213,6 +245,16 @@ export function SendImagesPage() {
     const corrections = [];
 
     try {
+      toast.info('🤖 Detectando respostas marcadas com IA...', { duration: 3000 });
+
+      // A imagem enviada é a mesma para todo o lote, então a detecção via IA
+      // é feita uma única vez e reaproveitada para cada aluno.
+      const detectedAnswers = await detectAnswersFromImage(
+        image.data,
+        examData.questions.length,
+        Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
+      );
+
       toast.info('🤖 Iniciando correção automática em lote...', { duration: 3000 });
 
       for (let i = 0; i < batchStudentsList.length; i++) {
@@ -220,12 +262,6 @@ export function SendImagesPage() {
         setAutoProcessingProgress(((i + 1) / batchStudentsList.length) * 100);
 
         console.log(`🤖 Auto-processando aluno ${i + 1}/${batchStudentsList.length}: ${currentStudent.studentName}`);
-
-        // Detectar respostas automaticamente
-        const detectedAnswers = await detectAnswersFromImage(
-          image.data,
-          examData.questions.length
-        );
 
         // Calcular resultado
         let correctCount = 0;
@@ -302,10 +338,16 @@ export function SendImagesPage() {
         }
       }
 
+      await apiService.updateImageStatus(image.id, {
+        status: 'Processada',
+        correctionType: 'auto-image-batch',
+        processedAt: new Date().toISOString()
+      });
+
       setCompletedCorrections(corrections);
       setSelectedImage(image);
       setShowAutoResults(true);
-      
+
       toast.success(
         `🎉 Correção automática concluída!\n\n${corrections.length} alunos corrigidos automaticamente`,
         { duration: 5000 }
@@ -315,7 +357,124 @@ export function SendImagesPage() {
 
     } catch (error) {
       console.error('❌ Erro na correção automática:', error);
-      toast.error('Erro durante a correção automática: ' + (error.message || 'Erro desconhecido'));
+      toast.error('Erro durante a correção automática: ' + friendlyErrorMessage(error));
+    } finally {
+      setIsAutoProcessing(false);
+      setAutoProcessingProgress(0);
+    }
+  };
+
+  // Correção automática por IA para uma imagem individual (um único aluno)
+  const handleAutoProcessIndividual = async (image) => {
+    const examData = exams.find(e => e.id === image.examId);
+
+    const validation = validateExamStructure(examData);
+    if (!validation.valid) {
+      toast.error(validation.error);
+      return;
+    }
+
+    setIsAutoProcessing(true);
+    setAutoProcessingProgress(0);
+
+    try {
+      toast.info('🤖 Detectando respostas marcadas com IA...', { duration: 3000 });
+
+      const detectedAnswers = await detectAnswersFromImage(
+        image.data,
+        examData.questions.length,
+        Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
+      );
+
+      setAutoProcessingProgress(60);
+
+      let correctCount = 0;
+      const results = examData.questions.map((question, index) => {
+        const studentAnswer = detectedAnswers[index];
+        const isCorrect = studentAnswer === question.correctAnswer;
+        if (isCorrect) correctCount++;
+
+        return {
+          question: question.question,
+          subject: question.subject,
+          studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
+          correctAnswer: String.fromCharCode(65 + question.correctAnswer),
+          isCorrect
+        };
+      });
+
+      const score = Math.round((correctCount / examData.questions.length) * 100);
+
+      const subjectPerformances = {};
+      examData.questions.forEach((question, index) => {
+        const subject = question.subject || 'Geral';
+        if (!subjectPerformances[subject]) {
+          subjectPerformances[subject] = { total: 0, correct: 0 };
+        }
+        subjectPerformances[subject].total++;
+        if (detectedAnswers[index] === question.correctAnswer) {
+          subjectPerformances[subject].correct++;
+        }
+      });
+
+      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
+        subject,
+        totalQuestions: data.total,
+        correctAnswers: data.correct,
+        percentage: Math.round((data.correct / data.total) * 100)
+      }));
+
+      const submissionData = {
+        examId: image.examId,
+        examTitle: examData.title,
+        studentId: image.studentId,
+        studentName: image.studentName,
+        studentEmail: image.studentEmail,
+        studentClass: image.studentClass,
+        studentGrade: image.studentGrade || examData.grade || 'Ensino Médio',
+        answers: detectedAnswers,
+        correctAnswers: examData.questions.map((q) => q.correctAnswer),
+        score: correctCount,
+        totalQuestions: examData.questions.length,
+        percentage: score,
+        subjectPerformances: subjectPerformanceArray,
+        timeSpent: 0,
+        results,
+        submittedAt: new Date().toISOString(),
+        gradingStatus: 'graded',
+        correctionType: 'auto-image-individual',
+        questionWeights: examData.questions.map((q, idx) => ({
+          questionIndex: idx,
+          weight: q.weight || 1,
+          subject: q.subject || 'Geral'
+        }))
+      };
+
+      const submissionResponse = await apiService.createSubmission(submissionData);
+
+      if (!submissionResponse || submissionResponse.error) {
+        throw new Error(submissionResponse?.error || 'Erro ao salvar correção');
+      }
+
+      setAutoProcessingProgress(90);
+
+      await apiService.updateImageStatus(image.id, {
+        status: 'Processada',
+        correctionType: 'auto-image-individual',
+        processedAt: new Date().toISOString()
+      });
+
+      setAutoProcessingProgress(100);
+
+      toast.success(
+        `✅ ${image.studentName}: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
+        { duration: 5000 }
+      );
+
+      await reloadOnlyImages();
+    } catch (error) {
+      console.error('❌ Erro na correção automática individual:', error);
+      toast.error('Erro durante a correção automática: ' + friendlyErrorMessage(error));
     } finally {
       setIsAutoProcessing(false);
       setAutoProcessingProgress(0);
@@ -535,9 +694,9 @@ export function SendImagesPage() {
     }
   };
 
-  const generateExcelExport = (corrections, examData, type = 'all') => {
-    const bySubject = {};
-    
+  const buildCorrectionSubjectBreakdown = (corrections) => {
+    const bySubject: Record<string, any[]> = {};
+
     corrections.forEach(correction => {
       correction.subjectPerformances.forEach(subj => {
         if (!bySubject[subj.subject]) {
@@ -553,55 +712,16 @@ export function SendImagesPage() {
       });
     });
 
-    const generateCSV = (data, subject) => {
-      let csv = `Matéria: ${subject}\n`;
-      csv += `Simulado: ${examData.title}\n`;
-      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
-      csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
-      
-      data.forEach(row => {
-        csv += `${row.aluno},${row.turma},${row.acertos},${row.total},${row.percentual}%\n`;
-      });
-      
-      return csv;
-    };
-
-    if (type === 'all') {
-      let csv = `RELATÓRIO GERAL - ${examData.title}\n`;
-      csv += `Data: ${new Date().toLocaleString('pt-BR')}\n\n`;
-      csv += 'Aluno,Turma,Nota,Percentual\n';
-      
-      corrections.forEach(corr => {
-        csv += `${corr.studentName},${corr.studentClass},${corr.score}/${corr.totalQuestions},${corr.percentage}%\n`;
-      });
-      
-      csv += '\n\nDETALHAMENTO POR MATÉRIA\n\n';
-      
-      Object.entries(bySubject).forEach(([subject, data]) => {
-        csv += `\n${subject}\n`;
-        csv += 'Aluno,Turma,Acertos,Total,Percentual\n';
-        data.forEach(row => {
-          csv += `${row.aluno},${row.turma},${row.acertos},${row.total},${row.percentual}%\n`;
-        });
-      });
-      
-      return csv;
-    } else {
-      return generateCSV(bySubject[type] || [], type);
-    }
+    return bySubject;
   };
 
-  const downloadExcel = (content, filename) => {
-    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    const url = URL.createObjectURL(blob);
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  const CORRECTION_SUBJECT_COLUMNS: ExcelColumn[] = [
+    { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
+    { header: 'Turma', key: 'turma', width: 15, type: 'text' },
+    { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
+    { header: 'Total', key: 'total', width: 12, type: 'number' },
+    { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
+  ];
 
   const handleBatchCorrection = async () => {
     if (!selectedImage || currentBatchIndex >= batchImages.length) return;
@@ -702,6 +822,12 @@ export function SendImagesPage() {
 
         if (currentBatchIndex === batchImages.length - 1) {
           console.log('✅ Lote finalizado - todas as correções completas');
+
+          await apiService.updateImageStatus(selectedImage.id, {
+            status: 'Processada',
+            correctionType: 'manual-image-batch',
+            processedAt: new Date().toISOString()
+          });
 
           toast.success(
             `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nAgora você pode exportar os resultados!`,
@@ -812,11 +938,17 @@ export function SendImagesPage() {
       if (submissionResponse && !submissionResponse.error) {
         console.log('✅ Submission created successfully');
 
+        await apiService.updateImageStatus(selectedImage.id, {
+          status: 'Processada',
+          correctionType: 'manual-image',
+          processedAt: new Date().toISOString()
+        });
+
         toast.success(
           `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
           { duration: 6000 }
         );
-        
+
         setShowAnswerSheet(false);
         setSelectedImage(null);
         await reloadOnlyImages();
@@ -838,7 +970,10 @@ export function SendImagesPage() {
 
     try {
       setLoading(true);
-      await apiService.deleteImage(imageId);
+      const response = await apiService.deleteImage(imageId);
+      if (response && response.error) {
+        throw new Error(response.error);
+      }
       toast.success('Imagem excluída com sucesso!');
       await reloadOnlyImages();
     } catch (error) {
@@ -853,7 +988,7 @@ export function SendImagesPage() {
     switch (status) {
       case 'Processada': return 'bg-green-100 text-green-800';
       case 'Processando': return 'bg-yellow-100 text-yellow-800';
-      case 'Aguardando Processamento': return 'bg-blue-100 text-blue-800';
+      case 'Aguardando Processamento': return 'bg-zinc-100 text-zinc-900';
       case 'Erro': return 'bg-red-100 text-red-800';
       default: return 'bg-gray-100 text-gray-800';
     }
@@ -863,28 +998,75 @@ export function SendImagesPage() {
     switch (status) {
       case 'Processada': return <CheckCircle className="w-4 h-4 text-green-600" />;
       case 'Processando': return <Clock className="w-4 h-4 text-yellow-600" />;
-      case 'Aguardando Processamento': return <Clock className="w-4 h-4 text-blue-600" />;
+      case 'Aguardando Processamento': return <Clock className="w-4 h-4 text-zinc-800" />;
       case 'Erro': return <XCircle className="w-4 h-4 text-red-600" />;
       default: return <Clock className="w-4 h-4 text-gray-600" />;
     }
   };
 
-  const handleExportExcel = (type, subject = null) => {
+  const handleExportExcel = async (type, subject = null) => {
     const examData = exams.find(e => e.id === selectedImage.examId);
     if (!examData) return;
 
-    const content = generateExcelExport(completedCorrections, examData, subject || 'all');
-    const timestamp = new Date().toISOString().split('T')[0];
-    
-    let filename;
-    if (type === 'general') {
-      filename = `Relatorio_Geral_${examData.title}_${timestamp}.csv`;
-    } else {
-      filename = `${subject}_${examData.title}_${timestamp}.csv`;
+    if (completedCorrections.length === 0) {
+      toast.error('Nenhuma correção disponível para exportar');
+      return;
     }
-    
-    downloadExcel(content, filename);
-    toast.success(`✅ Planilha exportada: ${filename}`);
+
+    const timestamp = new Date().toISOString().split('T')[0];
+    const exporter = new ExcelExporter();
+
+    try {
+      if (type === 'general') {
+        const bySubject = buildCorrectionSubjectBreakdown(completedCorrections);
+
+        const resumoSheet = {
+          title: `Relatório Geral — ${examData.title}`,
+          subtitle: `Total de alunos: ${completedCorrections.length}`,
+          sheetName: 'Resumo Geral',
+          includeStats: true,
+          columns: [
+            { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
+            { header: 'Turma', key: 'turma', width: 15, type: 'text' },
+            { header: 'Nota', key: 'nota', width: 14, type: 'text' },
+            { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
+          ] as ExcelColumn[],
+          data: completedCorrections.map((corr: any) => ({
+            aluno: corr.studentName,
+            turma: corr.studentClass,
+            nota: `${corr.score}/${corr.totalQuestions}`,
+            percentual: corr.percentage,
+          })),
+        };
+
+        const subjectSheets = Object.entries(bySubject).map(([subjectName, data]) => ({
+          title: `Detalhamento — ${subjectName}`,
+          sheetName: subjectName,
+          includeStats: true,
+          columns: CORRECTION_SUBJECT_COLUMNS,
+          data,
+        }));
+
+        await exporter.exportMultiSheet([resumoSheet, ...subjectSheets], `Relatorio_Geral_${examData.title}_${timestamp}`);
+      } else {
+        const bySubject = buildCorrectionSubjectBreakdown(completedCorrections);
+        const data = bySubject[subject] || [];
+
+        await exporter.export({
+          title: `${subject} — ${examData.title}`,
+          subtitle: `Total de alunos: ${data.length}`,
+          includeStats: true,
+          columns: CORRECTION_SUBJECT_COLUMNS,
+          data,
+          filename: `${subject}_${examData.title}_${timestamp}`,
+        });
+      }
+
+      toast.success('✅ Planilha exportada com sucesso!');
+    } catch (error) {
+      console.error('Erro ao exportar planilha:', error);
+      toast.error('Erro ao exportar planilha. Tente novamente.');
+    }
   };
 
   const getUniqueSubjects = () => {
@@ -903,7 +1085,7 @@ export function SendImagesPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <div className="text-center">
-          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-blue-600" />
+          <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3 text-zinc-800" />
           <p className="text-sm text-slate-600">Carregando dados...</p>
         </div>
       </div>
@@ -1035,8 +1217,8 @@ export function SendImagesPage() {
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors">
             <div className="space-y-4">
               <div className="flex justify-center">
-                <div className="w-16 h-16 bg-blue-100 rounded-full flex items-center justify-center">
-                  <Camera className="w-8 h-8 text-blue-600" />
+                <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center">
+                  <Camera className="w-8 h-8 text-zinc-800" />
                 </div>
               </div>
               
@@ -1066,7 +1248,7 @@ export function SendImagesPage() {
                   htmlFor="file-upload"
                   className={`inline-flex items-center px-4 py-2 rounded-lg font-medium cursor-pointer ${
                     selectedExam && (uploadMode === 'batch' || selectedStudent)
-                      ? 'bg-blue-600 text-white hover:bg-blue-700' 
+                      ? 'bg-zinc-800 text-white hover:bg-zinc-900' 
                       : 'bg-slate-300 text-slate-500 cursor-not-allowed'
                   }`}
                 >
@@ -1086,13 +1268,13 @@ export function SendImagesPage() {
             </div>
           </div>
 
-          <Card className="border-blue-200 bg-blue-50">
+          <Card className="border-zinc-200 bg-zinc-50">
             <CardContent className="p-4">
-              <h4 className="font-medium text-blue-900 mb-2 flex items-center">
+              <h4 className="font-medium text-zinc-900 mb-2 flex items-center">
                 <Scan className="w-4 h-4 mr-2" />
                 Modos de Correção:
               </h4>
-              <ul className="text-sm text-blue-800 space-y-1">
+              <ul className="text-sm text-zinc-900 space-y-1">
                 <li>• <strong>Correção Automática (IA/OCR):</strong> O sistema detecta automaticamente as respostas marcadas</li>
                 <li>• <strong>Correção Manual:</strong> Você marca manualmente as respostas visualizando o cartão</li>
                 <li>• <strong>Modo Lote:</strong> Corrija todos os alunos de uma vez automaticamente</li>
@@ -1107,8 +1289,8 @@ export function SendImagesPage() {
         <Card className="border-2">
           <CardContent className="p-6">
             <div className="flex items-center space-x-4">
-              <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-                <ImageIcon className="w-6 h-6 text-blue-600" />
+              <div className="w-12 h-12 bg-zinc-100 rounded-lg flex items-center justify-center">
+                <ImageIcon className="w-6 h-6 text-zinc-800" />
               </div>
               <div>
                 <p className="text-sm font-medium text-slate-600">Total de Imagens</p>
@@ -1195,7 +1377,7 @@ export function SendImagesPage() {
                         <div className="flex items-center space-x-2 mb-1">
                           <p className="font-medium text-slate-800">{image.studentName}</p>
                           {image.isBatch && (
-                            <Badge className="bg-purple-100 text-purple-800">
+                            <Badge className="bg-teal-100 text-teal-800">
                               <Users className="w-3 h-3 mr-1" />
                               Lote
                             </Badge>
@@ -1218,22 +1400,20 @@ export function SendImagesPage() {
                     <div className="flex items-center space-x-2 ml-4">
                       {getStatusIcon(image.status)}
                       
-                      {image.isBatch && (
-                        <Button 
-                          size="sm"
-                          onClick={() => handleAutoProcessBatch(image)}
-                          disabled={isAutoProcessing}
-                          className="bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-                        >
-                          <Zap className="w-4 h-4 mr-1" />
-                          Correção Automática
-                        </Button>
-                      )}
-                      
-                      <Button 
+                      <Button
+                        size="sm"
+                        onClick={() => image.isBatch ? handleAutoProcessBatch(image) : handleAutoProcessIndividual(image)}
+                        disabled={isAutoProcessing}
+                        className="bg-teal-600 hover:bg-teal-700 text-white"
+                      >
+                        <Zap className="w-4 h-4 mr-1" />
+                        Correção por IA
+                      </Button>
+
+                      <Button
                         size="sm"
                         onClick={() => handleProcessImage(image)}
-                        className="bg-blue-600 hover:bg-blue-700"
+                        className="bg-zinc-800 hover:bg-zinc-900"
                       >
                         <Eye className="w-4 h-4 mr-1" />
                         Correção Manual
@@ -1272,7 +1452,7 @@ export function SendImagesPage() {
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center">
-              <Zap className="w-5 h-5 mr-2 text-purple-600" />
+              <Zap className="w-5 h-5 mr-2 text-teal-600" />
               Processamento Automático em Andamento
             </DialogTitle>
             <DialogDescription>
@@ -1282,8 +1462,8 @@ export function SendImagesPage() {
           
           <div className="space-y-4 py-4">
             <div className="flex items-center justify-center">
-              <div className="w-20 h-20 bg-gradient-to-br from-purple-100 to-blue-100 rounded-full flex items-center justify-center">
-                <Loader2 className="w-10 h-10 animate-spin text-purple-600" />
+              <div className="w-20 h-20 bg-teal-100 rounded-full flex items-center justify-center">
+                <Loader2 className="w-10 h-10 animate-spin text-teal-600" />
               </div>
             </div>
             
@@ -1295,9 +1475,9 @@ export function SendImagesPage() {
               <Progress value={autoProcessingProgress} className="h-3" />
             </div>
             
-            <Card className="border-blue-200 bg-blue-50">
+            <Card className="border-zinc-200 bg-zinc-50">
               <CardContent className="p-4">
-                <p className="text-sm text-blue-800 text-center">
+                <p className="text-sm text-zinc-900 text-center">
                   🤖 IA detectando respostas marcadas nos cartões...
                 </p>
               </CardContent>
@@ -1315,7 +1495,7 @@ export function SendImagesPage() {
                 <CheckCircle className="w-6 h-6 mr-2 text-green-600" />
                 Correção Automática Concluída!
               </span>
-              <Badge className="bg-purple-100 text-purple-800">
+              <Badge className="bg-teal-100 text-teal-800">
                 {exams.find(e => e.id === selectedImage?.examId)?.title}
               </Badge>
             </DialogTitle>
@@ -1324,7 +1504,7 @@ export function SendImagesPage() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 overflow-y-auto pr-2">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2">
             <div className="space-y-4">
               <Card className="border-green-200 bg-green-50">
                 <CardContent className="p-6">
@@ -1430,7 +1610,7 @@ export function SendImagesPage() {
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center justify-between">
               <span>Correção Manual - {selectedImage?.studentName}</span>
-              <Badge className="bg-blue-100 text-blue-800">
+              <Badge className="bg-zinc-100 text-zinc-900">
                 {exams.find(e => e.id === selectedImage?.examId)?.title}
               </Badge>
             </DialogTitle>
@@ -1439,7 +1619,7 @@ export function SendImagesPage() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 overflow-y-auto pr-2">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2">
             <div className="space-y-4">
               <Card className="border-orange-200 bg-orange-50">
                 <CardContent className="p-4">
@@ -1463,7 +1643,7 @@ export function SendImagesPage() {
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1">
                           <div className="flex items-center space-x-2 mb-2">
-                            <Badge className="bg-blue-100 text-blue-800">
+                            <Badge className="bg-zinc-100 text-zinc-900">
                               Questão {index + 1}
                             </Badge>
                             <Badge variant="outline">{question.subject || 'Geral'}</Badge>
@@ -1494,9 +1674,9 @@ export function SendImagesPage() {
                                   setManualAnswers(newAnswers);
                                 }}
                                 className={`
-                                  ${isSelected ? 'bg-blue-600 text-white border-blue-600' : ''}
+                                  ${isSelected ? 'bg-zinc-800 text-white border-zinc-800' : ''}
                                   ${isCorrect ? 'border-green-500 border-2' : ''}
-                                  hover:bg-blue-100
+                                  hover:bg-zinc-100
                                 `}
                               >
                                 {String.fromCharCode(65 + optionIndex)}
@@ -1559,7 +1739,7 @@ export function SendImagesPage() {
               <span>
                 Correção em Lote - Aluno {currentBatchIndex + 1} de {batchImages.length}
               </span>
-              <Badge className="bg-purple-100 text-purple-800">
+              <Badge className="bg-teal-100 text-teal-800">
                 {exams.find(e => e.id === selectedImage?.examId)?.title}
               </Badge>
             </DialogTitle>
@@ -1568,21 +1748,21 @@ export function SendImagesPage() {
             </DialogDescription>
           </DialogHeader>
           
-          <div className="flex-1 overflow-y-auto pr-2">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2">
             <div className="space-y-4">
-              <Card className="border-purple-200 bg-purple-50">
+              <Card className="border-teal-200 bg-teal-50">
                 <CardContent className="p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <p className="font-medium text-purple-900">
+                      <p className="font-medium text-teal-900">
                         {batchImages[currentBatchIndex]?.studentName}
                       </p>
-                      <p className="text-sm text-purple-700">
+                      <p className="text-sm text-teal-700">
                         Turma: {batchImages[currentBatchIndex]?.studentClass}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm text-purple-700">
+                      <p className="text-sm text-teal-700">
                         Progresso: {currentBatchIndex + 1}/{batchImages.length}
                       </p>
                       <Progress 
@@ -1618,7 +1798,7 @@ export function SendImagesPage() {
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1">
                           <div className="flex items-center space-x-2 mb-2">
-                            <Badge className="bg-blue-100 text-blue-800">
+                            <Badge className="bg-zinc-100 text-zinc-900">
                               Questão {index + 1}
                             </Badge>
                             <Badge variant="outline">{question.subject || 'Geral'}</Badge>
@@ -1649,9 +1829,9 @@ export function SendImagesPage() {
                                   setManualAnswers(newAnswers);
                                 }}
                                 className={`
-                                  ${isSelected ? 'bg-blue-600 text-white border-blue-600' : ''}
+                                  ${isSelected ? 'bg-zinc-800 text-white border-zinc-800' : ''}
                                   ${isCorrect ? 'border-green-500 border-2' : ''}
-                                  hover:bg-blue-100
+                                  hover:bg-zinc-100
                                 `}
                               >
                                 {String.fromCharCode(65 + optionIndex)}
@@ -1722,7 +1902,7 @@ export function SendImagesPage() {
                   <Button 
                     onClick={handleBatchCorrection}
                     disabled={isProcessing || manualAnswers.filter(a => a >= 0).length === 0}
-                    className="bg-blue-600 hover:bg-blue-700"
+                    className="bg-zinc-800 hover:bg-zinc-900"
                   >
                     {isProcessing ? (
                       <>

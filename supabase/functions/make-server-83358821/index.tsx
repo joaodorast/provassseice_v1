@@ -1044,39 +1044,36 @@ app.get('/make-server-83358821/submissions', requireAuth, async (c) => {
   }
 });
 
+app.delete('/make-server-83358821/submissions/:id', requireAuth, async (c) => {
+  try {
+    const user = c.get('user');
+    const submissionId = c.req.param('id');
+
+    await kv.del(`submissions:${user.id}:${submissionId}`);
+    return c.json({ success: true });
+  } catch (error) {
+    console.log('Error deleting submission:', error);
+    return c.json({ error: 'Failed to delete submission' }, 500);
+  }
+});
+
 // Images Management (for scanned exams)
 app.post('/make-server-83358821/images', requireAuth, async (c) => {
   try {
     const user = c.get('user');
     const body = await c.req.json();
-    
+
     const imageId = crypto.randomUUID();
     const imageData = {
-      id: imageId,
+      status: 'Aguardando Processamento',
       ...body,
+      id: imageId,
       userId: user.id,
-      uploadedAt: new Date().toISOString(),
-      status: 'Processando'
+      uploadedAt: new Date().toISOString()
     };
-    
+
     await kv.set(`images:${user.id}:${imageId}`, imageData);
-    
-    // Simulate processing
-    setTimeout(async () => {
-      try {
-        const processedData = {
-          ...imageData,
-          status: 'Processada',
-          processedAt: new Date().toISOString(),
-          studentName: `Aluno ${Math.floor(Math.random() * 100) + 1}`,
-          extractedAnswers: Array.from({ length: 10 }, () => Math.floor(Math.random() * 4))
-        };
-        await kv.set(`images:${user.id}:${imageId}`, processedData);
-      } catch (error) {
-        console.log('Error processing image:', error);
-      }
-    }, 3000);
-    
+
     return c.json({ success: true, image: imageData });
   } catch (error) {
     console.log('Error saving image:', error);
@@ -1093,6 +1090,44 @@ app.get('/make-server-83358821/images', requireAuth, async (c) => {
   } catch (error) {
     console.log('Error fetching images:', error);
     return c.json({ error: 'Failed to fetch images' }, 500);
+  }
+});
+
+app.delete('/make-server-83358821/images/:id', requireAuth, async (c) => {
+  try {
+    const user = c.get('user');
+    const imageId = c.req.param('id');
+
+    await kv.del(`images:${user.id}:${imageId}`);
+    return c.json({ success: true });
+  } catch (error) {
+    console.log('Error deleting image:', error);
+    return c.json({ error: 'Failed to delete image' }, 500);
+  }
+});
+
+app.put('/make-server-83358821/images/:id/status', requireAuth, async (c) => {
+  try {
+    const user = c.get('user');
+    const imageId = c.req.param('id');
+    const body = await c.req.json();
+
+    const existingImage = await kv.get(`images:${user.id}:${imageId}`);
+    if (!existingImage) {
+      return c.json({ error: 'Image not found' }, 404);
+    }
+
+    const updatedImage = {
+      ...existingImage,
+      ...body,
+      updatedAt: new Date().toISOString()
+    };
+
+    await kv.set(`images:${user.id}:${imageId}`, updatedImage);
+    return c.json({ success: true, image: updatedImage });
+  } catch (error) {
+    console.log('Error updating image status:', error);
+    return c.json({ error: 'Failed to update image status' }, 500);
   }
 });
 
@@ -1289,7 +1324,7 @@ app.get('/make-server-83358821/public/exam/:examId', async (c) => {
     const allExams = await kv.getByPrefix('exams:');
     console.log(`Found ${allExams.length} total exams in database`);
 
-    const exam = allExams.find(e => e.value.id === examId);
+    const exam = allExams.find(e => e.id === examId);
 
     if (!exam) {
       console.log(`Exam ${examId} not found in database`);
@@ -1297,34 +1332,34 @@ app.get('/make-server-83358821/public/exam/:examId', async (c) => {
     }
 
     console.log('Found exam:', {
-      id: exam.value.id,
-      title: exam.value.title,
-      status: exam.value.status,
-      hasQuestions: !!exam.value.questions,
-      questionsCount: exam.value.questions?.length || 0
+      id: exam.id,
+      title: exam.title,
+      status: exam.status,
+      hasQuestions: !!exam.questions,
+      questionsCount: exam.questions?.length || 0
     });
 
-    if (exam.value.status !== 'Ativo') {
-      console.log(`Exam ${examId} is not active (status: ${exam.value.status})`);
+    if (exam.status !== 'Ativo') {
+      console.log(`Exam ${examId} is not active (status: ${exam.status})`);
       return c.json({ error: 'Exam not found or not active' }, 404);
     }
 
     // Validate that exam has questions
-    if (!exam.value.questions || exam.value.questions.length === 0) {
+    if (!exam.questions || exam.questions.length === 0) {
       console.error(`Exam ${examId} has no questions!`);
       return c.json({ error: 'Exam has no questions configured' }, 500);
     }
 
     // Return exam data without sensitive information (but including correct answers for grading)
     const publicExamData = {
-      id: exam.value.id,
-      title: exam.value.title,
-      description: exam.value.description,
-      timeLimit: exam.value.timeLimit,
-      totalQuestions: exam.value.totalQuestions,
-      questionsPerSubject: exam.value.questionsPerSubject,
-      subjects: exam.value.subjects,
-      questions: exam.value.questions
+      id: exam.id,
+      title: exam.title,
+      description: exam.description,
+      timeLimit: exam.timeLimit,
+      totalQuestions: exam.totalQuestions,
+      questionsPerSubject: exam.questionsPerSubject,
+      subjects: exam.subjects,
+      questions: exam.questions
     };
 
     console.log('Returning exam with', publicExamData.questions.length, 'questions');
@@ -1907,9 +1942,9 @@ app.put('/make-server-83358821/series/:id', requireAuth, async (c) => {
     // Check if code already exists (excluding current serie)
     if (body.code && body.code !== existingSerie.code) {
       const allSeries = await kv.getByPrefix(`series:${user.id}:`);
-      const codeExists = allSeries.some(item => 
-        item.value.id !== serieId && 
-        item.value.code.toLowerCase() === body.code.toLowerCase()
+      const codeExists = allSeries.some(item =>
+        item.id !== serieId &&
+        item.code.toLowerCase() === body.code.toLowerCase()
       );
       
       if (codeExists) {
@@ -2548,6 +2583,174 @@ app.get('/make-server-83358821/grading/queue', requireAuth, async (c) => {
   } catch (error) {
     console.error('Error fetching grading queue:', error);
     return c.json({ error: 'Failed to fetch grading queue' }, 500);
+  }
+});
+
+// ================== AI CORRECTION ROUTES (Gemini) ==================
+
+const GEMINI_MODEL = 'gemini-3.6-flash';
+
+// Set the Gemini API key via PUT /ai/config (stored server-side only, never exposed to the client)
+app.put('/make-server-83358821/ai/config', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { geminiApiKey } = body;
+
+    if (!geminiApiKey) {
+      return c.json({ error: 'geminiApiKey is required' }, 400);
+    }
+
+    await kv.set('config:gemini-api-key', { geminiApiKey });
+    return c.json({ success: true });
+  } catch (error) {
+    console.error('Error saving AI config:', error);
+    return c.json({ error: 'Failed to save AI config' }, 500);
+  }
+});
+
+const getGeminiApiKey = async (): Promise<string | undefined> => {
+  const stored = await kv.get('config:gemini-api-key');
+  return stored?.geminiApiKey || Deno.env.get('GEMINI_API_KEY');
+};
+
+const callGemini = async (contents: any[], responseSchema: any) => {
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) {
+    throw new Error('Gemini API key not configured');
+  }
+
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema,
+          temperature: 0,
+        },
+      }),
+    }
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error(`Gemini API error (${response.status}):`, errorText);
+
+    let shortMessage = `Gemini API error (${response.status})`;
+    try {
+      const parsed = JSON.parse(errorText);
+      if (parsed?.error?.message) {
+        shortMessage = parsed.error.message;
+      }
+    } catch {
+      // Response wasn't JSON (e.g. an HTML error page) - keep the short default message
+    }
+
+    throw new Error(shortMessage.slice(0, 200));
+  }
+
+  const result = await response.json();
+  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) {
+    throw new Error('Gemini returned an empty response');
+  }
+
+  return JSON.parse(text);
+};
+
+// Detect marked answers on a scanned answer sheet (bubble sheet) using Gemini Vision
+app.post('/make-server-83358821/ai/detect-answers', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { imageData, totalQuestions, optionsPerQuestion = 5 } = body;
+
+    if (!imageData || !totalQuestions) {
+      return c.json({ error: 'imageData and totalQuestions are required' }, 400);
+    }
+
+    // Aceita tanto imagens (data:image/...) quanto PDFs (data:application/pdf;...)
+    const mimeMatch = imageData.match(/^data:([\w.+-]+\/[\w.+-]+);base64,/);
+    const mimeType = mimeMatch?.[1] || 'image/jpeg';
+    const base64Data = imageData.replace(/^data:[\w.+-]+\/[\w.+-]+;base64,/, '');
+
+    const lastLetter = String.fromCharCode(65 + optionsPerQuestion - 1);
+    const prompt = `Você está analisando uma folha de respostas (gabarito) escaneada de uma prova de múltipla escolha com ${totalQuestions} questões, cada uma com ${optionsPerQuestion} alternativas (A a ${lastLetter}). Para cada questão, identifique qual alternativa foi marcada pelo aluno (a bolha/opção preenchida ou marcada). Se nenhuma alternativa estiver claramente marcada ou houver mais de uma marcada para a mesma questão, retorne -1 para essa questão. Retorne os índices baseados em zero (A=0, B=1, C=2, ...).`;
+
+    const result = await callGemini(
+      [
+        {
+          role: 'user',
+          parts: [
+            { text: prompt },
+            { inlineData: { mimeType, data: base64Data } },
+          ],
+        },
+      ],
+      {
+        type: 'OBJECT',
+        properties: {
+          answers: {
+            type: 'ARRAY',
+            items: { type: 'INTEGER' },
+          },
+        },
+        required: ['answers'],
+      }
+    );
+
+    let answers = Array.isArray(result.answers) ? result.answers : [];
+    // Normalize length to totalQuestions
+    if (answers.length < totalQuestions) {
+      answers = [...answers, ...Array(totalQuestions - answers.length).fill(-1)];
+    } else if (answers.length > totalQuestions) {
+      answers = answers.slice(0, totalQuestions);
+    }
+
+    return c.json({ success: true, answers });
+  } catch (error) {
+    console.error('Error detecting answers with AI:', error);
+    return c.json({ error: 'Failed to detect answers: ' + (error.message || 'Unknown error') }, 500);
+  }
+});
+
+// Grade a dissertative/essay answer using Gemini
+app.post('/make-server-83358821/ai/grade-essay', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const { question, studentAnswer, expectedAnswer, maxScore = 1 } = body;
+
+    if (!question || !studentAnswer) {
+      return c.json({ error: 'question and studentAnswer are required' }, 400);
+    }
+
+    const prompt = `Você é um professor corrigindo uma questão dissertativa.
+Questão: ${question}
+${expectedAnswer ? `Resposta esperada / critérios de correção: ${expectedAnswer}` : ''}
+Resposta do aluno: ${studentAnswer}
+
+Avalie a resposta do aluno atribuindo uma nota de 0 a ${maxScore} (pode usar casas decimais) e escreva um feedback curto e construtivo em português, explicando o que está correto e o que poderia melhorar.`;
+
+    const result = await callGemini(
+      [{ role: 'user', parts: [{ text: prompt }] }],
+      {
+        type: 'OBJECT',
+        properties: {
+          score: { type: 'NUMBER' },
+          feedback: { type: 'STRING' },
+        },
+        required: ['score', 'feedback'],
+      }
+    );
+
+    const score = Math.max(0, Math.min(maxScore, Number(result.score) || 0));
+
+    return c.json({ success: true, score, feedback: result.feedback || '' });
+  } catch (error) {
+    console.error('Error grading essay with AI:', error);
+    return c.json({ error: 'Failed to grade essay: ' + (error.message || 'Unknown error') }, 500);
   }
 });
 
