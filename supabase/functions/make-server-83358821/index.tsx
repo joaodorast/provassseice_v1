@@ -2613,52 +2613,76 @@ const getGeminiApiKey = async (): Promise<string | undefined> => {
   return stored?.geminiApiKey || Deno.env.get('GEMINI_API_KEY');
 };
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Erros transitórios do lado do Google (sobrecarga/rate limit) valem retry; erros do nosso
+// pedido (chave inválida, prompt rejeitado, etc.) não devem ser tentados de novo.
+const isTransientGeminiError = (status: number, message: string) => {
+  if (status === 503 || status === 429) return true;
+  const lower = message.toLowerCase();
+  return lower.includes('high demand') || lower.includes('overloaded') || lower.includes('unavailable');
+};
+
 const callGemini = async (contents: any[], responseSchema: any) => {
   const apiKey = await getGeminiApiKey();
   if (!apiKey) {
     throw new Error('Gemini API key not configured');
   }
 
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema,
-          temperature: 0,
-        },
-      }),
-    }
-  );
+  const maxAttempts = 3;
+  let lastError: Error | null = null;
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Gemini API error (${response.status}):`, errorText);
-
-    let shortMessage = `Gemini API error (${response.status})`;
-    try {
-      const parsed = JSON.parse(errorText);
-      if (parsed?.error?.message) {
-        shortMessage = parsed.error.message;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents,
+          generationConfig: {
+            responseMimeType: 'application/json',
+            responseSchema,
+            temperature: 0,
+          },
+        }),
       }
-    } catch {
-      // Response wasn't JSON (e.g. an HTML error page) - keep the short default message
+    );
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Gemini API error (${response.status}), attempt ${attempt}/${maxAttempts}:`, errorText);
+
+      let shortMessage = `Gemini API error (${response.status})`;
+      try {
+        const parsed = JSON.parse(errorText);
+        if (parsed?.error?.message) {
+          shortMessage = parsed.error.message;
+        }
+      } catch {
+        // Response wasn't JSON (e.g. an HTML error page) - keep the short default message
+      }
+
+      lastError = new Error(shortMessage.slice(0, 200));
+
+      if (isTransientGeminiError(response.status, shortMessage) && attempt < maxAttempts) {
+        await sleep(attempt * 1500); // backoff: 1.5s, depois 3s
+        continue;
+      }
+
+      throw lastError;
     }
 
-    throw new Error(shortMessage.slice(0, 200));
+    const result = await response.json();
+    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) {
+      throw new Error('Gemini returned an empty response');
+    }
+
+    return JSON.parse(text);
   }
 
-  const result = await response.json();
-  const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) {
-    throw new Error('Gemini returned an empty response');
-  }
-
-  return JSON.parse(text);
+  throw lastError || new Error('Gemini request failed after retries');
 };
 
 // Detect marked answers on a scanned answer sheet (bubble sheet) using Gemini Vision

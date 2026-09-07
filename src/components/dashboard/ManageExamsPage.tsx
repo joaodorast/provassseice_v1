@@ -49,6 +49,10 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState('');
 
+  // Estado para visualização do simulado
+  const [viewDialogOpen, setViewDialogOpen] = useState(false);
+  const [viewingExam, setViewingExam] = useState<any>(null);
+
   // Estado para edição de turma
   const [editClassDialogOpen, setEditClassDialogOpen] = useState(false);
   const [editingClassExam, setEditingClassExam] = useState<any>(null);
@@ -1009,7 +1013,7 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                             variant="ghost" 
                             size="sm" 
                             title="Visualizar"
-                            onClick={() => showToast('Funcionalidade em desenvolvimento', 'info')}
+                            onClick={() => { setViewingExam(exam); setViewDialogOpen(true); }}
                           >
                             <Eye className="w-4 h-4" />
                           </Button>
@@ -1094,6 +1098,88 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
           </CardContent>
         </Card>
       )}
+
+      {/* Dialog de Visualização do Simulado */}
+      <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
+        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-zinc-800" />
+              {viewingExam?.title || 'Simulado'}
+            </DialogTitle>
+            {viewingExam?.description && (
+              <DialogDescription>{viewingExam.description}</DialogDescription>
+            )}
+          </DialogHeader>
+
+          {viewingExam && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-sm">
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-slate-500 text-xs">Status</p>
+                  <p className="font-medium">{viewingExam.status || 'Rascunho'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-slate-500 text-xs">Questões</p>
+                  <p className="font-medium">{viewingExam.questions?.length || 0}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-slate-500 text-xs">Turma</p>
+                  <p className="font-medium">{viewingExam.selectedClass || '-'}</p>
+                </div>
+                <div className="bg-slate-50 rounded-lg p-3">
+                  <p className="text-slate-500 text-xs">Criado em</p>
+                  <p className="font-medium">{formatDate(viewingExam.createdAt)}</p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {(viewingExam.questions || []).map((q: any, idx: number) => (
+                  <div key={idx} className="border rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="outline">Questão {idx + 1}</Badge>
+                      {q.subject && <Badge variant="outline">{q.subject}</Badge>}
+                      {q.weight && q.weight !== 1 && (
+                        <Badge variant="outline" className="text-amber-600 border-amber-300">
+                          Peso {q.weight}
+                        </Badge>
+                      )}
+                    </div>
+                    <p className="text-sm font-medium mb-2">{q.question}</p>
+                    {Array.isArray(q.options) && (
+                      <div className="space-y-1">
+                        {q.options.map((opt: string, optIdx: number) => (
+                          <div
+                            key={optIdx}
+                            className={`text-sm px-2 py-1 rounded ${
+                              optIdx === q.correctAnswer
+                                ? 'bg-green-50 text-green-800 font-medium'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            {String.fromCharCode(65 + optIdx)}) {opt}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {(!viewingExam.questions || viewingExam.questions.length === 0) && (
+                  <p className="text-sm text-slate-500 text-center py-6">
+                    Este simulado ainda não tem questões cadastradas.
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewDialogOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de Edição de Título */}
       <Dialog open={editDialogOpen} onOpenChange={setEditDialogOpen}>
