@@ -5,19 +5,21 @@ import { Input } from '../ui/input';
 import { Textarea } from '../ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
 import { Badge } from '../ui/badge';
-import { 
-  Plus, 
-  Search, 
-  Filter, 
-  BookOpen, 
-  Edit, 
-  Trash2, 
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../ui/dialog';
+import {
+  Plus,
+  Search,
+  Filter,
+  BookOpen,
+  Edit,
+  Trash2,
   Eye,
   FileText,
   Tag,
   Download,
   Upload,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Sparkles
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
 import { toast } from 'sonner@2.0.3';
@@ -34,6 +36,9 @@ export function QuestionBankPage() {
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [subjects, setSubjects] = useState<string[]>([]);
   const [series, setSeries] = useState<string[]>([]);
+  const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  const [viewingQuestion, setViewingQuestion] = useState<any>(null);
+  const [showViewDialog, setShowViewDialog] = useState(false);
   const [newQuestion, setNewQuestion] = useState({
     question: '',
     subject: '',
@@ -182,8 +187,7 @@ export function QuestionBankPage() {
 
     try {
       setLoading(true);
-      console.log('Creating new question...');
-      
+
       const questionData: any = {
         question: newQuestion.question.trim(),
         subject: newQuestion.subject,
@@ -195,38 +199,37 @@ export function QuestionBankPage() {
         explanation: '',
         weight: newQuestion.weight || 1.0
       };
-      
+
       // Adicionar opções e resposta correta apenas para questões de múltipla escolha
       if (newQuestion.questionType === 'multiple-choice') {
         questionData.options = newQuestion.options.filter(opt => opt.trim()).map(opt => opt.trim());
         questionData.correctAnswer = newQuestion.correctAnswer;
       }
-      
-      console.log('Question data to be sent:', questionData);
-      const response = await apiService.createQuestion(questionData);
-      
-      console.log('Create question response:', response);
-      
+
+      const response = editingQuestionId
+        ? await apiService.updateQuestion(editingQuestionId, questionData)
+        : await apiService.createQuestion(questionData);
+
       if (response.success === false) {
         console.error('Backend error:', response.error);
-        toast.error(response.error || 'Erro ao criar questão');
+        toast.error(response.error || (editingQuestionId ? 'Erro ao atualizar questão' : 'Erro ao criar questão'));
         return;
       }
-      
+
       if (!response.question || !response.question.id) {
         console.error('Invalid response - no question returned:', response);
-        toast.error('Erro: questão não foi criada corretamente');
+        toast.error('Erro: questão não foi salva corretamente');
         return;
       }
-      
-      console.log('Question created successfully with ID:', response.question.id);
-      
-      // Add the new question to the local state immediately for instant feedback
-      const createdQuestion = response.question;
-      setQuestions(prev => [...prev, createdQuestion]);
-      
-      toast.success('Questão criada com sucesso!');
-      
+
+      if (editingQuestionId) {
+        setQuestions(prev => prev.map(q => (q.id === editingQuestionId ? response.question : q)));
+        toast.success('Questão atualizada com sucesso!');
+      } else {
+        setQuestions(prev => [...prev, response.question]);
+        toast.success('Questão criada com sucesso!');
+      }
+
       // Clear form
       setNewQuestion({
         question: '',
@@ -240,21 +243,52 @@ export function QuestionBankPage() {
         tags: '',
         weight: 1.0
       });
+      setEditingQuestionId(null);
       setShowAddForm(false);
-      
-      // Wait a moment to ensure data is persisted, then reload
-      console.log('Waiting for data persistence...');
+
       await new Promise(resolve => setTimeout(resolve, 500));
-      
-      console.log('Reloading questions from backend...');
       await loadQuestions();
-      
+
     } catch (error) {
-      console.error('Error creating question:', error);
-      toast.error('Erro ao criar questão: ' + (error.message || 'Erro desconhecido'));
+      console.error('Error saving question:', error);
+      toast.error((editingQuestionId ? 'Erro ao atualizar questão: ' : 'Erro ao criar questão: ') + (error.message || 'Erro desconhecido'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditClick = (question: any) => {
+    setEditingQuestionId(question.id);
+    setNewQuestion({
+      question: question.question || '',
+      subject: question.subject || '',
+      grade: question.grade || '',
+      difficulty: question.difficulty || '',
+      questionType: question.questionType === 'essay' ? 'essay' : 'multiple-choice',
+      type: question.type || 'Múltipla Escolha',
+      options: question.options && question.options.length > 0 ? [...question.options, '', '', '', ''].slice(0, 4) : ['', '', '', ''],
+      correctAnswer: typeof question.correctAnswer === 'number' ? question.correctAnswer : 0,
+      tags: Array.isArray(question.tags) ? question.tags.join(', ') : '',
+      weight: question.weight || 1.0
+    });
+    setShowAddForm(true);
+  };
+
+  const handleCancelForm = () => {
+    setEditingQuestionId(null);
+    setNewQuestion({
+      question: '',
+      subject: '',
+      grade: '',
+      difficulty: '',
+      questionType: 'multiple-choice',
+      type: 'Múltipla Escolha',
+      options: ['', '', '', ''],
+      correctAnswer: 0,
+      tags: '',
+      weight: 1.0
+    });
+    setShowAddForm(false);
   };
 
   const handleDeleteQuestion = async (id: string) => {
@@ -374,9 +408,14 @@ export function QuestionBankPage() {
     <div className="space-y-4 lg:space-y-6">
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
-        <div>
-          <h1 className="text-xl lg:text-2xl font-semibold text-slate-800">Banco de Questões</h1>
-          <p className="text-sm lg:text-base text-slate-600">Gerencie suas questões para criar avaliações</p>
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-zinc-900 to-zinc-700 flex items-center justify-center shadow-md shadow-zinc-900/20 flex-shrink-0">
+            <BookOpen className="w-5 h-5 text-amber-400" />
+          </div>
+          <div>
+            <h1 className="font-display text-xl lg:text-2xl font-extrabold text-slate-900 tracking-tight">Banco de Questões</h1>
+            <p className="text-sm lg:text-base text-slate-500">Gerencie suas questões para criar avaliações</p>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 lg:space-x-3">
           {/* Botão de Importar */}
@@ -424,10 +463,10 @@ export function QuestionBankPage() {
             </Button>
           </div>
           
-          <Button 
-            onClick={() => setShowAddForm(!showAddForm)}
+          <Button
+            onClick={() => (showAddForm ? handleCancelForm() : setShowAddForm(true))}
             size="sm"
-            className="bg-amber-500 hover:bg-amber-600 text-zinc-900 text-xs lg:text-sm"
+            className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-zinc-900 font-semibold shadow-md shadow-amber-900/20 text-xs lg:text-sm"
           >
             <Plus className="w-4 h-4 mr-1 lg:mr-2" />
             <span className="hidden sm:inline">Nova Questão</span>
@@ -489,7 +528,7 @@ export function QuestionBankPage() {
           <CardHeader>
             <CardTitle className="flex items-center">
               <FileText className="w-5 h-5 mr-2" />
-              Nova Questão
+              {editingQuestionId ? 'Editar Questão' : 'Nova Questão'}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -641,15 +680,15 @@ export function QuestionBankPage() {
             </div>
             
             <div className="flex justify-end space-x-2">
-              <Button variant="outline" onClick={() => setShowAddForm(false)}>
+              <Button variant="outline" onClick={handleCancelForm}>
                 Cancelar
               </Button>
-              <Button 
+              <Button
                 className="bg-zinc-800 hover:bg-zinc-900"
                 onClick={handleCreateQuestion}
                 disabled={loading}
               >
-                {loading ? 'Salvando...' : 'Salvar Questão'}
+                {loading ? 'Salvando...' : editingQuestionId ? 'Salvar Alterações' : 'Salvar Questão'}
               </Button>
             </div>
           </CardContent>
@@ -659,8 +698,8 @@ export function QuestionBankPage() {
       {/* Questions List */}
       <div className="space-y-4">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-slate-800">
-            Questões ({filteredQuestions.length})
+          <h2 className="font-display font-bold text-slate-900 tracking-tight">
+            Questões <span className="text-amber-600">({filteredQuestions.length})</span>
           </h2>
           {filteredQuestions.length > 0 && (
             <div className="flex items-center space-x-2 text-sm text-slate-500">
@@ -670,10 +709,13 @@ export function QuestionBankPage() {
             </div>
           )}
         </div>
-        
-        {filteredQuestions.map(question => (
-          <Card key={question.id} className="seice-card hover:shadow-md transition-shadow">
-            <CardContent className="p-4 lg:p-6">
+
+        {filteredQuestions.map(question => {
+          const accentColor = question.difficulty === 'Fácil' ? 'bg-green-500' : question.difficulty === 'Difícil' ? 'bg-red-500' : 'bg-amber-500';
+          return (
+          <Card key={question.id} className="seice-glow-card relative overflow-hidden border-slate-200 hover:-translate-y-0.5 transition-all duration-200">
+            <div className={`absolute left-0 top-0 h-full w-1 ${accentColor}`} />
+            <CardContent className="p-4 lg:p-6 pl-5 lg:pl-7">
               <div className="flex flex-col lg:flex-row lg:justify-between lg:items-start space-y-4 lg:space-y-0">
                 <div className="flex-1">
                   <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -735,15 +777,16 @@ export function QuestionBankPage() {
                 </div>
                 
                 <div className="flex items-center space-x-1 lg:space-x-2 lg:ml-4">
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" title="Visualizar" onClick={() => { setViewingQuestion(question); setShowViewDialog(true); }}>
                     <Eye className="w-4 h-4" />
                   </Button>
-                  <Button variant="ghost" size="sm">
+                  <Button variant="ghost" size="sm" title="Editar" onClick={() => handleEditClick(question)}>
                     <Edit className="w-4 h-4" />
                   </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    title="Excluir"
                     className="text-red-600 hover:text-red-700"
                     onClick={() => handleDeleteQuestion(question.id)}
                     disabled={loading}
@@ -754,22 +797,25 @@ export function QuestionBankPage() {
               </div>
             </CardContent>
           </Card>
-        ))}
-        
+          );
+        })}
+
         {filteredQuestions.length === 0 && (
           <Card className="seice-card">
             <CardContent className="p-12 text-center">
-              <BookOpen className="w-12 h-12 text-slate-300 mx-auto mb-4" />
-              <h3 className="font-medium text-slate-800 mb-2">Nenhuma questão encontrada</h3>
+              <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center mx-auto mb-4">
+                <BookOpen className="w-8 h-8 text-zinc-400" />
+              </div>
+              <h3 className="font-display font-bold text-slate-800 mb-2">Nenhuma questão encontrada</h3>
               <p className="text-slate-500 mb-4">
                 {searchTerm || (selectedSubject !== 'all') || (selectedDifficulty !== 'all')
                   ? 'Tente ajustar os filtros ou criar uma nova questão'
                   : 'Comece criando sua primeira questão'
                 }
               </p>
-              <Button 
+              <Button
                 onClick={() => setShowAddForm(true)}
-                className="bg-zinc-800 hover:bg-zinc-900"
+                className="bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-zinc-900 font-semibold shadow-md shadow-amber-900/20"
               >
                 <Plus className="w-4 h-4 mr-2" />
                 Criar Primeira Questão
@@ -778,6 +824,73 @@ export function QuestionBankPage() {
           </Card>
         )}
       </div>
+
+      {/* Dialog de Visualização da Questão */}
+      <Dialog open={showViewDialog} onOpenChange={setShowViewDialog}>
+        <DialogContent className="sm:max-w-[600px] max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-500" />
+              Visualizar Questão
+            </DialogTitle>
+          </DialogHeader>
+
+          {viewingQuestion && (
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="bg-zinc-50 text-zinc-900 text-xs">{viewingQuestion.subject}</Badge>
+                {viewingQuestion.grade && <Badge variant="outline" className="bg-zinc-50 text-zinc-900 text-xs">{viewingQuestion.grade}</Badge>}
+                <Badge className={`${getDifficultyColor(viewingQuestion.difficulty)} text-xs`}>{viewingQuestion.difficulty}</Badge>
+                <Badge variant="outline" className="bg-amber-50 text-amber-700 text-xs">Peso: {viewingQuestion.weight || 1.0}</Badge>
+              </div>
+
+              <p className="text-sm lg:text-base font-medium text-slate-800">{viewingQuestion.question}</p>
+
+              {viewingQuestion.questionType === 'essay' ? (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+                  <p className="text-sm text-amber-800">
+                    <strong>Questão Dissertativa:</strong> Requer correção manual do professor
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {(viewingQuestion.options || []).map((option: string, index: number) => (
+                    <div
+                      key={index}
+                      className={`p-2.5 rounded-lg text-sm ${
+                        index === viewingQuestion.correctAnswer
+                          ? 'bg-green-50 text-green-800 border border-green-200 font-medium'
+                          : 'bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      <span className="font-medium">{String.fromCharCode(65 + index)}) </span>
+                      {option}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {Array.isArray(viewingQuestion.tags) && viewingQuestion.tags.length > 0 && (
+                <div className="flex items-center gap-1.5 text-sm text-slate-500">
+                  <Tag className="w-4 h-4" />
+                  {viewingQuestion.tags.join(', ')}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowViewDialog(false)}>Fechar</Button>
+            <Button
+              className="bg-zinc-800 hover:bg-zinc-900"
+              onClick={() => { setShowViewDialog(false); handleEditClick(viewingQuestion); }}
+            >
+              <Edit className="w-4 h-4 mr-2" />
+              Editar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Excel Export Dialog */}
       <ExcelExportDialog
