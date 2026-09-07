@@ -15,11 +15,13 @@ import { Checkbox } from '../ui/checkbox';
 import { 
   CheckCircle, Clock, Search, Eye, Download, FileText, Target, TrendingUp, Award, XCircle, AlertCircle,
   Loader2, RefreshCw, GraduationCap, Star, Save, X, PieChart, Clipboard, Send, Image as ImageIcon, ZoomIn, UserX,
-  Camera, Scan, FileSpreadsheet, Trash2
+  Camera, Scan, FileSpreadsheet, Trash2, Bot
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+
+const IMAGE_CORRECTION_TYPES = ['manual-image', 'manual-image-batch', 'auto-image-individual', 'auto-image-batch'];
 
 export function GradeExamsPage() {
   const [loading, setLoading] = useState(true);
@@ -181,7 +183,7 @@ export function GradeExamsPage() {
         console.log(`✓ Loaded ${realSubmissionsList.length} submissions from API`);
         
         const imageSubmissions = realSubmissionsList.filter(
-          (s) => s.correctionType === 'manual-image' || s.correctionType === 'manual-image-batch'
+          (s) => IMAGE_CORRECTION_TYPES.includes(s.correctionType)
         );
         console.log(`✓ Found ${imageSubmissions.length} answer sheet submissions`);
         
@@ -238,8 +240,8 @@ export function GradeExamsPage() {
     const notSubmitted = submissions.filter(s => s.gradingStatus === 'not_submitted').length;
     const gradedSubmissions = submissions.filter(s => s.gradingStatus === 'graded').length;
     const reviewedSubmissions = submissions.filter(s => s.gradingStatus === 'reviewed').length;
-    const imageCorrections = submissions.filter(s => 
-      s.correctionType === 'manual-image' || s.correctionType === 'manual-image-batch'
+    const imageCorrections = submissions.filter(s =>
+      IMAGE_CORRECTION_TYPES.includes(s.correctionType)
     ).length;
     const avgScore = actualSubmissions.length > 0 
       ? Math.round(actualSubmissions.reduce((sum, sub) => sum + sub.percentage, 0) / actualSubmissions.length) : 0;
@@ -411,6 +413,22 @@ export function GradeExamsPage() {
         <Badge variant="outline" className="text-teal-600 border-teal-300">
           <Scan className="w-3 h-3 mr-1" />
           Cartão Lote
+        </Badge>
+      );
+    }
+    if (correctionType === 'auto-image-individual') {
+      return (
+        <Badge variant="outline" className="text-amber-600 border-amber-300">
+          <Bot className="w-3 h-3 mr-1" />
+          IA - Individual
+        </Badge>
+      );
+    }
+    if (correctionType === 'auto-image-batch') {
+      return (
+        <Badge variant="outline" className="text-amber-600 border-amber-300">
+          <Bot className="w-3 h-3 mr-1" />
+          IA - Lote
         </Badge>
       );
     }
@@ -680,7 +698,9 @@ export function GradeExamsPage() {
     const matchesCorrectionType = filterCorrectionType === 'all' ||
                                  (filterCorrectionType === 'online' && (!submission.correctionType || submission.correctionType === 'online')) ||
                                  (filterCorrectionType === 'manual-image' && submission.correctionType === 'manual-image') ||
-                                 (filterCorrectionType === 'manual-image-batch' && submission.correctionType === 'manual-image-batch');
+                                 (filterCorrectionType === 'manual-image-batch' && submission.correctionType === 'manual-image-batch') ||
+                                 (filterCorrectionType === 'auto-image-individual' && submission.correctionType === 'auto-image-individual') ||
+                                 (filterCorrectionType === 'auto-image-batch' && submission.correctionType === 'auto-image-batch');
     return matchesSearch && matchesExam && matchesApp && matchesStatus && matchesCorrectionType;
   });
 
@@ -935,6 +955,8 @@ export function GradeExamsPage() {
                       <SelectItem value="online">Online</SelectItem>
                       <SelectItem value="manual-image">Cartão Individual</SelectItem>
                       <SelectItem value="manual-image-batch">Cartão Lote</SelectItem>
+                      <SelectItem value="auto-image-individual">IA - Individual</SelectItem>
+                      <SelectItem value="auto-image-batch">IA - Lote</SelectItem>
                     </SelectContent>
                   </Select>
                   <Select value={filterStatus} onValueChange={setFilterStatus}>
@@ -1017,8 +1039,8 @@ export function GradeExamsPage() {
                         <TableRow 
                           key={submission.id} 
                           className={
-                            submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' : 
-                            (submission.correctionType === 'manual-image' || submission.correctionType === 'manual-image-batch') ? 'bg-teal-50' : 
+                            submission.gradingStatus === 'not_submitted' ? 'bg-gray-50' :
+                            IMAGE_CORRECTION_TYPES.includes(submission.correctionType) ? 'bg-teal-50' :
                             ''
                           }
                         >
@@ -1257,16 +1279,24 @@ export function GradeExamsPage() {
                 </div>
               ) : (
                 <>
-                  {(selectedSubmission.correctionType === 'manual-image' || selectedSubmission.correctionType === 'manual-image-batch') && (
-                    <Card className="border-teal-200 bg-teal-50">
+                  {IMAGE_CORRECTION_TYPES.includes(selectedSubmission.correctionType) && (
+                    <Card className={selectedSubmission.correctionType?.startsWith('auto-') ? 'border-amber-200 bg-amber-50' : 'border-teal-200 bg-teal-50'}>
                       <CardContent className="p-4">
                         <div className="flex items-center gap-3">
-                          <Camera className="w-5 h-5 text-teal-600" />
+                          {selectedSubmission.correctionType?.startsWith('auto-') ? (
+                            <Bot className="w-5 h-5 text-amber-600" />
+                          ) : (
+                            <Camera className="w-5 h-5 text-teal-600" />
+                          )}
                           <div>
-                            <p className="font-medium text-teal-900">Correção de Cartão Resposta</p>
-                            <p className="text-sm text-teal-800">
-                              Corrigido manualmente através de imagem
-                              {selectedSubmission.correctionType === 'manual-image-batch' && ' (lote)'}
+                            <p className={selectedSubmission.correctionType?.startsWith('auto-') ? 'font-medium text-amber-900' : 'font-medium text-teal-900'}>
+                              Correção de Cartão Resposta
+                            </p>
+                            <p className={selectedSubmission.correctionType?.startsWith('auto-') ? 'text-sm text-amber-800' : 'text-sm text-teal-800'}>
+                              {selectedSubmission.correctionType?.startsWith('auto-')
+                                ? 'Corrigido automaticamente por IA através de imagem'
+                                : 'Corrigido manualmente através de imagem'}
+                              {(selectedSubmission.correctionType === 'manual-image-batch' || selectedSubmission.correctionType === 'auto-image-batch') && ' (lote)'}
                             </p>
                           </div>
                         </div>
