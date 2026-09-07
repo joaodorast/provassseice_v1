@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent } from '../ui/card';
 import {
   Download,
@@ -10,16 +10,43 @@ import {
   FileText,
   ArrowRight,
   ArrowUpRight,
-  Sparkles
+  GraduationCap,
+  Activity
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
 import { toast } from 'sonner@2.0.3';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
-import seiceLogo from '../../assets/seice-logo.png';
 
 type OverviewPageProps = {
   onNavigate: (page: string) => void;
 };
+
+// Anima um número inteiro subindo de 0 até o valor final quando ele muda.
+function useCountUp(target: number, duration = 900) {
+  const [value, setValue] = useState(0);
+  const startRef = useRef<number | null>(null);
+  const fromRef = useRef(0);
+
+  useEffect(() => {
+    fromRef.current = 0;
+    startRef.current = null;
+    let frame: number;
+
+    const step = (timestamp: number) => {
+      if (startRef.current === null) startRef.current = timestamp;
+      const progress = Math.min(1, (timestamp - startRef.current) / duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      setValue(Math.round(fromRef.current + (target - fromRef.current) * eased));
+      if (progress < 1) frame = requestAnimationFrame(step);
+    };
+
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target]);
+
+  return value;
+}
 
 export function OverviewPage({ onNavigate }: OverviewPageProps) {
   const [stats, setStats] = useState({
@@ -104,11 +131,18 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
     return 'Boa noite';
   })();
 
+  const today = new Date().toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' });
+
+  const animatedStudents = useCountUp(stats.totalStudents);
+  const animatedExams = useCountUp(stats.totalExams);
+  const animatedActive = useCountUp(stats.activeExams);
+  const animatedAvgTenths = useCountUp(Math.round(stats.averageScore * 10));
+
   const statCards = [
     {
       key: 'gerenciar-alunos',
       label: 'ALUNOS',
-      value: stats.totalStudents,
+      value: animatedStudents,
       helper: 'Total de alunos',
       icon: Users,
       accent: 'zinc'
@@ -116,7 +150,7 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
     {
       key: 'avaliacao',
       label: 'AVALIAÇÕES',
-      value: stats.totalExams,
+      value: animatedExams,
       helper: 'Total de avaliações',
       icon: FileText,
       accent: 'zinc'
@@ -124,7 +158,7 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
     {
       key: 'aplicacao',
       label: 'ATIVAS',
-      value: stats.activeExams,
+      value: animatedActive,
       helper: 'Avaliações ativas',
       icon: Play,
       accent: 'zinc'
@@ -132,7 +166,7 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
     {
       key: 'relatorios-gerais',
       label: 'MÉDIA GERAL',
-      value: `${stats.averageScore.toFixed(1)}%`,
+      value: `${(animatedAvgTenths / 10).toFixed(1)}%`,
       helper: 'Média das avaliações',
       icon: CheckSquare,
       accent: 'gold'
@@ -194,44 +228,65 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
   return (
     <div className="space-y-6 lg:space-y-10">
       {/* Welcome Banner */}
-      <div className="seice-sidebar rounded-2xl lg:rounded-3xl px-5 py-7 lg:px-10 lg:py-10 relative overflow-hidden shadow-xl shadow-black/25">
-        <div className="pointer-events-none absolute -top-16 -right-16 w-72 h-72 rounded-full bg-amber-500/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-20 right-1/4 w-52 h-52 rounded-full bg-white/5 blur-3xl" />
+      <div className="rounded-2xl lg:rounded-[28px] relative overflow-hidden shadow-2xl shadow-black/50 bg-[#0a0a0a]">
+        {/* Aurora glow field */}
         <div
-          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          className="pointer-events-none absolute inset-0"
           style={{
-            backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)',
-            backgroundSize: '22px 22px'
+            background:
+              'radial-gradient(60% 90% at 8% 0%, rgba(245,158,11,0.30) 0%, transparent 60%), radial-gradient(50% 70% at 100% 100%, rgba(245,158,11,0.16) 0%, transparent 60%), radial-gradient(80% 60% at 60% -10%, rgba(63,63,70,0.6) 0%, transparent 70%)'
           }}
         />
-        <img
-          src={seiceLogo}
-          alt=""
-          className="pointer-events-none select-none absolute -right-6 -bottom-10 w-48 lg:w-64 opacity-[0.06] object-contain"
-        />
+        <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-400/60 to-transparent" />
+        <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/[0.06] rounded-2xl lg:rounded-[28px]" />
 
-        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
-          <div>
-            <div className="inline-flex items-center gap-1.5 text-[11px] lg:text-xs font-medium text-amber-400 tracking-wide uppercase mb-3">
-              <Sparkles className="w-3.5 h-3.5" />
-              {greeting}
+        <div className="relative px-6 py-10 lg:px-14 lg:py-16">
+          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-10 lg:gap-8">
+            <div className="max-w-2xl">
+              <p className="text-[11px] lg:text-xs font-semibold tracking-[0.3em] text-amber-400/90 uppercase mb-4">
+                {greeting} · <span className="text-zinc-500 tracking-normal font-normal normal-case">{today}</span>
+              </p>
+
+              <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-extrabold text-white tracking-tight leading-[0.95]">
+                Sistema
+                <span className="relative inline-block ml-3 lg:ml-4">
+                  <span className="absolute inset-0 blur-2xl bg-amber-400/50 -z-10" />
+                  <span className="bg-gradient-to-br from-amber-200 via-amber-400 to-amber-600 bg-clip-text text-transparent">
+                    SEICE
+                  </span>
+                </span>
+              </h1>
+
+              <p className="text-sm lg:text-lg text-zinc-400 mt-5 max-w-md leading-relaxed">
+                Alunos, simulados e correções acompanhados em tempo real, em um único painel.
+              </p>
+
+              <button
+                onClick={() => onNavigate('importar-alunos')}
+                className="group inline-flex items-center gap-2 mt-8 rounded-full border border-amber-400/40 bg-white/[0.04] backdrop-blur-sm hover:bg-amber-400 text-amber-300 hover:text-zinc-900 font-semibold text-sm px-5 py-3 transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-amber-900/30"
+              >
+                Importar Alunos
+                <ArrowRight className="w-4 h-4 transition-transform duration-300 group-hover:translate-x-1" />
+              </button>
             </div>
-            <h1 className="text-2xl lg:text-3xl font-semibold text-white tracking-tight leading-tight">
-              Bem-vindo ao Sistema SEICE
-            </h1>
-            <div className="h-1 w-14 rounded-full bg-gradient-to-r from-amber-500 to-amber-300 mt-3 mb-3" />
-            <p className="text-sm lg:text-base text-zinc-400 max-w-lg">
-              Acompanhe alunos, simulados e correções em um só lugar.
-            </p>
-          </div>
 
-          <button
-            onClick={() => onNavigate('importar-alunos')}
-            className="group inline-flex items-center gap-2 self-start rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-900 font-semibold text-sm px-4 py-2.5 lg:px-5 lg:py-3 shadow-lg shadow-black/30 transition-all duration-200 hover:-translate-y-0.5"
-          >
-            Importar Alunos
-            <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-          </button>
+            {/* Live stat strip */}
+            <div className="flex lg:flex-col divide-x lg:divide-x-0 lg:divide-y divide-white/10 lg:border-l lg:border-white/10 lg:pl-10">
+              {[
+                { icon: GraduationCap, value: stats.totalStudents, label: 'Alunos' },
+                { icon: Activity, value: stats.activeExams, label: 'Avaliações ativas' },
+                { icon: CheckSquare, value: `${stats.averageScore.toFixed(1)}%`, label: 'Média geral' }
+              ].map((item, i) => (
+                <div key={i} className="flex-1 lg:flex-none px-5 lg:px-0 lg:py-3 first:pl-0 first:lg:pt-0">
+                  <div className="flex items-center gap-2 text-zinc-500 mb-1.5">
+                    <item.icon className="w-3.5 h-3.5" />
+                    <span className="text-[10px] lg:text-xs uppercase tracking-wider">{item.label}</span>
+                  </div>
+                  <p className="font-display text-2xl lg:text-3xl font-bold text-white tabular-nums">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 
@@ -243,10 +298,10 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
             <Card
               key={stat.key}
               onClick={() => onNavigate(stat.key)}
-              className={`group relative cursor-pointer overflow-hidden border transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+              className={`seice-glow-card group relative cursor-pointer overflow-hidden border transition-all duration-300 hover:-translate-y-1.5 ${
                 isGold
-                  ? 'border-amber-200 shadow-md shadow-amber-900/5'
-                  : 'border-slate-200 shadow-sm hover:border-amber-200'
+                  ? 'border-amber-200'
+                  : 'border-slate-200 hover:border-amber-200'
               }`}
             >
               <div
@@ -254,21 +309,22 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
                   isGold ? 'bg-amber-500 scale-y-100' : 'bg-zinc-900'
                 }`}
               />
-              <CardContent className="p-4 lg:p-6">
+              <div className="pointer-events-none absolute -right-6 -top-6 w-24 h-24 rounded-full bg-amber-400/0 group-hover:bg-amber-400/10 blur-2xl transition-colors duration-300" />
+              <CardContent className="p-4 lg:p-6 relative">
                 <div className="flex items-start justify-between mb-4 lg:mb-6">
                   <div
-                    className={`w-11 h-11 lg:w-14 lg:h-14 rounded-2xl flex items-center justify-center ${
+                    className={`w-11 h-11 lg:w-14 lg:h-14 rounded-2xl flex items-center justify-center transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3 ${
                       isGold ? 'bg-amber-100' : 'bg-zinc-100'
                     }`}
                   >
                     <stat.icon className={`w-5 h-5 lg:w-6 lg:h-6 ${isGold ? 'text-amber-600' : 'text-zinc-700'}`} />
                   </div>
-                  <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors duration-200" />
+                  <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 group-hover:translate-x-0.5 group-hover:-translate-y-0.5 transition-all duration-200" />
                 </div>
                 <p className="text-[11px] lg:text-xs font-semibold tracking-widest text-slate-400 uppercase mb-1">
                   {stat.label}
                 </p>
-                <p className={`text-2xl lg:text-3xl font-bold mb-1 ${isGold ? 'text-amber-600' : 'text-zinc-900'}`}>
+                <p className={`font-display text-2xl lg:text-4xl font-extrabold mb-1 tabular-nums ${isGold ? 'text-amber-600' : 'text-zinc-900'}`}>
                   {stat.value}
                 </p>
                 <p className="text-xs lg:text-sm text-slate-500">{stat.helper}</p>
@@ -285,24 +341,24 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
           {mainActions.map((action) => (
             <Card
               key={action.key}
-              className={`group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl border ${
+              className={`seice-glow-card group cursor-pointer transition-all duration-300 hover:-translate-y-1.5 border ${
                 action.highlight
-                  ? 'border-amber-300 ring-1 ring-amber-200 shadow-md shadow-amber-900/5'
+                  ? 'border-amber-300 ring-1 ring-amber-200'
                   : 'border-slate-200 hover:border-zinc-300'
               }`}
               onClick={() => onNavigate(action.key)}
             >
               <CardContent className="p-3.5 lg:p-6 text-center">
                 <div
-                  className={`mx-auto flex justify-center mb-2.5 lg:mb-4 w-10 h-10 lg:w-12 lg:h-12 rounded-xl items-center transition-transform duration-200 group-hover:scale-105 ${
-                    action.highlight ? 'bg-gradient-to-br from-zinc-900 to-zinc-700' : 'bg-slate-100'
+                  className={`mx-auto flex justify-center mb-2.5 lg:mb-4 w-10 h-10 lg:w-12 lg:h-12 rounded-xl items-center transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3 ${
+                    action.highlight ? 'bg-gradient-to-br from-zinc-900 to-zinc-700 shadow-lg shadow-zinc-900/20' : 'bg-slate-100'
                   }`}
                 >
                   <action.icon className={`w-5 h-5 lg:w-6 lg:h-6 mx-auto ${action.highlight ? 'text-amber-400' : 'text-zinc-600'}`} />
                 </div>
                 <h3 className="font-medium text-slate-800 mb-1 text-xs lg:text-sm">{action.title}</h3>
                 <p className="text-xs text-slate-500 hidden lg:block">{action.description}</p>
-                <div className="hidden lg:flex items-center justify-center gap-1 mt-3 text-[11px] font-medium text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                <div className="hidden lg:flex items-center justify-center gap-1 mt-3 text-[11px] font-medium text-amber-600 opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200">
                   Acessar <ArrowRight className="w-3 h-3" />
                 </div>
               </CardContent>

@@ -263,6 +263,32 @@ html {
 
 /* SEICE Custom Styles */
 @layer components {
+  .font-display {
+    font-family: 'Plus Jakarta Sans', var(--font-sans, ui-sans-serif), system-ui, sans-serif;
+  }
+
+  .seice-noise {
+    position: relative;
+  }
+
+  .seice-noise::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.05;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .seice-glow-card {
+    box-shadow: 0 1px 2px rgba(24, 24, 27, 0.04);
+  }
+
+  .seice-glow-card:hover {
+    box-shadow: 0 18px 40px -12px rgba(245, 158, 11, 0.25), 0 4px 12px -4px rgba(24, 24, 27, 0.1);
+  }
+
   .seice-gradient {
     background: linear-gradient(135deg, #18181b 0%, #3f3f46 100%);
   }
