@@ -2677,7 +2677,16 @@ app.post('/make-server-83358821/ai/detect-answers', requireAuth, async (c) => {
     const base64Data = imageData.replace(/^data:[\w.+-]+\/[\w.+-]+;base64,/, '');
 
     const lastLetter = String.fromCharCode(65 + optionsPerQuestion - 1);
-    const prompt = `Você está analisando uma folha de respostas (gabarito) escaneada de uma prova de múltipla escolha com ${totalQuestions} questões, cada uma com ${optionsPerQuestion} alternativas (A a ${lastLetter}). Para cada questão, identifique qual alternativa foi marcada pelo aluno (a bolha/opção preenchida ou marcada). Se nenhuma alternativa estiver claramente marcada ou houver mais de uma marcada para a mesma questão, retorne -1 para essa questão. Retorne os índices baseados em zero (A=0, B=1, C=2, ...).`;
+    const prompt = `Você é um sistema de leitura óptica de cartão-resposta (OMR) extremamente preciso. Analise a imagem de uma folha de respostas escaneada de uma prova de múltipla escolha com exatamente ${totalQuestions} questões numeradas de 1 a ${totalQuestions}, cada uma com ${optionsPerQuestion} alternativas (A a ${lastLetter}).
+
+Regras obrigatórias:
+1. Identifique cada questão pelo NÚMERO IMPRESSO ao lado dela na folha, nunca pela posição visual. A folha pode ter várias colunas ou blocos de questões (ex: questões 1-15 numa coluna e 16-30 em outra) — leia cada bloco e ordene o resultado final estritamente pelo número da questão (1, 2, 3, ..., ${totalQuestions}), não pela ordem em que aparecem na imagem.
+2. Considere marcada a alternativa cuja bolha/quadrado esteja visivelmente preenchida, pintada, com um X ou circulada com força — ignore marcas muito fracas, rabiscos incompletos ou sombras/dobras do papel que não sejam marcações reais.
+3. Se para uma questão nenhuma alternativa estiver claramente marcada, ou se houver marcação em mais de uma alternativa (dupla marcação), retorne -1 para essa questão específica — nunca "chute" ou invente uma resposta.
+4. Não pule nem repita números de questão. O array de resposta final deve ter exatamente ${totalQuestions} posições, uma para cada questão na ordem 1..${totalQuestions}.
+5. Retorne os índices das alternativas baseados em zero: A=0, B=1, C=2, ${optionsPerQuestion > 3 ? 'D=3, ' : ''}... até ${lastLetter}=${optionsPerQuestion - 1}.
+
+Antes de responder, confira mentalmente cada questão uma segunda vez para garantir que o número da questão e a bolha marcada foram lidos corretamente.`;
 
     const result = await callGemini(
       [

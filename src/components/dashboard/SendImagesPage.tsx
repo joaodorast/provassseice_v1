@@ -30,6 +30,9 @@ export function SendImagesPage() {
   const [selectedImage, setSelectedImage] = useState(null);
   const [manualAnswers, setManualAnswers] = useState([]);
   const [batchImages, setBatchImages] = useState([]);
+  const [showBatchAiStudentPicker, setShowBatchAiStudentPicker] = useState(false);
+  const [batchAiTargetImage, setBatchAiTargetImage] = useState(null);
+  const [batchAiSelectedStudent, setBatchAiSelectedStudent] = useState('');
   const [showBatchProcessing, setShowBatchProcessing] = useState(false);
   const [currentBatchIndex, setCurrentBatchIndex] = useState(0);
   const [completedCorrections, setCompletedCorrections] = useState([]);
@@ -212,160 +215,54 @@ export function SendImagesPage() {
     return response.answers;
   };
 
-  const handleAutoProcessBatch = async (image) => {
-    const examData = exams.find(e => e.id === image.examId);
-    
-    const validation = validateExamStructure(examData);
-    if (!validation.valid) {
-      toast.error(validation.error);
-      return;
-    }
-
+  // Cada imagem de lote é UMA folha de resposta real de UM aluno. A IA não consegue
+  // adivinhar de quem é a folha, então pedimos ao professor para indicar o aluno
+  // antes de rodar a detecção - evitando aplicar o mesmo resultado para toda a turma.
+  const handleAutoProcessBatch = (image) => {
     if (!image.isBatch) {
       toast.error('Esta função é apenas para imagens em lote');
       return;
     }
 
-    const batchStudentsList = availableStudents.map(student => ({
-      ...image,
-      studentId: student.id,
-      studentName: student.name,
-      studentEmail: student.email,
-      studentClass: student.class,
-      studentGrade: student.grade
-    }));
-
-    if (batchStudentsList.length === 0) {
+    if (availableStudents.length === 0) {
       toast.error('Nenhum aluno disponível para correção');
       return;
     }
 
-    setIsAutoProcessing(true);
-    setAutoProcessingProgress(0);
-    const corrections = [];
+    setBatchAiTargetImage(image);
+    setBatchAiSelectedStudent('');
+    setShowBatchAiStudentPicker(true);
+  };
 
-    try {
-      toast.info('🤖 Detectando respostas marcadas com IA...', { duration: 3000 });
-
-      // A imagem enviada é a mesma para todo o lote, então a detecção via IA
-      // é feita uma única vez e reaproveitada para cada aluno.
-      const detectedAnswers = await detectAnswersFromImage(
-        image.data,
-        examData.questions.length,
-        Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
-      );
-
-      toast.info('🤖 Iniciando correção automática em lote...', { duration: 3000 });
-
-      for (let i = 0; i < batchStudentsList.length; i++) {
-        const currentStudent = batchStudentsList[i];
-        setAutoProcessingProgress(((i + 1) / batchStudentsList.length) * 100);
-
-        console.log(`🤖 Auto-processando aluno ${i + 1}/${batchStudentsList.length}: ${currentStudent.studentName}`);
-
-        // Calcular resultado
-        let correctCount = 0;
-        const results = examData.questions.map((question, index) => {
-          const studentAnswer = detectedAnswers[index];
-          const isCorrect = studentAnswer === question.correctAnswer;
-          if (isCorrect) correctCount++;
-          
-          return {
-            question: question.question,
-            subject: question.subject,
-            studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
-            correctAnswer: String.fromCharCode(65 + question.correctAnswer),
-            isCorrect
-          };
-        });
-
-        const score = Math.round((correctCount / examData.questions.length) * 100);
-
-        // Calcular performance por matéria
-        const subjectPerformances = {};
-        examData.questions.forEach((question, index) => {
-          const subject = question.subject || 'Geral';
-          if (!subjectPerformances[subject]) {
-            subjectPerformances[subject] = { total: 0, correct: 0 };
-          }
-          subjectPerformances[subject].total++;
-          if (detectedAnswers[index] === question.correctAnswer) {
-            subjectPerformances[subject].correct++;
-          }
-        });
-
-        const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
-          subject,
-          totalQuestions: data.total,
-          correctAnswers: data.correct,
-          percentage: Math.round((data.correct / data.total) * 100)
-        }));
-
-        const submissionData = {
-          examId: image.examId,
-          examTitle: examData.title,
-          studentId: currentStudent.studentId,
-          studentName: currentStudent.studentName,
-          studentEmail: currentStudent.studentEmail,
-          studentClass: currentStudent.studentClass,
-          studentGrade: currentStudent.studentGrade || examData.grade || 'Ensino Médio',
-          answers: detectedAnswers,
-          correctAnswers: examData.questions.map((q) => q.correctAnswer),
-          score: correctCount,
-          totalQuestions: examData.questions.length,
-          percentage: score,
-          subjectPerformances: subjectPerformanceArray,
-          timeSpent: 0,
-          results,
-          submittedAt: new Date().toISOString(),
-          gradingStatus: 'graded',
-          correctionType: 'auto-image-batch',
-          questionWeights: examData.questions.map((q, idx) => ({
-            questionIndex: idx,
-            weight: q.weight || 1,
-            subject: q.subject || 'Geral'
-          }))
-        };
-
-        console.log('📤 Creating auto submission:', submissionData);
-        const submissionResponse = await apiService.createSubmission(submissionData);
-        
-        if (submissionResponse && !submissionResponse.error) {
-          corrections.push(submissionData);
-          console.log(`✅ Auto-correção salva: ${currentStudent.studentName} - ${score}%`);
-        } else {
-          throw new Error(`Erro ao salvar correção de ${currentStudent.studentName}`);
-        }
-      }
-
-      await apiService.updateImageStatus(image.id, {
-        status: 'Processada',
-        correctionType: 'auto-image-batch',
-        processedAt: new Date().toISOString()
-      });
-
-      setCompletedCorrections(corrections);
-      setSelectedImage(image);
-      setShowAutoResults(true);
-
-      toast.success(
-        `🎉 Correção automática concluída!\n\n${corrections.length} alunos corrigidos automaticamente`,
-        { duration: 5000 }
-      );
-
-      await reloadOnlyImages();
-
-    } catch (error) {
-      console.error('❌ Erro na correção automática:', error);
-      toast.error('Erro durante a correção automática: ' + friendlyErrorMessage(error));
-    } finally {
-      setIsAutoProcessing(false);
-      setAutoProcessingProgress(0);
+  const confirmBatchAiCorrection = async () => {
+    if (!batchAiTargetImage || !batchAiSelectedStudent) {
+      toast.error('Selecione o aluno correspondente a este cartão resposta');
+      return;
     }
+
+    const student = availableStudents.find((s) => s.id === batchAiSelectedStudent);
+    if (!student) {
+      toast.error('Aluno não encontrado');
+      return;
+    }
+
+    const imageForStudent = {
+      ...batchAiTargetImage,
+      studentId: student.id,
+      studentName: student.name,
+      studentEmail: student.email,
+      studentClass: student.class,
+      studentGrade: student.grade,
+    };
+
+    setShowBatchAiStudentPicker(false);
+    await handleAutoProcessIndividual(imageForStudent, 'auto-image-batch');
+    setBatchAiTargetImage(null);
+    setBatchAiSelectedStudent('');
   };
 
   // Correção automática por IA para uma imagem individual (um único aluno)
-  const handleAutoProcessIndividual = async (image) => {
+  const handleAutoProcessIndividual = async (image, correctionType = 'auto-image-individual') => {
     const examData = exams.find(e => e.id === image.examId);
 
     const validation = validateExamStructure(examData);
@@ -442,7 +339,7 @@ export function SendImagesPage() {
         results,
         submittedAt: new Date().toISOString(),
         gradingStatus: 'graded',
-        correctionType: 'auto-image-individual',
+        correctionType,
         questionWeights: examData.questions.map((q, idx) => ({
           questionIndex: idx,
           weight: q.weight || 1,
@@ -460,7 +357,7 @@ export function SendImagesPage() {
 
       await apiService.updateImageStatus(image.id, {
         status: 'Processada',
-        correctionType: 'auto-image-individual',
+        correctionType,
         processedAt: new Date().toISOString()
       });
 
@@ -1922,6 +1819,60 @@ export function SendImagesPage() {
                 )}
               </div>
             </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para identificar de qual aluno é o cartão resposta antes da correção por IA */}
+      <Dialog open={showBatchAiStudentPicker} onOpenChange={setShowBatchAiStudentPicker}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>De qual aluno é este cartão resposta?</DialogTitle>
+            <DialogDescription>
+              A IA vai ler as marcações desta imagem e gerar a correção apenas para o aluno selecionado abaixo.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <Select value={batchAiSelectedStudent} onValueChange={setBatchAiSelectedStudent}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o aluno" />
+              </SelectTrigger>
+              <SelectContent>
+                {availableStudents.map((student) => (
+                  <SelectItem key={student.id} value={student.id}>
+                    {student.name} {student.class ? `— ${student.class}` : ''}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex justify-end space-x-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowBatchAiStudentPicker(false);
+                setBatchAiTargetImage(null);
+                setBatchAiSelectedStudent('');
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmBatchAiCorrection}
+              disabled={!batchAiSelectedStudent || isAutoProcessing}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {isAutoProcessing ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Corrigindo...
+                </>
+              ) : (
+                'Corrigir com IA'
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>
