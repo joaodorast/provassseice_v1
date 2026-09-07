@@ -44,6 +44,7 @@ type MainDashboardProps = {
 export function MainDashboard({ user, onLogout }: MainDashboardProps) {
   const [currentPage, setCurrentPage] = useState('inicio');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [examToEdit, setExamToEdit] = useState<any>(null);
 
   const menuItems = [
     {
@@ -93,9 +94,23 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
       case 'banco-questoes':
         return <QuestionBankPage />;
       case 'criar-simulado':
-        return <CreateSimuladoPage onBack={() => setCurrentPage('inicio')} />;
+        return (
+          <CreateSimuladoPage
+            examToEdit={examToEdit}
+            onBack={() => {
+              const cameFromEdit = !!examToEdit;
+              setExamToEdit(null);
+              setCurrentPage(cameFromEdit ? 'avaliacao' : 'inicio');
+            }}
+          />
+        );
       case 'avaliacao':
-        return <ManageExamsPage onCreateExam={() => setCurrentPage('criar-simulado')} />;
+        return (
+          <ManageExamsPage
+            onCreateExam={() => { setExamToEdit(null); setCurrentPage('criar-simulado'); }}
+            onEditExam={(exam) => { setExamToEdit(exam); setCurrentPage('criar-simulado'); }}
+          />
+        );
       case 'aplicacao':
         return <ApplyExamsPage />;
       case 'correcao':

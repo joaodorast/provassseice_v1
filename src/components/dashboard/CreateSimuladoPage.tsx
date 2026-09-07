@@ -51,15 +51,66 @@ interface SimuladoData {
   sections: Section[];
 }
 
-export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
-  const [simuladoData, setSimuladoData] = useState<SimuladoData>({
-    title: '',
-    description: '',
-    grade: '',
-    timeLimit: 120,
-    selectedClass: '',
-    sections: []
-  });
+// Normaliza uma questão vinda do backend (que pode ter sido criada fora deste
+// editor, ex. via IA/API direta) para o formato que o editor de simulado espera.
+function normalizeQuestionForEditing(q: any, idx: number): Question {
+  return {
+    id: q.id || `q-${idx}-${Date.now()}`,
+    question: q.question || '',
+    subject: q.subject || '',
+    difficulty: q.difficulty || 'medium',
+    type: q.questionType === 'essay' || q.type === 'essay' ? 'essay' : 'multiple-choice',
+    options: Array.isArray(q.options) && q.options.length > 0 ? q.options : ['', '', '', ''],
+    correctAnswer: typeof q.correctAnswer === 'number' ? q.correctAnswer : 0,
+    tags: Array.isArray(q.tags) ? q.tags : [],
+    points: q.points || q.weight || 1,
+    fromBank: q.fromBank || false
+  };
+}
+
+// Reconstrói o estado do editor a partir de um simulado já existente, para permitir edição completa.
+function buildSimuladoDataFromExam(exam: any): SimuladoData {
+  let sections: Section[];
+
+  if (Array.isArray(exam.sections) && exam.sections.length > 0) {
+    sections = exam.sections.map((s: any, si: number) => ({
+      id: s.id || `section-${si}`,
+      name: s.name || `Seção ${si + 1}`,
+      description: s.description || '',
+      questions: (s.questions || []).map(normalizeQuestionForEditing)
+    }));
+  } else {
+    sections = [{
+      id: 'section-1',
+      name: 'Questões',
+      description: '',
+      questions: (exam.questions || []).map(normalizeQuestionForEditing)
+    }];
+  }
+
+  return {
+    title: exam.title || '',
+    description: exam.description || '',
+    grade: exam.grade || '',
+    timeLimit: exam.timeLimit || 120,
+    selectedClass: exam.selectedClass || '',
+    sections
+  };
+}
+
+export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void; examToEdit?: any }) {
+  const [simuladoData, setSimuladoData] = useState<SimuladoData>(() =>
+    examToEdit
+      ? buildSimuladoDataFromExam(examToEdit)
+      : {
+          title: '',
+          description: '',
+          grade: '',
+          timeLimit: 120,
+          selectedClass: '',
+          sections: []
+        }
+  );
 
   const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
   const [availableClasses, setAvailableClasses] = useState<string[]>([]);
@@ -453,17 +504,19 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
 
       console.log('📤 Enviando dados do simulado:', examData);
 
-      const response = await apiService.createExam(examData);
+      const response = examToEdit
+        ? await apiService.updateExam(examToEdit.id, examData)
+        : await apiService.createExam(examData);
 
       if (response && !response.error) {
-        toast.success('Simulado criado com sucesso!');
+        toast.success(examToEdit ? 'Simulado atualizado com sucesso!' : 'Simulado criado com sucesso!');
         onBack();
       } else {
-        throw new Error(response.error || 'Falha ao criar simulado');
+        throw new Error(response.error || (examToEdit ? 'Falha ao atualizar simulado' : 'Falha ao criar simulado'));
       }
     } catch (error: any) {
-      console.error('❌ Error creating simulado:', error);
-      toast.error('Erro ao criar simulado: ' + (error.message || 'Erro desconhecido'));
+      console.error('❌ Error saving simulado:', error);
+      toast.error((examToEdit ? 'Erro ao atualizar simulado: ' : 'Erro ao criar simulado: ') + (error.message || 'Erro desconhecido'));
     } finally {
       setLoading(false);
     }
@@ -480,17 +533,19 @@ export function CreateSimuladoPage({ onBack }: { onBack: () => void }) {
             Voltar
           </Button>
           <div>
-            <h1 className="text-2xl font-semibold text-slate-800">Criar Simulado</h1>
-            <p className="text-slate-600">Configure um simulado organizado em seções</p>
+            <h1 className="text-2xl font-semibold text-slate-800">{examToEdit ? 'Editar Simulado' : 'Criar Simulado'}</h1>
+            <p className="text-slate-600">
+              {examToEdit ? 'Altere as questões, seções e configurações deste simulado' : 'Configure um simulado organizado em seções'}
+            </p>
           </div>
         </div>
-        <Button 
+        <Button
           onClick={handleCreateSimulado}
           disabled={!canCreateSimulado() || loading}
           className="bg-zinc-800 hover:bg-zinc-900"
         >
           <Save className="w-4 h-4 mr-2" />
-          {loading ? 'Salvando...' : 'Salvar Simulado'}
+          {loading ? 'Salvando...' : examToEdit ? 'Salvar Alterações' : 'Salvar Simulado'}
         </Button>
       </div>
 

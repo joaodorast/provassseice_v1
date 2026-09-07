@@ -29,9 +29,10 @@ import { apiService } from '../../utils/api';
 
 type ManageExamsPageProps = {
   onCreateExam?: () => void;
+  onEditExam?: (exam: any) => void;
 };
 
-export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
+export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPageProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSubject, setFilterSubject] = useState('all');
   const [filterType, setFilterType] = useState('all');
@@ -1003,8 +1004,8 @@ export function ManageExamsPage({ onCreateExam }: ManageExamsPageProps) {
                           <Button 
                             variant="ghost" 
                             size="sm" 
-                            title="Editar Título"
-                            onClick={() => handleEditClick(exam)}
+                            title="Editar Simulado"
+                            onClick={() => onEditExam ? onEditExam(exam) : handleEditClick(exam)}
                             className="text-zinc-800 hover:text-zinc-900 hover:bg-zinc-50"
                           >
                             <Edit className="w-4 h-4" />
