@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { Card, CardContent } from '../ui/card';
-import { 
-  Download, 
-  Plus, 
-  Play, 
+import {
+  Download,
+  Plus,
+  Play,
   CheckSquare,
   Users,
   BookOpen,
-  FileText
+  FileText,
+  ArrowRight,
+  ArrowUpRight,
+  Sparkles
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
 import { toast } from 'sonner@2.0.3';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+import seiceLogo from '../../assets/seice-logo.png';
 
 type OverviewPageProps = {
   onNavigate: (page: string) => void;
@@ -39,7 +43,7 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
         apiService.getDashboardStats(),
         apiService.getSubmissions()
       ]);
-      
+
       setStats(statsResponse.stats);
       setRecentSubmissions(submissionsResponse.submissions.slice(0, 5));
     } catch (error) {
@@ -93,46 +97,89 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
     }
   };
 
-  const mainActions = [
+  const greeting = (() => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Bom dia';
+    if (hour < 18) return 'Boa tarde';
+    return 'Boa noite';
+  })();
+
+  const statCards = [
     {
-      key: 'importar-alunos',
-      title: 'IMPORTAR ALUNOS',
-      description: 'Importar lista de alunos',
-      icon: Download,
-      color: 'text-amber-600'
+      key: 'gerenciar-alunos',
+      label: 'ALUNOS',
+      value: stats.totalStudents,
+      helper: 'Total de alunos',
+      icon: Users,
+      accent: 'zinc'
     },
     {
       key: 'avaliacao',
-      title: 'CRIAR AVALIAÇÃO',
-      description: 'Criar nova avaliação',
-      icon: Plus,
-      color: 'text-slate-600'
+      label: 'AVALIAÇÕES',
+      value: stats.totalExams,
+      helper: 'Total de avaliações',
+      icon: FileText,
+      accent: 'zinc'
     },
     {
       key: 'aplicacao',
-      title: 'APLICAR',
+      label: 'ATIVAS',
+      value: stats.activeExams,
+      helper: 'Avaliações ativas',
+      icon: Play,
+      accent: 'zinc'
+    },
+    {
+      key: 'relatorios-gerais',
+      label: 'MÉDIA GERAL',
+      value: `${stats.averageScore.toFixed(1)}%`,
+      helper: 'Média das avaliações',
+      icon: CheckSquare,
+      accent: 'gold'
+    }
+  ];
+
+  const mainActions = [
+    {
+      key: 'importar-alunos',
+      title: 'Importar Alunos',
+      description: 'Importar lista de alunos',
+      icon: Download,
+      highlight: true
+    },
+    {
+      key: 'avaliacao',
+      title: 'Criar Avaliação',
+      description: 'Criar nova avaliação',
+      icon: Plus,
+      highlight: false
+    },
+    {
+      key: 'aplicacao',
+      title: 'Aplicar',
       description: 'Aplicar avaliação',
       icon: Play,
-      color: 'text-slate-600'
+      highlight: false
     },
     {
       key: 'correcao',
-      title: 'CORRIGIR',
+      title: 'Corrigir',
       description: 'Corrigir avaliações',
       icon: CheckSquare,
-      color: 'text-slate-600'
+      highlight: false
     }
   ];
 
   if (loading) {
     return (
       <div className="space-y-4 lg:space-y-8">
+        <div className="h-32 lg:h-40 rounded-2xl bg-zinc-200/70 animate-pulse" />
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
           {[...Array(4)].map((_, i) => (
             <Card key={i} className="seice-card">
               <CardContent className="p-4 lg:p-8">
                 <div className="animate-pulse">
-                  <div className="w-12 h-12 lg:w-16 lg:h-16 bg-slate-200 rounded-2xl mx-auto mb-4"></div>
+                  <div className="w-12 h-12 lg:w-16 lg:h-16 bg-slate-200 rounded-2xl mb-4"></div>
                   <div className="h-4 bg-slate-200 rounded mb-2"></div>
                   <div className="h-3 bg-slate-200 rounded"></div>
                 </div>
@@ -145,116 +192,146 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
   }
 
   return (
-    <div className="space-y-4 lg:space-y-8">
+    <div className="space-y-6 lg:space-y-10">
       {/* Welcome Banner */}
-      <div className="seice-sidebar rounded-2xl px-5 py-6 lg:px-8 lg:py-8 relative overflow-hidden shadow-lg shadow-black/20">
-        <div className="pointer-events-none absolute -top-10 -right-10 w-56 h-56 rounded-full bg-amber-500/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-16 right-1/3 w-40 h-40 rounded-full bg-white/5 blur-3xl" />
-        <div className="relative">
-          <h1 className="text-xl lg:text-2xl font-semibold text-white tracking-tight">Bem-vindo ao Sistema SEICE</h1>
-          <p className="text-sm lg:text-base text-zinc-400 mt-1">Acompanhe alunos, simulados e correções em um só lugar.</p>
+      <div className="seice-sidebar rounded-2xl lg:rounded-3xl px-5 py-7 lg:px-10 lg:py-10 relative overflow-hidden shadow-xl shadow-black/25">
+        <div className="pointer-events-none absolute -top-16 -right-16 w-72 h-72 rounded-full bg-amber-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-20 right-1/4 w-52 h-52 rounded-full bg-white/5 blur-3xl" />
+        <div
+          className="pointer-events-none absolute inset-0 opacity-[0.05]"
+          style={{
+            backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)',
+            backgroundSize: '22px 22px'
+          }}
+        />
+        <img
+          src={seiceLogo}
+          alt=""
+          className="pointer-events-none select-none absolute -right-6 -bottom-10 w-48 lg:w-64 opacity-[0.06] object-contain"
+        />
+
+        <div className="relative flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5">
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-[11px] lg:text-xs font-medium text-amber-400 tracking-wide uppercase mb-3">
+              <Sparkles className="w-3.5 h-3.5" />
+              {greeting}
+            </div>
+            <h1 className="text-2xl lg:text-3xl font-semibold text-white tracking-tight leading-tight">
+              Bem-vindo ao Sistema SEICE
+            </h1>
+            <div className="h-1 w-14 rounded-full bg-gradient-to-r from-amber-500 to-amber-300 mt-3 mb-3" />
+            <p className="text-sm lg:text-base text-zinc-400 max-w-lg">
+              Acompanhe alunos, simulados e correções em um só lugar.
+            </p>
+          </div>
+
+          <button
+            onClick={() => onNavigate('importar-alunos')}
+            className="group inline-flex items-center gap-2 self-start rounded-xl bg-amber-500 hover:bg-amber-400 text-zinc-900 font-semibold text-sm px-4 py-2.5 lg:px-5 lg:py-3 shadow-lg shadow-black/30 transition-all duration-200 hover:-translate-y-0.5"
+          >
+            Importar Alunos
+            <ArrowRight className="w-4 h-4 transition-transform duration-200 group-hover:translate-x-0.5" />
+          </button>
         </div>
       </div>
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        <Card className="seice-card cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200" onClick={() => onNavigate('importar-alunos')}>
-          <CardContent className="p-4 lg:p-8 text-center">
-            <div className="flex justify-center mb-3 lg:mb-4">
-              <div className="w-12 h-12 lg:w-16 lg:h-16 bg-zinc-100 rounded-2xl flex items-center justify-center">
-                <Users className="w-6 h-6 lg:w-8 lg:h-8 text-zinc-700" />
-              </div>
-            </div>
-            <h3 className="font-semibold text-slate-800 mb-1 lg:mb-2 text-sm lg:text-base">ALUNOS</h3>
-            <p className="text-xl lg:text-2xl font-bold text-zinc-900 mb-1 lg:mb-2">{stats.totalStudents}</p>
-            <p className="text-xs lg:text-sm text-slate-600">Total de alunos</p>
-          </CardContent>
-        </Card>
-
-        <Card className="seice-card cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200" onClick={() => onNavigate('avaliacao')}>
-          <CardContent className="p-4 lg:p-8 text-center">
-            <div className="flex justify-center mb-3 lg:mb-4">
-              <div className="w-12 h-12 lg:w-16 lg:h-16 bg-zinc-100 rounded-2xl flex items-center justify-center">
-                <FileText className="w-6 h-6 lg:w-8 lg:h-8 text-zinc-700" />
-              </div>
-            </div>
-            <h3 className="font-semibold text-slate-800 mb-1 lg:mb-2 text-sm lg:text-base">AVALIAÇÕES</h3>
-            <p className="text-xl lg:text-2xl font-bold text-zinc-900 mb-1 lg:mb-2">{stats.totalExams}</p>
-            <p className="text-xs lg:text-sm text-slate-600">Total de avaliações</p>
-          </CardContent>
-        </Card>
-
-        <Card className="seice-card cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200" onClick={() => onNavigate('aplicacao')}>
-          <CardContent className="p-4 lg:p-8 text-center">
-            <div className="flex justify-center mb-3 lg:mb-4">
-              <div className="w-12 h-12 lg:w-16 lg:h-16 bg-zinc-100 rounded-2xl flex items-center justify-center">
-                <Play className="w-6 h-6 lg:w-8 lg:h-8 text-zinc-700" />
-              </div>
-            </div>
-            <h3 className="font-semibold text-slate-800 mb-1 lg:mb-2 text-sm lg:text-base">ATIVAS</h3>
-            <p className="text-xl lg:text-2xl font-bold text-zinc-900 mb-1 lg:mb-2">{stats.activeExams}</p>
-            <p className="text-xs lg:text-sm text-slate-600">Avaliações ativas</p>
-          </CardContent>
-        </Card>
-
-        <Card className="seice-card cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ring-1 ring-amber-200" onClick={() => onNavigate('relatorios-gerais')}>
-          <CardContent className="p-4 lg:p-8 text-center">
-            <div className="flex justify-center mb-3 lg:mb-4">
-              <div className="w-12 h-12 lg:w-16 lg:h-16 bg-amber-100 rounded-2xl flex items-center justify-center">
-                <CheckSquare className="w-6 h-6 lg:w-8 lg:h-8 text-amber-600" />
-              </div>
-            </div>
-            <h3 className="font-semibold text-slate-800 mb-1 lg:mb-2 text-sm lg:text-base">MÉDIA GERAL</h3>
-            <p className="text-xl lg:text-2xl font-bold text-amber-600 mb-1 lg:mb-2">{stats.averageScore.toFixed(1)}%</p>
-            <p className="text-xs lg:text-sm text-slate-600">Média das avaliações</p>
-          </CardContent>
-        </Card>
+        {statCards.map((stat) => {
+          const isGold = stat.accent === 'gold';
+          return (
+            <Card
+              key={stat.key}
+              onClick={() => onNavigate(stat.key)}
+              className={`group relative cursor-pointer overflow-hidden border transition-all duration-200 hover:-translate-y-1 hover:shadow-xl ${
+                isGold
+                  ? 'border-amber-200 shadow-md shadow-amber-900/5'
+                  : 'border-slate-200 shadow-sm hover:border-amber-200'
+              }`}
+            >
+              <div
+                className={`absolute left-0 top-0 h-full w-1 origin-top scale-y-0 group-hover:scale-y-100 transition-transform duration-300 ${
+                  isGold ? 'bg-amber-500 scale-y-100' : 'bg-zinc-900'
+                }`}
+              />
+              <CardContent className="p-4 lg:p-6">
+                <div className="flex items-start justify-between mb-4 lg:mb-6">
+                  <div
+                    className={`w-11 h-11 lg:w-14 lg:h-14 rounded-2xl flex items-center justify-center ${
+                      isGold ? 'bg-amber-100' : 'bg-zinc-100'
+                    }`}
+                  >
+                    <stat.icon className={`w-5 h-5 lg:w-6 lg:h-6 ${isGold ? 'text-amber-600' : 'text-zinc-700'}`} />
+                  </div>
+                  <ArrowUpRight className="w-4 h-4 text-slate-300 group-hover:text-amber-500 transition-colors duration-200" />
+                </div>
+                <p className="text-[11px] lg:text-xs font-semibold tracking-widest text-slate-400 uppercase mb-1">
+                  {stat.label}
+                </p>
+                <p className={`text-2xl lg:text-3xl font-bold mb-1 ${isGold ? 'text-amber-600' : 'text-zinc-900'}`}>
+                  {stat.value}
+                </p>
+                <p className="text-xs lg:text-sm text-slate-500">{stat.helper}</p>
+              </CardContent>
+            </Card>
+          );
+        })}
       </div>
 
       {/* Quick Actions */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-6">
-        {mainActions.map((action) => (
-          <Card
-            key={action.key}
-            className={`cursor-pointer hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 ${
-              action.key === 'importar-alunos' ? 'ring-2 ring-amber-500 shadow-lg' : 'hover:ring-1 hover:ring-zinc-300'
-            }`}
-            onClick={() => onNavigate(action.key)}
-          >
-            <CardContent className="p-3 lg:p-6 text-center">
-              <div className="flex justify-center mb-2 lg:mb-3">
-                <div className="w-10 h-10 lg:w-12 lg:h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                  <action.icon className={`w-5 h-5 lg:w-6 lg:h-6 ${action.color}`} />
+      <div className="space-y-3 lg:space-y-4">
+        <h2 className="text-sm lg:text-base font-semibold text-slate-800 tracking-tight">Ações Rápidas</h2>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 lg:gap-6">
+          {mainActions.map((action) => (
+            <Card
+              key={action.key}
+              className={`group cursor-pointer transition-all duration-200 hover:-translate-y-1 hover:shadow-xl border ${
+                action.highlight
+                  ? 'border-amber-300 ring-1 ring-amber-200 shadow-md shadow-amber-900/5'
+                  : 'border-slate-200 hover:border-zinc-300'
+              }`}
+              onClick={() => onNavigate(action.key)}
+            >
+              <CardContent className="p-3.5 lg:p-6 text-center">
+                <div
+                  className={`mx-auto flex justify-center mb-2.5 lg:mb-4 w-10 h-10 lg:w-12 lg:h-12 rounded-xl items-center transition-transform duration-200 group-hover:scale-105 ${
+                    action.highlight ? 'bg-gradient-to-br from-zinc-900 to-zinc-700' : 'bg-slate-100'
+                  }`}
+                >
+                  <action.icon className={`w-5 h-5 lg:w-6 lg:h-6 mx-auto ${action.highlight ? 'text-amber-400' : 'text-zinc-600'}`} />
                 </div>
-              </div>
-              <h3 className="font-medium text-slate-800 mb-1 text-xs lg:text-sm">{action.title}</h3>
-              <p className="text-xs text-slate-600 hidden lg:block">{action.description}</p>
-            </CardContent>
-          </Card>
-        ))}
+                <h3 className="font-medium text-slate-800 mb-1 text-xs lg:text-sm">{action.title}</h3>
+                <p className="text-xs text-slate-500 hidden lg:block">{action.description}</p>
+                <div className="hidden lg:flex items-center justify-center gap-1 mt-3 text-[11px] font-medium text-amber-600 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                  Acessar <ArrowRight className="w-3 h-3" />
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
 
       {/* Students and Exams Data */}
-      <div className="space-y-4">
-        <h2 className="text-base lg:text-lg font-semibold text-slate-800">Dados dos Alunos e Simulados</h2>
-        
-        <Card className="seice-card">
+      <div className="space-y-3 lg:space-y-4">
+        <h2 className="text-sm lg:text-base font-semibold text-slate-800 tracking-tight">Dados dos Alunos e Simulados</h2>
+
+        <Card className="seice-card overflow-hidden">
           <CardContent className="p-0">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-slate-200">
-              <div className="flex items-center space-x-2 lg:space-x-4">
-                <Users className="w-4 h-4 lg:w-5 lg:h-5 text-slate-600" />
+            <div className="flex items-center justify-between px-4 lg:px-6 py-3 lg:py-4 border-b border-slate-200 bg-slate-50/60">
+              <div className="flex items-center space-x-2.5 lg:space-x-3">
+                <div className="w-8 h-8 rounded-lg bg-zinc-900 flex items-center justify-center flex-shrink-0">
+                  <Users className="w-4 h-4 text-amber-400" />
+                </div>
                 <span className="font-medium text-slate-800 text-sm lg:text-base">Lista de Alunos e Resultados</span>
               </div>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleExportSubmissions}
-                  className="text-amber-600 hover:text-amber-700 text-xs lg:text-sm font-medium"
-                >
-                  Exportar
-                </button>
-                <FileText className="w-4 h-4 text-slate-400" />
-              </div>
+              <button
+                onClick={handleExportSubmissions}
+                className="inline-flex items-center gap-1.5 text-amber-600 hover:text-amber-700 text-xs lg:text-sm font-medium"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                Exportar
+              </button>
             </div>
 
             {/* Table */}
@@ -279,9 +356,9 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
                     </th>
                   </tr>
                 </thead>
-                <tbody className="bg-white divide-y divide-slate-200">
+                <tbody className="bg-white divide-y divide-slate-100">
                   {recentSubmissions.map((submission, index) => (
-                    <tr key={index} className="hover:bg-slate-50">
+                    <tr key={index} className="hover:bg-amber-50/40 transition-colors duration-150">
                       <td className="px-3 lg:px-6 py-4">
                         <div className="flex items-center">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-800">
@@ -290,9 +367,14 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
                         </div>
                       </td>
                       <td className="px-3 lg:px-6 py-4">
-                        <div>
-                          <div className="text-xs lg:text-sm font-medium text-slate-900">{submission.studentName || 'Anônimo'}</div>
-                          <div className="text-xs text-slate-500 hidden lg:block">ID: {submission.userId}</div>
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-full bg-zinc-900 text-amber-400 text-xs font-semibold flex items-center justify-center flex-shrink-0">
+                            {(submission.studentName || 'A').charAt(0).toUpperCase()}
+                          </div>
+                          <div>
+                            <div className="text-xs lg:text-sm font-medium text-slate-900">{submission.studentName || 'Anônimo'}</div>
+                            <div className="text-xs text-slate-500 hidden lg:block">ID: {submission.userId}</div>
+                          </div>
                         </div>
                       </td>
                       <td className="px-3 lg:px-6 py-4 hidden md:table-cell">
@@ -320,15 +402,18 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
 
             {/* Empty State for more data */}
             {recentSubmissions.length === 0 && (
-              <div className="px-4 lg:px-6 py-6 lg:py-8 text-center border-t border-slate-200">
-                <BookOpen className="w-10 h-10 lg:w-12 lg:h-12 text-slate-300 mx-auto mb-4" />
-                <p className="text-slate-500 text-sm lg:text-base">Nenhuma submissão encontrada</p>
-                <p className="text-slate-400 text-xs lg:text-sm">Dados aparecerão conforme as avaliações forem aplicadas</p>
-                <button 
+              <div className="px-4 lg:px-6 py-10 lg:py-14 text-center border-t border-slate-200">
+                <div className="w-14 h-14 rounded-2xl bg-zinc-100 flex items-center justify-center mx-auto mb-4">
+                  <BookOpen className="w-7 h-7 text-zinc-400" />
+                </div>
+                <p className="text-slate-600 text-sm lg:text-base font-medium">Nenhuma submissão encontrada</p>
+                <p className="text-slate-400 text-xs lg:text-sm mt-1">Dados aparecerão conforme as avaliações forem aplicadas</p>
+                <button
                   onClick={() => onNavigate('importar-alunos')}
-                  className="mt-4 text-amber-600 hover:text-amber-700 font-medium text-sm"
+                  className="mt-5 inline-flex items-center gap-1.5 text-amber-600 hover:text-amber-700 font-medium text-sm"
                 >
                   Começar importando alunos
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               </div>
             )}

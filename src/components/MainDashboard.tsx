@@ -86,6 +86,7 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
       case 'inicio':
         return <OverviewPage onNavigate={setCurrentPage} />;
       case 'gerenciar-alunos':
+      case 'importar-alunos':
         return <ManageStudentsPage />;
       case 'gerenciar-turmas':
         return <ManageClassesPage />;
