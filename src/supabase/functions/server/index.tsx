@@ -2586,21 +2586,22 @@ app.get('/make-server-83358821/grading/queue', requireAuth, async (c) => {
   }
 });
 
-// ================== AI CORRECTION ROUTES (Gemini) ==================
+// ================== AI CORRECTION ROUTES (Claude) ==================
 
-const GEMINI_MODEL = 'gemini-3.6-flash';
+const CLAUDE_MODEL = 'claude-sonnet-5';
+const CLAUDE_API_URL = 'https://api.anthropic.com/v1/messages';
 
-// Set the Gemini API key via PUT /ai/config (stored server-side only, never exposed to the client)
+// Set the Claude API key via PUT /ai/config (stored server-side only, never exposed to the client)
 app.put('/make-server-83358821/ai/config', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
-    const { geminiApiKey } = body;
+    const { claudeApiKey } = body;
 
-    if (!geminiApiKey) {
-      return c.json({ error: 'geminiApiKey is required' }, 400);
+    if (!claudeApiKey) {
+      return c.json({ error: 'claudeApiKey is required' }, 400);
     }
 
-    await kv.set('config:gemini-api-key', { geminiApiKey });
+    await kv.set('config:claude-api-key', { claudeApiKey });
     return c.json({ success: true });
   } catch (error) {
     console.error('Error saving AI config:', error);
@@ -2608,84 +2609,101 @@ app.put('/make-server-83358821/ai/config', requireAuth, async (c) => {
   }
 });
 
-const getGeminiApiKey = async (): Promise<string | undefined> => {
-  const stored = await kv.get('config:gemini-api-key');
-  return stored?.geminiApiKey || Deno.env.get('GEMINI_API_KEY');
+const getClaudeApiKey = async (): Promise<string | undefined> => {
+  const stored = await kv.get('config:claude-api-key');
+  return stored?.claudeApiKey || Deno.env.get('ANTHROPIC_API_KEY');
 };
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Erros transitórios do lado do Google (sobrecarga/rate limit) valem retry; erros do nosso
-// pedido (chave inválida, prompt rejeitado, etc.) não devem ser tentados de novo.
-const isTransientGeminiError = (status: number, message: string) => {
-  if (status === 503 || status === 429) return true;
-  const lower = message.toLowerCase();
-  return lower.includes('high demand') || lower.includes('overloaded') || lower.includes('unavailable');
-};
+// Erros transitórios da Anthropic (sobrecarga/rate limit de curto prazo) valem retry com backoff;
+// erros do nosso pedido (chave inválida, prompt rejeitado, etc.) não devem ser tentados de novo.
+const isTransientClaudeError = (status: number) => status === 429 || status === 503 || status === 529;
 
-const callGemini = async (contents: any[], responseSchema: any) => {
-  const apiKey = await getGeminiApiKey();
+// Chama a API da Claude (Anthropic) forçando o uso de uma "tool" para garantir uma resposta
+// estruturada em JSON (equivalente ao responseSchema usado antes com o Gemini).
+const callClaude = async (content: any[], toolSchema: any) => {
+  const apiKey = await getClaudeApiKey();
   if (!apiKey) {
-    throw new Error('Gemini API key not configured');
+    throw new Error('Claude API key not configured');
   }
 
-  const maxAttempts = 3;
+  const toolName = 'return_result';
+  const maxAttempts = 5;
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents,
-          generationConfig: {
-            responseMimeType: 'application/json',
-            responseSchema,
-            temperature: 0,
+    const response = await fetch(CLAUDE_API_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 4096,
+        messages: [{ role: 'user', content }],
+        tools: [
+          {
+            name: toolName,
+            description: 'Retorna o resultado estruturado da análise.',
+            input_schema: toolSchema,
           },
-        }),
-      }
-    );
+        ],
+        tool_choice: { type: 'tool', name: toolName },
+      }),
+    });
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error(`Gemini API error (${response.status}), attempt ${attempt}/${maxAttempts}:`, errorText);
+      console.error(`Claude API error (${response.status}), attempt ${attempt}/${maxAttempts}:`, errorText);
 
-      let shortMessage = `Gemini API error (${response.status})`;
+      let shortMessage = `Claude API error (${response.status})`;
       try {
         const parsed = JSON.parse(errorText);
         if (parsed?.error?.message) {
           shortMessage = parsed.error.message;
         }
       } catch {
-        // Response wasn't JSON (e.g. an HTML error page) - keep the short default message
+        // Response wasn't JSON - keep the short default message
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        throw new Error('Chave da API da Claude inválida ou sem permissão. Verifique a chave configurada.');
       }
 
       lastError = new Error(shortMessage.slice(0, 200));
 
-      if (isTransientGeminiError(response.status, shortMessage) && attempt < maxAttempts) {
-        await sleep(attempt * 1500); // backoff: 1.5s, depois 3s
+      if (isTransientClaudeError(response.status) && attempt < maxAttempts) {
+        const retryAfterHeader = Number(response.headers.get('retry-after'));
+        const backoffMs = retryAfterHeader > 0 ? retryAfterHeader * 1000 : attempt * 2000;
+        await sleep(backoffMs); // backoff progressivo: 2s, 4s, 6s, 8s
         continue;
+      }
+
+      if (response.status === 429) {
+        throw new Error(
+          'Limite de requisições da API da Claude foi atingido. Aguarde alguns instantes e tente novamente.'
+        );
       }
 
       throw lastError;
     }
 
     const result = await response.json();
-    const text = result.candidates?.[0]?.content?.parts?.[0]?.text;
-    if (!text) {
-      throw new Error('Gemini returned an empty response');
+    const toolUse = result.content?.find((block: any) => block.type === 'tool_use');
+    if (!toolUse?.input) {
+      throw new Error('Claude returned an empty response');
     }
 
-    return JSON.parse(text);
+    return toolUse.input;
   }
 
-  throw lastError || new Error('Gemini request failed after retries');
+  throw lastError || new Error('Claude request failed after retries');
 };
 
-// Detect marked answers on a scanned answer sheet (bubble sheet) using Gemini Vision
+// Detect marked answers on a scanned answer sheet (bubble sheet) using Claude Vision
 app.post('/make-server-83358821/ai/detect-answers', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
@@ -2699,6 +2717,7 @@ app.post('/make-server-83358821/ai/detect-answers', requireAuth, async (c) => {
     const mimeMatch = imageData.match(/^data:([\w.+-]+\/[\w.+-]+);base64,/);
     const mimeType = mimeMatch?.[1] || 'image/jpeg';
     const base64Data = imageData.replace(/^data:[\w.+-]+\/[\w.+-]+;base64,/, '');
+    const isPdf = mimeType === 'application/pdf';
 
     const lastLetter = String.fromCharCode(65 + optionsPerQuestion - 1);
     const prompt = `Você é um sistema de leitura óptica de cartão-resposta (OMR) extremamente preciso. Analise a imagem de uma folha de respostas escaneada de uma prova de múltipla escolha com exatamente ${totalQuestions} questões numeradas de 1 a ${totalQuestions}, cada uma com ${optionsPerQuestion} alternativas (A a ${lastLetter}).
@@ -2710,24 +2729,22 @@ Regras obrigatórias:
 4. Não pule nem repita números de questão. O array de resposta final deve ter exatamente ${totalQuestions} posições, uma para cada questão na ordem 1..${totalQuestions}.
 5. Retorne os índices das alternativas baseados em zero: A=0, B=1, C=2, ${optionsPerQuestion > 3 ? 'D=3, ' : ''}... até ${lastLetter}=${optionsPerQuestion - 1}.
 
-Antes de responder, confira mentalmente cada questão uma segunda vez para garantir que o número da questão e a bolha marcada foram lidos corretamente.`;
+Antes de responder, confira mentalmente cada questão uma segunda vez para garantir que o número da questão e a bolha marcada foram lidos corretamente. Use a tool "return_result" para responder.`;
 
-    const result = await callGemini(
+    const result = await callClaude(
       [
         {
-          role: 'user',
-          parts: [
-            { text: prompt },
-            { inlineData: { mimeType, data: base64Data } },
-          ],
+          type: isPdf ? 'document' : 'image',
+          source: { type: 'base64', media_type: mimeType, data: base64Data },
         },
+        { type: 'text', text: prompt },
       ],
       {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
           answers: {
-            type: 'ARRAY',
-            items: { type: 'INTEGER' },
+            type: 'array',
+            items: { type: 'integer' },
           },
         },
         required: ['answers'],
@@ -2749,7 +2766,7 @@ Antes de responder, confira mentalmente cada questão uma segunda vez para garan
   }
 });
 
-// Grade a dissertative/essay answer using Gemini
+// Grade a dissertative/essay answer using Claude
 app.post('/make-server-83358821/ai/grade-essay', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
@@ -2764,15 +2781,15 @@ Questão: ${question}
 ${expectedAnswer ? `Resposta esperada / critérios de correção: ${expectedAnswer}` : ''}
 Resposta do aluno: ${studentAnswer}
 
-Avalie a resposta do aluno atribuindo uma nota de 0 a ${maxScore} (pode usar casas decimais) e escreva um feedback curto e construtivo em português, explicando o que está correto e o que poderia melhorar.`;
+Avalie a resposta do aluno atribuindo uma nota de 0 a ${maxScore} (pode usar casas decimais) e escreva um feedback curto e construtivo em português, explicando o que está correto e o que poderia melhorar. Use a tool "return_result" para responder.`;
 
-    const result = await callGemini(
-      [{ role: 'user', parts: [{ text: prompt }] }],
+    const result = await callClaude(
+      [{ type: 'text', text: prompt }],
       {
-        type: 'OBJECT',
+        type: 'object',
         properties: {
-          score: { type: 'NUMBER' },
-          feedback: { type: 'STRING' },
+          score: { type: 'number' },
+          feedback: { type: 'string' },
         },
         required: ['score', 'feedback'],
       }

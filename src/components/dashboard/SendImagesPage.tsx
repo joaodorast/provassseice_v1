@@ -203,7 +203,7 @@ export function SendImagesPage() {
     return message.length > 200 ? message.slice(0, 200) + '…' : message;
   };
 
-  // Detecta respostas marcadas na folha de respostas usando IA (Gemini)
+  // Detecta respostas marcadas na folha de respostas usando IA (Claude)
   const detectAnswersFromImage = async (imageData, totalQuestions, optionsPerQuestion = 5) => {
     const resizedImage = await resizeImageForAI(imageData);
     const response = await apiService.detectAnswersAI(resizedImage, totalQuestions, optionsPerQuestion);

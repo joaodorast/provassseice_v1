@@ -441,7 +441,7 @@ class ApiService {
     return this.request('/health');
   }
 
-  // AI-powered correction (Gemini)
+  // AI-powered correction (Claude)
   async detectAnswersAI(imageData: string, totalQuestions: number, optionsPerQuestion = 5) {
     return this.request('/ai/detect-answers', {
       method: 'POST',
