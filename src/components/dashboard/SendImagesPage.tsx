@@ -164,8 +164,12 @@ export function SendImagesPage() {
     return { valid: true };
   };
 
-  // Reduz o tamanho da imagem antes de enviar para a IA (evita payloads enormes e erros)
-  const resizeImageForAI = (dataUrl, maxDimension = 1600, quality = 0.85) => {
+  // Reduz o tamanho da imagem antes de enviar para a IA (evita payloads enormes e erros).
+  // maxDimension/quality baixos demais fazem a IA ler bolhas erradas em cartões com muitas
+  // questões (ex: 50-60) de forma inconsistente entre chamadas - testado e confirmado:
+  // 1600px/0.85 gerava respostas diferentes a cada chamada na mesma imagem; a resolução
+  // original (sem cortar) deu resultado idêntico e 100% correto em chamadas repetidas.
+  const resizeImageForAI = (dataUrl, maxDimension = 2400, quality = 0.95) => {
     if (!dataUrl?.startsWith('data:image/')) {
       // Não é uma imagem (ex: PDF) - envia como está
       return Promise.resolve(dataUrl);
