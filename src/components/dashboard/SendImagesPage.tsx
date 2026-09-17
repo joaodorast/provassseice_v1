@@ -40,6 +40,12 @@ export function SendImagesPage() {
   const [autoProcessingProgress, setAutoProcessingProgress] = useState(0);
   const [showAutoResults, setShowAutoResults] = useState(false);
   const [detectedAnswers, setDetectedAnswers] = useState([]);
+  const [showBatchAiAssignDialog, setShowBatchAiAssignDialog] = useState(false);
+  const [batchAiQueue, setBatchAiQueue] = useState([]);
+  const [batchAiAssignments, setBatchAiAssignments] = useState({});
+  const [isBatchAiRunning, setIsBatchAiRunning] = useState(false);
+  const [batchAiProgress, setBatchAiProgress] = useState({ current: 0, total: 0 });
+  const [batchAiErrors, setBatchAiErrors] = useState([]);
 
   useEffect(() => {
     loadData();
@@ -265,110 +271,118 @@ export function SendImagesPage() {
     setBatchAiSelectedStudent('');
   };
 
-  // Correção automática por IA para uma imagem individual (um único aluno)
-  const handleAutoProcessIndividual = async (image, correctionType = 'auto-image-individual') => {
+  // Núcleo da correção por IA para UMA imagem já associada a UM aluno. Não mexe em
+  // estado de UI (toasts/progresso) - isso fica por conta de quem chama, para poder
+  // ser reaproveitado tanto na correção individual quanto na correção de lote inteiro.
+  // Usa sempre image.examId (a prova com que a imagem foi enviada), nunca a prova
+  // selecionada no momento na tela, para garantir que cada cartão seja corrigido com
+  // o gabarito da prova certa mesmo que o professor troque de prova depois do upload.
+  const runAiCorrectionForImage = async (image, correctionType) => {
     const examData = exams.find(e => e.id === image.examId);
 
     const validation = validateExamStructure(examData);
     if (!validation.valid) {
-      toast.error(validation.error);
-      return;
+      throw new Error(validation.error);
     }
 
+    const detectedAnswers = await detectAnswersFromImage(
+      image.data,
+      examData.questions.length,
+      Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
+    );
+
+    let correctCount = 0;
+    const results = examData.questions.map((question, index) => {
+      const studentAnswer = detectedAnswers[index];
+      const isCorrect = studentAnswer === question.correctAnswer;
+      if (isCorrect) correctCount++;
+
+      return {
+        question: question.question,
+        subject: question.subject,
+        studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
+        correctAnswer: String.fromCharCode(65 + question.correctAnswer),
+        isCorrect
+      };
+    });
+
+    const score = Math.round((correctCount / examData.questions.length) * 100);
+
+    const subjectPerformances = {};
+    examData.questions.forEach((question, index) => {
+      const subject = question.subject || 'Geral';
+      if (!subjectPerformances[subject]) {
+        subjectPerformances[subject] = { total: 0, correct: 0 };
+      }
+      subjectPerformances[subject].total++;
+      if (detectedAnswers[index] === question.correctAnswer) {
+        subjectPerformances[subject].correct++;
+      }
+    });
+
+    const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
+      subject,
+      totalQuestions: data.total,
+      correctAnswers: data.correct,
+      percentage: Math.round((data.correct / data.total) * 100)
+    }));
+
+    const submissionData = {
+      examId: image.examId,
+      examTitle: examData.title,
+      studentId: image.studentId,
+      studentName: image.studentName,
+      studentEmail: image.studentEmail,
+      studentClass: image.studentClass,
+      studentGrade: image.studentGrade || examData.grade || 'Ensino Médio',
+      answers: detectedAnswers,
+      correctAnswers: examData.questions.map((q) => q.correctAnswer),
+      score: correctCount,
+      totalQuestions: examData.questions.length,
+      percentage: score,
+      subjectPerformances: subjectPerformanceArray,
+      timeSpent: 0,
+      results,
+      submittedAt: new Date().toISOString(),
+      gradingStatus: 'graded',
+      correctionType,
+      questionWeights: examData.questions.map((q, idx) => ({
+        questionIndex: idx,
+        weight: q.weight || 1,
+        subject: q.subject || 'Geral'
+      }))
+    };
+
+    const submissionResponse = await apiService.createSubmission(submissionData);
+
+    if (!submissionResponse || submissionResponse.error) {
+      throw new Error(submissionResponse?.error || 'Erro ao salvar correção');
+    }
+
+    await apiService.updateImageStatus(image.id, {
+      status: 'Processada',
+      correctionType,
+      processedAt: new Date().toISOString()
+    });
+
+    return submissionData;
+  };
+
+  // Correção automática por IA para uma imagem individual (um único aluno)
+  const handleAutoProcessIndividual = async (image, correctionType = 'auto-image-individual') => {
     setIsAutoProcessing(true);
     setAutoProcessingProgress(0);
 
     try {
       toast.info('🤖 Detectando respostas marcadas com IA...', { duration: 3000 });
+      setAutoProcessingProgress(30);
 
-      const detectedAnswers = await detectAnswersFromImage(
-        image.data,
-        examData.questions.length,
-        Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
-      );
-
-      setAutoProcessingProgress(60);
-
-      let correctCount = 0;
-      const results = examData.questions.map((question, index) => {
-        const studentAnswer = detectedAnswers[index];
-        const isCorrect = studentAnswer === question.correctAnswer;
-        if (isCorrect) correctCount++;
-
-        return {
-          question: question.question,
-          subject: question.subject,
-          studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
-          correctAnswer: String.fromCharCode(65 + question.correctAnswer),
-          isCorrect
-        };
-      });
-
-      const score = Math.round((correctCount / examData.questions.length) * 100);
-
-      const subjectPerformances = {};
-      examData.questions.forEach((question, index) => {
-        const subject = question.subject || 'Geral';
-        if (!subjectPerformances[subject]) {
-          subjectPerformances[subject] = { total: 0, correct: 0 };
-        }
-        subjectPerformances[subject].total++;
-        if (detectedAnswers[index] === question.correctAnswer) {
-          subjectPerformances[subject].correct++;
-        }
-      });
-
-      const subjectPerformanceArray = Object.entries(subjectPerformances).map(([subject, data]) => ({
-        subject,
-        totalQuestions: data.total,
-        correctAnswers: data.correct,
-        percentage: Math.round((data.correct / data.total) * 100)
-      }));
-
-      const submissionData = {
-        examId: image.examId,
-        examTitle: examData.title,
-        studentId: image.studentId,
-        studentName: image.studentName,
-        studentEmail: image.studentEmail,
-        studentClass: image.studentClass,
-        studentGrade: image.studentGrade || examData.grade || 'Ensino Médio',
-        answers: detectedAnswers,
-        correctAnswers: examData.questions.map((q) => q.correctAnswer),
-        score: correctCount,
-        totalQuestions: examData.questions.length,
-        percentage: score,
-        subjectPerformances: subjectPerformanceArray,
-        timeSpent: 0,
-        results,
-        submittedAt: new Date().toISOString(),
-        gradingStatus: 'graded',
-        correctionType,
-        questionWeights: examData.questions.map((q, idx) => ({
-          questionIndex: idx,
-          weight: q.weight || 1,
-          subject: q.subject || 'Geral'
-        }))
-      };
-
-      const submissionResponse = await apiService.createSubmission(submissionData);
-
-      if (!submissionResponse || submissionResponse.error) {
-        throw new Error(submissionResponse?.error || 'Erro ao salvar correção');
-      }
-
-      setAutoProcessingProgress(90);
-
-      await apiService.updateImageStatus(image.id, {
-        status: 'Processada',
-        correctionType,
-        processedAt: new Date().toISOString()
-      });
+      const submissionData = await runAiCorrectionForImage(image, correctionType);
 
       setAutoProcessingProgress(100);
 
       toast.success(
-        `✅ ${image.studentName}: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
+        `✅ ${submissionData.studentName}: ${submissionData.percentage}% (${submissionData.score}/${submissionData.totalQuestions} acertos)`,
         { duration: 5000 }
       );
 
@@ -380,6 +394,112 @@ export function SendImagesPage() {
       setIsAutoProcessing(false);
       setAutoProcessingProgress(0);
     }
+  };
+
+  // Retorna a lista de alunos elegíveis para uma imagem específica, filtrando pela
+  // turma da prova à qual aquela imagem foi associada no upload (mesma regra usada
+  // para popular availableStudents quando uma prova é selecionada).
+  const getStudentsForImage = (image) => {
+    const exam = exams.find(e => e.id === image.examId);
+    if (exam && exam.selectedClass) {
+      return students.filter(s => s.class === exam.selectedClass);
+    }
+    return students;
+  };
+
+  // Abre o diálogo de atribuição de alunos para TODOS os cartões de lote ainda não
+  // processados, permitindo ver e conferir cada imagem antes de corrigir tudo de uma vez.
+  const openBatchAiAssignDialog = () => {
+    const pending = images.filter((img) => img.isBatch && img.status !== 'Processada');
+
+    if (pending.length === 0) {
+      toast.error('Nenhum cartão de lote aguardando correção');
+      return;
+    }
+
+    setBatchAiQueue(pending);
+    setBatchAiAssignments({});
+    setBatchAiErrors([]);
+    setShowBatchAiAssignDialog(true);
+  };
+
+  const batchAiAssignmentIsComplete = () => {
+    return batchAiQueue.length > 0 && batchAiQueue.every((img) => !!batchAiAssignments[img.id]);
+  };
+
+  const batchAiHasDuplicateAssignments = () => {
+    const assigned = batchAiQueue.map((img) => batchAiAssignments[img.id]).filter(Boolean);
+    return new Set(assigned).size !== assigned.length;
+  };
+
+  // Corrige TODOS os cartões do lote de uma vez, um após o outro (sequencial, não em
+  // paralelo, para não estourar limite de requisições da IA). Erros em um cartão não
+  // interrompem os demais - cada falha é coletada e mostrada claramente no final,
+  // nunca escondida ou ignorada.
+  const handleBatchAiRunAll = async () => {
+    if (!batchAiAssignmentIsComplete()) {
+      toast.error('Selecione o aluno correspondente para todos os cartões antes de continuar');
+      return;
+    }
+
+    if (batchAiHasDuplicateAssignments()) {
+      toast.error('Dois cartões estão marcados para o mesmo aluno. Corrija antes de continuar.');
+      return;
+    }
+
+    setIsBatchAiRunning(true);
+    setBatchAiProgress({ current: 0, total: batchAiQueue.length });
+    setBatchAiErrors([]);
+    setCompletedCorrections([]);
+
+    const results = [];
+    const errors = [];
+
+    for (let i = 0; i < batchAiQueue.length; i++) {
+      const image = batchAiQueue[i];
+      const studentId = batchAiAssignments[image.id];
+      const student = students.find((s) => s.id === studentId);
+
+      setBatchAiProgress({ current: i + 1, total: batchAiQueue.length });
+
+      if (!student) {
+        errors.push({ imageId: image.id, filename: image.filename, studentName: '(aluno não encontrado)', error: 'Aluno inválido' });
+        continue;
+      }
+
+      const imageForStudent = {
+        ...image,
+        studentId: student.id,
+        studentName: student.name,
+        studentEmail: student.email,
+        studentClass: student.class,
+        studentGrade: student.grade,
+      };
+
+      try {
+        const submissionData = await runAiCorrectionForImage(imageForStudent, 'auto-image-batch');
+        results.push(submissionData);
+      } catch (error) {
+        console.error(`❌ Erro ao corrigir ${student.name}:`, error);
+        errors.push({ imageId: image.id, filename: image.filename, studentName: student.name, error: friendlyErrorMessage(error) });
+      }
+    }
+
+    setCompletedCorrections(results);
+    setBatchAiErrors(errors);
+    setIsBatchAiRunning(false);
+    setShowBatchAiAssignDialog(false);
+
+    if (errors.length > 0) {
+      toast.error(`⚠️ ${errors.length} cartão(ões) não puderam ser corrigidos. Veja os detalhes.`, { duration: 6000 });
+    }
+    if (results.length > 0) {
+      toast.success(`✅ ${results.length} aluno(s) corrigido(s) com sucesso!`, { duration: 5000 });
+      setSelectedImage(batchAiQueue[0]);
+      setShowAutoResults(true);
+    }
+
+    await reloadOnlyImages();
   };
 
   const handleFileUpload = async (event) => {
@@ -1257,6 +1377,16 @@ export function SendImagesPage() {
               <FileText className="w-5 h-5 mr-2" />
               Cartões Resposta Enviados ({images.length})
             </div>
+            {images.some((img) => img.isBatch && img.status !== 'Processada') && (
+              <Button
+                size="sm"
+                onClick={openBatchAiAssignDialog}
+                className="bg-teal-600 hover:bg-teal-700 text-white"
+              >
+                <Zap className="w-4 h-4 mr-1" />
+                Corrigir Lote Completo com IA
+              </Button>
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1421,6 +1551,28 @@ export function SendImagesPage() {
                 </CardContent>
               </Card>
 
+              {batchAiErrors.length > 0 && (
+                <Card className="border-red-300 bg-red-50">
+                  <CardContent className="p-4">
+                    <div className="flex items-start space-x-3">
+                      <AlertTriangle className="w-6 h-6 text-red-600 mt-0.5 flex-shrink-0" />
+                      <div className="flex-1">
+                        <p className="font-semibold text-red-900 mb-2">
+                          {batchAiErrors.length} cartão(ões) NÃO foram corrigidos - precisam de correção manual
+                        </p>
+                        <div className="space-y-1">
+                          {batchAiErrors.map((err, idx) => (
+                            <div key={idx} className="text-sm text-red-800 bg-white/60 rounded p-2">
+                              <span className="font-medium">{err.studentName}</span> ({err.filename}): {err.error}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1488,6 +1640,7 @@ export function SendImagesPage() {
               onClick={async () => {
                 setShowAutoResults(false);
                 setCompletedCorrections([]);
+                setBatchAiErrors([]);
                 setSelectedImage(null);
                 await reloadOnlyImages();
               }}
@@ -1875,6 +2028,123 @@ export function SendImagesPage() {
                 </>
               ) : (
                 'Corrigir com IA'
+              )}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para corrigir o lote inteiro com IA de uma vez, com preview de cada cartão */}
+      <Dialog
+        open={showBatchAiAssignDialog}
+        onOpenChange={(open) => {
+          if (!isBatchAiRunning) {
+            setShowBatchAiAssignDialog(open);
+            if (!open) {
+              setBatchAiQueue([]);
+              setBatchAiAssignments({});
+            }
+          }
+        }}
+      >
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center">
+              <Zap className="w-5 h-5 mr-2 text-teal-600" />
+              Corrigir Lote Completo com IA
+            </DialogTitle>
+            <DialogDescription>
+              Confira a imagem de cada cartão resposta enviado e selecione o aluno correspondente.
+              Depois de atribuir todos, corrija o lote inteiro de uma vez só.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 overflow-y-auto pr-2 space-y-3">
+            {batchAiQueue.map((image) => {
+              const exam = exams.find((e) => e.id === image.examId);
+              const assignedId = batchAiAssignments[image.id] || '';
+              const isDuplicate = !!assignedId && batchAiQueue.some(
+                (other) => other.id !== image.id && batchAiAssignments[other.id] === assignedId
+              );
+
+              return (
+                <Card key={image.id} className={`border-2 ${isDuplicate ? 'border-red-400 bg-red-50' : ''}`}>
+                  <CardContent className="p-3 flex items-center space-x-3">
+                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center flex-shrink-0 border">
+                      {image.mimeType?.startsWith('image/') ? (
+                        <img src={image.data} alt={image.filename} className="w-full h-full object-cover" />
+                      ) : (
+                        <FileText className="w-6 h-6 text-slate-400" />
+                      )}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-800 truncate">{image.filename}</p>
+                      <p className="text-xs text-slate-500 truncate">{exam?.title || 'Simulado não encontrado'}</p>
+                    </div>
+                    <div className="w-56 flex-shrink-0">
+                      <Select
+                        value={assignedId}
+                        onValueChange={(value) => setBatchAiAssignments((prev) => ({ ...prev, [image.id]: value }))}
+                        disabled={isBatchAiRunning}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o aluno" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {getStudentsForImage(image).map((student) => (
+                            <SelectItem key={student.id} value={student.id}>
+                              {student.name}{student.class ? ` — ${student.class}` : ''}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {isDuplicate && (
+                        <p className="text-xs text-red-600 mt-1">Aluno já usado em outro cartão</p>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+
+          {isBatchAiRunning && (
+            <div className="flex-shrink-0 space-y-2 pt-3 border-t">
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-600">Corrigindo com IA...</span>
+                <span className="font-medium text-slate-800">{batchAiProgress.current}/{batchAiProgress.total}</span>
+              </div>
+              <Progress value={(batchAiProgress.current / Math.max(batchAiProgress.total, 1)) * 100} className="h-2" />
+            </div>
+          )}
+
+          <div className="flex-shrink-0 flex justify-between items-center pt-4 border-t mt-2">
+            <Button
+              variant="outline"
+              disabled={isBatchAiRunning}
+              onClick={() => {
+                setShowBatchAiAssignDialog(false);
+                setBatchAiQueue([]);
+                setBatchAiAssignments({});
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleBatchAiRunAll}
+              disabled={isBatchAiRunning || !batchAiAssignmentIsComplete() || batchAiHasDuplicateAssignments()}
+              className="bg-teal-600 hover:bg-teal-700"
+            >
+              {isBatchAiRunning ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Corrigindo {batchAiProgress.current}/{batchAiProgress.total}...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-4 h-4 mr-2" />
+                  Corrigir Todos ({batchAiQueue.length})
+                </>
               )}
             </Button>
           </div>
