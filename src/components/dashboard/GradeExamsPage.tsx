@@ -42,6 +42,7 @@ export function GradeExamsPage() {
   const [uploadingImage, setUploadingImage] = useState(false);
   const [answerSheetImages, setAnswerSheetImages] = useState([]);
   const [selectedImagePreview, setSelectedImagePreview] = useState(null);
+  const sendImagesCache = React.useRef(null);
   const [showExportDialog, setShowExportDialog] = useState(false);
   const [deletingSubmission, setDeletingSubmission] = useState(null);
 
@@ -102,7 +103,10 @@ export function GradeExamsPage() {
         reviewNotes: sub.reviewNotes,
         questionWeights,
         applicationId: sub.applicationId,
-        correctionType: sub.correctionType
+        correctionType: sub.correctionType,
+        imageId: sub.imageId,
+        imageFilename: sub.imageFilename,
+        imageThumb: sub.imageThumb
       };
     });
   };
@@ -475,16 +479,42 @@ export function GradeExamsPage() {
       return;
     }
     
+    // Cartão enviado pela página "Enviar Imagens" (miniatura guardada junto com a correção)
+    const fromSendImages = submission.imageThumb
+      ? [{
+          id: `send-${submission.imageId}`,
+          signedUrl: submission.imageThumb,
+          fileName: submission.imageFilename || 'Cartão resposta',
+          fromSendImages: true,
+          fullImageId: submission.imageId
+        }]
+      : [];
+
     try {
       const response = await apiService.getAnswerSheets(submission.id);
-      if (response.success && response.images) {
-        setAnswerSheetImages(response.images);
-      } else {
-        setAnswerSheetImages([]);
-      }
+      const stored = response.success && response.images ? response.images : [];
+      setAnswerSheetImages([...fromSendImages, ...stored]);
     } catch (error) {
       console.error('Error loading answer sheets:', error);
-      setAnswerSheetImages([]);
+      setAnswerSheetImages(fromSendImages);
+    }
+  };
+
+  // Abre a imagem em tamanho maior: para cartões vindos de "Enviar Imagens", busca a foto original
+  // (carrega a lista uma vez e guarda em cache) e, se não achar, usa a miniatura.
+  const handlePreviewImage = async (image) => {
+    setSelectedImagePreview(image.signedUrl);
+    if (!image.fromSendImages || !image.fullImageId) return;
+
+    try {
+      if (!sendImagesCache.current) {
+        const response = await apiService.getImages();
+        sendImagesCache.current = response?.images || [];
+      }
+      const full = sendImagesCache.current.find((img) => img.id === image.fullImageId);
+      if (full?.data) setSelectedImagePreview(full.data);
+    } catch (error) {
+      console.error('Erro ao carregar a imagem original:', error);
     }
   };
 
@@ -538,6 +568,10 @@ export function GradeExamsPage() {
   };
 
   const handleDeleteAnswerSheet = async (imageId) => {
+    if (String(imageId).startsWith('send-')) {
+      toast.info('Este cartão veio da página Enviar Imagens; para excluir, use aquela página.');
+      return;
+    }
     if (!window.confirm('Tem certeza que deseja excluir esta imagem?')) return;
     try {
       const response = await apiService.deleteAnswerSheet(imageId);
@@ -1404,7 +1438,7 @@ export function GradeExamsPage() {
                           <div key={image.id} className="relative group">
                             <div 
                               className="aspect-square rounded-lg overflow-hidden border-2 cursor-pointer"
-                              onClick={() => setSelectedImagePreview(image.signedUrl)}
+                              onClick={() => handlePreviewImage(image)}
                             >
                               <img 
                                 src={image.signedUrl} 
@@ -1413,7 +1447,7 @@ export function GradeExamsPage() {
                               />
                             </div>
                             <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center gap-2">
-                              <Button variant="secondary" size="sm" onClick={() => setSelectedImagePreview(image.signedUrl)}>
+                              <Button variant="secondary" size="sm" onClick={() => handlePreviewImage(image)}>
                                 <ZoomIn className="w-4 h-4" />
                               </Button>
                               <Button

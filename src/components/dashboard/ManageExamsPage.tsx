@@ -385,7 +385,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                 <div class="qr-section">
                   <div class="qr-title">Código do Aluno</div>
                   <div class="qr-code">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=60x60&data=${encodeURIComponent(studentQRCode)}" alt="QR Code" style="width: 100%; height: 100%;" />
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&margin=0&data=${encodeURIComponent(studentQRCode)}" alt="QR Code" style="width: 100%; height: 100%;" />
                   </div>
                   <div class="qr-label">ID: ${studentId.substring(0, 8)}...</div>
                 </div>
@@ -575,7 +575,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               font-weight: 700;
             }
             .qr-section {
-              width: 90px;
+              width: 118px;
               text-align: center;
               padding: 6px;
               border: 1.5px solid #1e40af;
@@ -590,8 +590,8 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               text-transform: uppercase;
             }
             .qr-code {
-              width: 60px;
-              height: 60px;
+              width: 86px;
+              height: 86px;
               margin: 4px auto;
               background: white;
               border: 1px solid #cbd5e1;

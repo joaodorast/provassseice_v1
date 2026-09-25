@@ -17,8 +17,11 @@ import {
   Edit,
   Search,
   Filter,
-  AlertCircle
+  AlertCircle,
+  Eye,
+  Image as ImageIcon
 } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { toast } from 'sonner@2.0.3';
 import { apiService } from '../../utils/api';
 
@@ -48,10 +51,40 @@ export function ManageStudentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterClass, setFilterClass] = useState('all');
   const [loading, setLoading] = useState(false);
+  // Cartões-resposta enviados na página "Enviar Imagens", agrupados por aluno
+  const [studentImages, setStudentImages] = useState<Record<string, any[]>>({});
+  const [viewingCardsOf, setViewingCardsOf] = useState<Student | null>(null);
 
   useEffect(() => {
     loadStudents();
+    loadStudentImages();
   }, []);
+
+  // Carrega em segundo plano os cartões enviados (a lista de alunos aparece sem esperar as fotos)
+  const loadStudentImages = async () => {
+    try {
+      const response = await apiService.getImages();
+      const grouped: Record<string, any[]> = {};
+      (response?.images || []).forEach((image: any) => {
+        if (!image?.studentId || image.studentId === 'batch') return;
+        (grouped[image.studentId] = grouped[image.studentId] || []).push(image);
+      });
+      setStudentImages(grouped);
+    } catch (error) {
+      console.error('Error loading student images:', error);
+    }
+  };
+
+  const cardsOf = (student: Student): any[] => studentImages[student.id] || [];
+
+  const openImageFullSize = async (dataUrl: string) => {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      window.open(URL.createObjectURL(blob), '_blank');
+    } catch (error) {
+      toast.error('Não foi possível abrir a imagem em tamanho real');
+    }
+  };
 
   const loadStudents = async () => {
     try {
@@ -489,6 +522,7 @@ export function ManageStudentsPage() {
                   <TableHead>Turno</TableHead>
                   <TableHead>Matrícula</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Cartão resposta</TableHead>
                   <TableHead className="text-right">Ações</TableHead>
                 </TableRow>
               </TableHeader>
@@ -506,6 +540,29 @@ export function ManageStudentsPage() {
                       <Badge variant={student.status === 'active' ? 'default' : 'secondary'}>
                         {student.status === 'active' ? 'Ativo' : 'Inativo'}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      {cardsOf(student).length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() => setViewingCardsOf(student)}
+                          title="Ver o cartão resposta enviado"
+                          className="flex items-center gap-2 rounded-md hover:bg-slate-100 p-1 transition"
+                        >
+                          {cardsOf(student)[0].mimeType?.startsWith('image/') ? (
+                            <img
+                              src={cardsOf(student)[0].data}
+                              alt="Cartão resposta"
+                              className="w-8 h-10 rounded border object-cover object-top"
+                            />
+                          ) : (
+                            <ImageIcon className="w-5 h-5 text-slate-400" />
+                          )}
+                          <span className="text-xs text-slate-600">{cardsOf(student).length} cartão(ões)</span>
+                        </button>
+                      ) : (
+                        <span className="text-xs text-slate-400">—</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex justify-end space-x-2">
@@ -546,6 +603,49 @@ export function ManageStudentsPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* Cartões resposta enviados de um aluno */}
+      <Dialog open={!!viewingCardsOf} onOpenChange={(open) => { if (!open) setViewingCardsOf(null); }}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle>Cartão resposta - {viewingCardsOf?.name}</DialogTitle>
+            <DialogDescription>
+              Cartões enviados para este aluno na página Enviar Imagens.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex-1 min-h-0 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-4 pr-1">
+            {(viewingCardsOf ? cardsOf(viewingCardsOf) : []).map((image: any) => (
+              <div key={image.id} className="rounded-lg border p-3 space-y-2 bg-white">
+                <div className="rounded-md border bg-slate-50 overflow-hidden max-h-[46vh] overflow-y-auto">
+                  {image.mimeType?.startsWith('image/') ? (
+                    <img src={image.data} alt={image.filename} className="w-full h-auto block" />
+                  ) : (
+                    <p className="p-6 text-sm text-slate-500 text-center">Pré-visualização indisponível (PDF)</p>
+                  )}
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">{image.filename}</p>
+                    <p className="text-xs text-slate-500 truncate">{image.examTitle}</p>
+                  </div>
+                  <Badge variant={image.status === 'Processada' ? 'default' : 'secondary'}>
+                    {image.status === 'Processada' ? 'Corrigido' : 'Aguardando'}
+                  </Badge>
+                </div>
+                {image.data && (
+                  <Button variant="outline" size="sm" className="w-full" onClick={() => openImageFullSize(image.data)}>
+                    <Eye className="w-4 h-4 mr-2" />
+                    Abrir em tamanho real
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          <div className="flex-shrink-0 flex justify-end pt-3 border-t">
+            <Button onClick={() => setViewingCardsOf(null)}>Fechar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

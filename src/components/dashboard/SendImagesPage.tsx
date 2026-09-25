@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 import { readAnswerSheet } from '../../utils/omr';
+import { readCardIdentity } from '../../utils/cardIdentity';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
@@ -47,6 +48,8 @@ export function SendImagesPage() {
   const [isBatchAiRunning, setIsBatchAiRunning] = useState(false);
   const [batchAiProgress, setBatchAiProgress] = useState({ current: 0, total: 0 });
   const [batchAiErrors, setBatchAiErrors] = useState([]);
+  const [batchAiAutoIds, setBatchAiAutoIds] = useState<Record<string, string>>({});
+  const [isIdentifyingQr, setIsIdentifyingQr] = useState(false);
   const [previewImageId, setPreviewImageId] = useState<string | null>(null);
   const [previewFit, setPreviewFit] = useState(true);
   const [omrPasses, setOmrPasses] = useState(1);
@@ -82,7 +85,7 @@ export function SendImagesPage() {
     if (selectedExam) {
       const exam = exams.find(e => e.id === selectedExam);
       if (exam && exam.selectedClass) {
-        const filteredStudents = students.filter(s => s.class === exam.selectedClass);
+        const filteredStudents = students.filter(s => (s.class || s.className) === exam.selectedClass);
         setAvailableStudents(filteredStudents);
         console.log(`✓ Filtered ${filteredStudents.length} students from class: ${exam.selectedClass}`);
       } else {
@@ -234,9 +237,21 @@ export function SendImagesPage() {
   // Cada imagem de lote é UMA folha de resposta real de UM aluno. A IA não consegue
   // adivinhar de quem é a folha, então pedimos ao professor para indicar o aluno
   // antes de rodar a detecção - evitando aplicar o mesmo resultado para toda a turma.
-  const handleAutoProcessBatch = (image) => {
+  const handleAutoProcessBatch = async (image) => {
     if (!image.isBatch) {
       toast.error('Esta função é apenas para imagens em lote');
+      return;
+    }
+
+    if (image.autoIdentified && image.studentId && image.studentId !== 'batch') {
+      await handleAutoProcessIndividual(image, 'auto-image-batch');
+      return;
+    }
+
+    const identified = await identifyImageByQr(image);
+    if (identified) {
+      toast.success(`Cartão identificado pelo QR Code: ${identified.studentName}`);
+      await handleAutoProcessIndividual(identified, 'auto-image-batch');
       return;
     }
 
@@ -275,6 +290,29 @@ export function SendImagesPage() {
     await handleAutoProcessIndividual(imageForStudent, 'auto-image-batch');
     setBatchAiTargetImage(null);
     setBatchAiSelectedStudent('');
+  };
+
+  // Miniatura do cartão guardada junto com a correção, para a página Correção mostrar a imagem sem carregar todas as fotos.
+  const makeThumbnail = (dataUrl, maxWidth = 640, quality = 0.72) => {
+    if (!dataUrl?.startsWith('data:image/')) return Promise.resolve(null);
+
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const scale = Math.min(1, maxWidth / img.width);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * scale);
+        canvas.height = Math.round(img.height * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(null);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = () => resolve(null);
+      img.src = dataUrl;
+    });
   };
 
   // Núcleo da correção por IA para UMA imagem já associada a UM aluno. Não mexe em
@@ -344,8 +382,12 @@ export function SendImagesPage() {
       percentage: Math.round((data.correct / data.total) * 100)
     }));
 
+    const imageThumb = await makeThumbnail(image.data);
+
     const submissionData = {
       imageId: image.id,
+      imageFilename: image.filename,
+      imageThumb,
       optionsPerQuestion,
       examId: image.examId,
       examTitle: examData.title,
@@ -572,14 +614,48 @@ export function SendImagesPage() {
   const getStudentsForImage = (image) => {
     const exam = exams.find(e => e.id === image.examId);
     if (exam && exam.selectedClass) {
-      return students.filter(s => s.class === exam.selectedClass);
+      return students.filter(s => (s.class || s.className) === exam.selectedClass);
     }
     return students;
   };
 
+  // Opções do seletor de aluno de um cartão; garante que o aluno já atribuído (ex: pelo QR Code) sempre apareça.
+  const studentOptionsFor = (image, assignedId) => {
+    const options = getStudentsForImage(image);
+    if (assignedId && !options.some((s) => s.id === assignedId)) {
+      const assigned = students.find((s) => s.id === assignedId);
+      if (assigned) return [assigned, ...options];
+    }
+    return options;
+  };
+
+  // Acha o aluno do sistema a partir do id gravado no QR Code do cartão.
+  const findStudentByCardId = (cardStudentId) =>
+    students.find((s) => s.id === cardStudentId || s.studentId === cardStudentId);
+
+  const studentFieldsForImage = (student) => ({
+    studentId: student.id,
+    studentName: student.name,
+    studentEmail: student.email || '',
+    studentClass: student.class || student.className || '',
+    studentGrade: student.grade || ''
+  });
+
+  // Lê o QR Code de um cartão já enviado, associa o aluno e grava isso na própria imagem.
+  const identifyImageByQr = async (image) => {
+    const identity = await readCardIdentity(image.data);
+    const student = identity ? findStudentByCardId(identity.studentId) : null;
+    if (!student) return null;
+
+    const fields = { ...studentFieldsForImage(student), autoIdentified: true };
+    setImages((prev) => prev.map((i) => (i.id === image.id ? { ...i, ...fields } : i)));
+    apiService.updateImageStatus(image.id, fields).catch((error) => console.error('Erro ao gravar aluno identificado:', error));
+    return { ...image, ...fields };
+  };
+
   // Abre o diálogo de atribuição de alunos para TODOS os cartões de lote ainda não
   // processados, permitindo ver e conferir cada imagem antes de corrigir tudo de uma vez.
-  const openBatchAiAssignDialog = () => {
+  const openBatchAiAssignDialog = async () => {
     const pending = images.filter((img) => img.isBatch && img.status !== 'Processada');
 
     if (pending.length === 0) {
@@ -587,10 +663,35 @@ export function SendImagesPage() {
       return;
     }
 
+    // Cartões já identificados no upload vêm com o aluno preenchido
+    const assignments = {};
+    const autoIds = {};
+    pending.forEach((img) => {
+      if (img.autoIdentified && img.studentId && img.studentId !== 'batch' && students.some((s) => s.id === img.studentId)) {
+        assignments[img.id] = img.studentId;
+        autoIds[img.id] = img.studentId;
+      }
+    });
+
     setBatchAiQueue(pending);
-    setBatchAiAssignments({});
+    setBatchAiAssignments(assignments);
+    setBatchAiAutoIds(autoIds);
     setBatchAiErrors([]);
     setShowBatchAiAssignDialog(true);
+
+    // Cartões enviados antes (sem identificação): tenta ler o QR Code agora
+    const rest = pending.filter((img) => !autoIds[img.id]);
+    if (rest.length > 0) {
+      setIsIdentifyingQr(true);
+      for (const img of rest) {
+        const identified = await identifyImageByQr(img);
+        if (identified) {
+          setBatchAiAssignments((prev) => ({ ...prev, [img.id]: identified.studentId }));
+          setBatchAiAutoIds((prev) => ({ ...prev, [img.id]: identified.studentId }));
+        }
+      }
+      setIsIdentifyingQr(false);
+    }
   };
 
   const batchAiAssignmentIsComplete = () => {
@@ -707,6 +808,7 @@ export function SendImagesPage() {
 
     try {
       if (uploadMode === 'batch') {
+        let identifiedCount = 0;
         for (let i = 0; i < files.length; i++) {
           const file = files[i];
           setUploadProgress(((i + 1) / files.length) * 100);
@@ -718,15 +820,30 @@ export function SendImagesPage() {
               try {
                 const base64Data = e.target?.result;
                 
+                // O cartão do sistema traz um QR Code com o aluno e a prova: usa isso para já identificar de quem é
+                const identity = await readCardIdentity(base64Data as string);
+                const matchedStudent = identity ? findStudentByCardId(identity.studentId) : null;
+                const cardExam = identity?.examId ? exams.find((x) => x.id === identity.examId) : null;
+                const targetExam = cardExam && validateExamStructure(cardExam).valid ? cardExam : selectedExamData;
+                if (matchedStudent) identifiedCount++;
+                if (targetExam.id !== selectedExam) {
+                  toast.info(`${file.name}: o cartão pertence à prova "${targetExam.title}" e foi associado a ela.`);
+                }
+
                 const imageData = {
                   filename: file.name,
-                  examId: selectedExam,
-                  examTitle: selectedExamData.title,
-                  studentId: 'batch',
-                  studentName: 'Lote - Todos os Alunos',
-                  studentEmail: '',
-                  studentClass: selectedExamData.selectedClass || '',
-                  studentGrade: selectedExamData.grade || '',
+                  examId: targetExam.id,
+                  examTitle: targetExam.title,
+                  ...(matchedStudent
+                    ? studentFieldsForImage(matchedStudent)
+                    : {
+                        studentId: 'batch',
+                        studentName: 'Lote - Todos os Alunos',
+                        studentEmail: '',
+                        studentClass: targetExam.selectedClass || '',
+                        studentGrade: targetExam.grade || ''
+                      }),
+                  autoIdentified: !!matchedStudent,
                   size: (file.size / 1024 / 1024).toFixed(1) + ' MB',
                   mimeType: file.type,
                   data: base64Data,
@@ -734,7 +851,7 @@ export function SendImagesPage() {
                   status: 'Aguardando Processamento',
                   uploadedAt: new Date().toLocaleString('pt-BR'),
                   isBatch: true,
-                  totalQuestions: selectedExamData.questions.length
+                  totalQuestions: targetExam.questions.length
                 };
 
                 console.log('📤 Uploading batch image:', imageData.filename);
@@ -764,7 +881,10 @@ export function SendImagesPage() {
           });
         }
 
-        toast.success(`✅ ${files.length} arquivo(s) enviado(s) em modo lote!`);
+        toast.success(`✅ ${files.length} arquivo(s) enviado(s)! ${identifiedCount} de ${files.length} identificado(s) automaticamente pelo QR Code.`);
+        if (identifiedCount < files.length) {
+          toast.info('Cartões sem QR Code legível: escolha o aluno na hora de corrigir.', { duration: 6000 });
+        }
         await reloadOnlyImages();
 
       } else {
@@ -1625,6 +1745,9 @@ export function SendImagesPage() {
                               Lote
                             </Badge>
                           )}
+                          {image.autoIdentified && (
+                            <Badge className="bg-green-100 text-green-800">QR identificado</Badge>
+                          )}
                           <Badge className={getStatusColor(image.status)}>
                             {image.status}
                           </Badge>
@@ -2374,7 +2497,7 @@ export function SendImagesPage() {
                           <SelectValue placeholder="Selecione o aluno" />
                         </SelectTrigger>
                         <SelectContent>
-                          {getStudentsForImage(image).map((student) => (
+                          {studentOptionsFor(image, assignedId).map((student) => (
                             <SelectItem key={student.id} value={student.id}>
                               {student.name}{student.class ? ` — ${student.class}` : ''}
                             </SelectItem>
@@ -2383,6 +2506,15 @@ export function SendImagesPage() {
                       </Select>
                       {isDuplicate && (
                         <p className="text-xs text-red-600 mt-1">Aluno já usado em outro cartão</p>
+                      )}
+                      {!isDuplicate && assignedId && batchAiAutoIds[image.id] === assignedId && (
+                        <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                          <CheckCircle className="w-3 h-3" />
+                          Identificado pelo QR Code
+                        </p>
+                      )}
+                      {!assignedId && isIdentifyingQr && (
+                        <p className="text-xs text-slate-500 mt-1">Lendo o QR Code...</p>
                       )}
                     </div>
                   </CardContent>
