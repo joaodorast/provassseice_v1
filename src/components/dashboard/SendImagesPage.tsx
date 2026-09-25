@@ -13,6 +13,7 @@ import {
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+import { readAnswerSheet } from '../../utils/omr';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
@@ -46,10 +47,36 @@ export function SendImagesPage() {
   const [isBatchAiRunning, setIsBatchAiRunning] = useState(false);
   const [batchAiProgress, setBatchAiProgress] = useState({ current: 0, total: 0 });
   const [batchAiErrors, setBatchAiErrors] = useState([]);
+  const [previewImageId, setPreviewImageId] = useState<string | null>(null);
+  const [previewFit, setPreviewFit] = useState(true);
+  const [omrPasses, setOmrPasses] = useState(2);
+  const [readProgress, setReadProgress] = useState(0);
+  const [reviewSubmission, setReviewSubmission] = useState(null);
+  const [reviewFilter, setReviewFilter] = useState('all');
+  const [reviewHasChanges, setReviewHasChanges] = useState(false);
+  const [isSavingReview, setIsSavingReview] = useState(false);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Setas do teclado navegam entre as imagens anexadas no visualizador
+  useEffect(() => {
+    if (!previewImageId) return;
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+      setPreviewImageId((current) => {
+        const index = images.findIndex((i) => i.id === current);
+        if (index < 0 || images.length === 0) return current;
+        const next = event.key === 'ArrowRight' ? (index + 1) % images.length : (index - 1 + images.length) % images.length;
+        return images[next].id;
+      });
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [previewImageId, images]);
 
   useEffect(() => {
     if (selectedExam) {
@@ -170,59 +197,39 @@ export function SendImagesPage() {
     return { valid: true };
   };
 
-  // Reduz o tamanho da imagem antes de enviar para a IA (evita payloads enormes e erros).
-  // maxDimension/quality baixos demais fazem a IA ler bolhas erradas em cartões com muitas
-  // questões (ex: 50-60) de forma inconsistente entre chamadas - testado e confirmado:
-  // 1600px/0.85 gerava respostas diferentes a cada chamada na mesma imagem; a resolução
-  // original (sem cortar) deu resultado idêntico e 100% correto em chamadas repetidas.
-  const resizeImageForAI = (dataUrl, maxDimension = 2400, quality = 0.95) => {
-    if (!dataUrl?.startsWith('data:image/')) {
-      // Não é uma imagem (ex: PDF) - envia como está
-      return Promise.resolve(dataUrl);
-    }
-
-    return new Promise((resolve) => {
-      const img = new window.Image();
-      img.onload = () => {
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height / width) * maxDimension);
-            width = maxDimension;
-          } else {
-            width = Math.round((width / height) * maxDimension);
-            height = maxDimension;
-          }
-        }
-
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.onerror = () => resolve(dataUrl); // Se falhar, envia a imagem original
-      img.src = dataUrl;
-    });
-  };
-
   // Limita o tamanho de mensagens de erro para não exibir textos enormes/ilegíveis
   const friendlyErrorMessage = (error, fallback = 'Erro desconhecido') => {
     const message = (error?.message || fallback).toString();
     return message.length > 200 ? message.slice(0, 200) + '…' : message;
   };
 
-  // Detecta respostas marcadas na folha de respostas usando IA (Claude)
+  // Detecta as respostas marcadas na folha usando IA (Claude). Imagens são lidas em faixas, mais de
+  // uma vez, e tudo que não for uma marcação clara e confirmada volta sinalizado para revisão
+  // (ver utils/omr.ts). Retorna { answers, flags } - flags: nº da questão -> motivo da revisão.
   const detectAnswersFromImage = async (imageData, totalQuestions, optionsPerQuestion = 5) => {
-    const resizedImage = await resizeImageForAI(imageData);
-    const response = await apiService.detectAnswersAI(resizedImage, totalQuestions, optionsPerQuestion);
+    if (!imageData?.startsWith('data:image/')) {
+      // PDF: não dá para recortar no navegador; usa a leitura antiga e manda TUDO para revisão
+      const response = await apiService.detectAnswersAI(imageData, totalQuestions, optionsPerQuestion);
 
-    if (!response || response.error || !Array.isArray(response.answers)) {
-      throw new Error(friendlyErrorMessage({ message: response?.error }, 'Falha ao detectar respostas com IA'));
+      if (!response || response.error || !Array.isArray(response.answers)) {
+        throw new Error(friendlyErrorMessage({ message: response?.error }, 'Falha ao detectar respostas com IA'));
+      }
+
+      const flags = {};
+      for (let q = 1; q <= totalQuestions; q++) flags[q] = 'leitura de PDF (confira na imagem)';
+      return { answers: response.answers, flags };
     }
 
-    return response.answers;
+    setReadProgress(0);
+    return readAnswerSheet(imageData, {
+      totalQuestions,
+      optionsPerQuestion,
+      passes: omrPasses,
+      onProgress: (fraction) => {
+        setReadProgress(fraction);
+        setAutoProcessingProgress(Math.round(5 + fraction * 90));
+      }
+    });
   };
 
   // Cada imagem de lote é UMA folha de resposta real de UM aluno. A IA não consegue
@@ -285,24 +292,35 @@ export function SendImagesPage() {
       throw new Error(validation.error);
     }
 
-    const detectedAnswers = await detectAnswersFromImage(
+    const optionsPerQuestion = Math.max(...examData.questions.map((q) => (q.options?.length || 5)));
+
+    const { answers: detectedAnswers, flags } = await detectAnswersFromImage(
       image.data,
       examData.questions.length,
-      Math.max(...examData.questions.map((q) => (q.options?.length || 5)))
+      optionsPerQuestion
     );
+    const reviewCount = Object.keys(flags).length;
 
     let correctCount = 0;
     const results = examData.questions.map((question, index) => {
       const studentAnswer = detectedAnswers[index];
+      const reviewReason = flags[index + 1] || null;
       const isCorrect = studentAnswer === question.correctAnswer;
       if (isCorrect) correctCount++;
+
+      let answerLabel = 'Não detectada';
+      if (studentAnswer >= 0) answerLabel = String.fromCharCode(65 + studentAnswer);
+      else if (reviewReason === 'dupla marcação') answerLabel = 'Dupla marcação';
+      else if (reviewReason === 'em branco') answerLabel = 'Em branco';
 
       return {
         question: question.question,
         subject: question.subject,
-        studentAnswer: studentAnswer >= 0 ? String.fromCharCode(65 + studentAnswer) : 'Não detectada',
+        studentAnswer: answerLabel,
         correctAnswer: String.fromCharCode(65 + question.correctAnswer),
-        isCorrect
+        isCorrect,
+        needsReview: !!reviewReason,
+        reviewReason
       };
     });
 
@@ -328,6 +346,8 @@ export function SendImagesPage() {
     }));
 
     const submissionData = {
+      imageId: image.id,
+      optionsPerQuestion,
       examId: image.examId,
       examTitle: examData.title,
       studentId: image.studentId,
@@ -344,7 +364,11 @@ export function SendImagesPage() {
       timeSpent: 0,
       results,
       submittedAt: new Date().toISOString(),
-      gradingStatus: 'graded',
+      // Enquanto houver questões sinalizadas, a nota é provisória e a correção fica aguardando conferência
+      gradingStatus: reviewCount > 0 ? 'pending-review' : 'graded',
+      reviewCount,
+      // Muitas questões duvidosas = foto/scan ruim; nesse caso pode haver marcas fracas que a IA nem viu
+      lowQuality: reviewCount / examData.questions.length >= 0.1,
       correctionType,
       questionWeights: examData.questions.map((q, idx) => ({
         questionIndex: idx,
@@ -359,13 +383,164 @@ export function SendImagesPage() {
       throw new Error(submissionResponse?.error || 'Erro ao salvar correção');
     }
 
+    const savedSubmissionId = submissionResponse.submission?.id;
+
+    // Grava na própria imagem qual aluno/correção ela gerou, para o card mostrar o aluno certo
+    // e para ser possível reabrir e conferir a correção depois.
     await apiService.updateImageStatus(image.id, {
       status: 'Processada',
       correctionType,
-      processedAt: new Date().toISOString()
+      processedAt: new Date().toISOString(),
+      submissionId: savedSubmissionId,
+      studentId: image.studentId,
+      studentName: image.studentName,
+      studentClass: image.studentClass
     });
 
-    return submissionData;
+    return { ...submissionData, id: savedSubmissionId };
+  };
+
+  // Recalcula nota/acertos/desempenho por matéria de uma correção quando o professor
+  // ajusta manualmente alguma resposta na conferência. Usa o gabarito salvo na própria
+  // correção (correctAnswers), sem depender de a prova ainda existir/estar carregada.
+  const recomputeSubmission = (sub, newAnswers) => {
+    const correctAnswers = sub.correctAnswers || [];
+    let correctCount = 0;
+    const subjectMap = {};
+
+    const results = (sub.results || []).map((r, index) => {
+      const answer = newAnswers[index];
+      const correct = correctAnswers[index];
+      const isCorrect = answer === correct;
+      if (isCorrect) correctCount++;
+
+      const subject = r.subject || 'Geral';
+      if (!subjectMap[subject]) subjectMap[subject] = { total: 0, correct: 0 };
+      subjectMap[subject].total++;
+      if (isCorrect) subjectMap[subject].correct++;
+
+      return {
+        ...r,
+        // Enquanto a linha ainda está sinalizada mantém o rótulo original (ex: "Dupla marcação")
+        studentAnswer: answer >= 0 ? String.fromCharCode(65 + answer) : (r.needsReview ? r.studentAnswer : 'Em branco'),
+        isCorrect
+      };
+    });
+
+    const total = results.length || 1;
+    const reviewCount = results.filter((r) => r.needsReview).length;
+
+    return {
+      ...sub,
+      answers: newAnswers,
+      results,
+      reviewCount,
+      gradingStatus: reviewCount > 0 ? 'pending-review' : 'graded',
+      score: correctCount,
+      percentage: Math.round((correctCount / total) * 100),
+      subjectPerformances: Object.entries(subjectMap).map(([subject, d]: [string, any]) => ({
+        subject,
+        totalQuestions: d.total,
+        correctAnswers: d.correct,
+        percentage: Math.round((d.correct / d.total) * 100)
+      }))
+    };
+  };
+
+  const openReview = (sub) => {
+    setReviewSubmission(sub);
+    setReviewFilter('all');
+    setReviewHasChanges(false);
+  };
+
+  const closeReview = () => {
+    if (reviewHasChanges && !confirm('Há alterações não salvas nesta correção. Fechar mesmo assim?')) {
+      return;
+    }
+    setReviewSubmission(null);
+    setReviewHasChanges(false);
+  };
+
+  // Marcar uma alternativa (ou clicar na que já está marcada) = o professor conferiu essa questão,
+  // então ela deixa de estar sinalizada para revisão.
+  const handleReviewChangeAnswer = (questionIndex, newAnswer) => {
+    setReviewSubmission((prev) => {
+      if (!prev) return prev;
+      const answers = [...(prev.answers || [])];
+      answers[questionIndex] = newAnswer;
+      const results = (prev.results || []).map((r, idx) =>
+        idx === questionIndex ? { ...r, needsReview: false, reviewReason: null, reviewed: true } : r
+      );
+      return recomputeSubmission({ ...prev, results }, answers);
+    });
+    setReviewHasChanges(true);
+  };
+
+  const handleSaveReview = async () => {
+    if (!reviewSubmission?.id) {
+      toast.error('Não foi possível salvar: esta correção não tem identificador no sistema');
+      return;
+    }
+
+    setIsSavingReview(true);
+    try {
+      const { id, answers, results, score, percentage, subjectPerformances, reviewCount, gradingStatus } = reviewSubmission;
+      const response = await apiService.bulkUpdateSubmissions([
+        {
+          id,
+          answers,
+          results,
+          score,
+          percentage,
+          subjectPerformances,
+          reviewCount,
+          gradingStatus,
+          manuallyReviewed: true,
+          reviewedAt: new Date().toISOString()
+        }
+      ]);
+
+      if (!response || response.error || response.updated !== 1) {
+        throw new Error(response?.error || response?.errors?.[0]?.error || 'Falha ao salvar alterações');
+      }
+
+      setCompletedCorrections((prev) => prev.map((c) => (c.id === id ? reviewSubmission : c)));
+      setReviewHasChanges(false);
+      toast.success('Correção atualizada com sucesso!');
+    } catch (error) {
+      console.error('Erro ao salvar conferência:', error);
+      toast.error('Erro ao salvar: ' + friendlyErrorMessage(error));
+    } finally {
+      setIsSavingReview(false);
+    }
+  };
+
+  // Reabre a correção já salva de um cartão (ex: card na lista de imagens processadas)
+  const handleViewCorrection = async (image) => {
+    try {
+      const response = await apiService.getSubmissions();
+      const all = response?.submissions || [];
+      const sub = all.find((s) => s.id === image.submissionId) || all.find((s) => s.imageId === image.id);
+
+      if (!sub) {
+        toast.error('Não encontrei a correção deste cartão (ela pode ter sido feita antes deste recurso existir).');
+        return;
+      }
+
+      openReview(sub);
+    } catch (error) {
+      console.error('Erro ao carregar correção:', error);
+      toast.error('Erro ao carregar a correção');
+    }
+  };
+
+  const openImageFullSize = async (dataUrl) => {
+    try {
+      const blob = await (await fetch(dataUrl)).blob();
+      window.open(URL.createObjectURL(blob), '_blank');
+    } catch (error) {
+      toast.error('Não foi possível abrir a imagem em tamanho real');
+    }
   };
 
   // Correção automática por IA para uma imagem individual (um único aluno)
@@ -385,6 +560,9 @@ export function SendImagesPage() {
         `✅ ${submissionData.studentName}: ${submissionData.percentage}% (${submissionData.score}/${submissionData.totalQuestions} acertos)`,
         { duration: 5000 }
       );
+
+      // Abre direto a conferência para o professor validar a leitura da IA
+      openReview(submissionData);
 
       await reloadOnlyImages();
     } catch (error) {
@@ -834,7 +1012,10 @@ export function SendImagesPage() {
       if (submissionResponse && !submissionResponse.error) {
         console.log(`✅ Submission created for ${currentStudent.studentName}`);
         
-        setCompletedCorrections(prev => [...prev, submissionData]);
+        setCompletedCorrections(prev => [
+          ...prev,
+          { ...submissionData, id: submissionResponse.submission?.id }
+        ]);
         
         toast.success(
           `✅ ${currentStudent.studentName}: ${score}% (${correctCount}/${examData.questions.length})`,
@@ -1101,6 +1282,20 @@ export function SendImagesPage() {
     
     return Array.from(subjects);
   };
+
+  const previewIndex = previewImageId ? images.findIndex((i) => i.id === previewImageId) : -1;
+  const previewImg = previewIndex >= 0 ? images[previewIndex] : null;
+
+  const reviewImage = reviewSubmission
+    ? images.find((i) => i.id === reviewSubmission.imageId || (reviewSubmission.id && i.submissionId === reviewSubmission.id))
+    : null;
+  const reviewResults = reviewSubmission?.results || [];
+  const reviewAnswers = reviewSubmission?.answers || [];
+  const reviewKey = reviewSubmission?.correctAnswers || [];
+  const reviewOptionsCount = reviewSubmission?.optionsPerQuestion || 5;
+  const reviewPending = reviewResults.filter((r) => r.needsReview).length;
+  const reviewCorrect = reviewResults.filter((r) => r.isCorrect && !r.needsReview).length;
+  const reviewWrong = reviewResults.length - reviewCorrect - reviewPending;
 
   if (loading) {
     return (
@@ -1377,16 +1572,27 @@ export function SendImagesPage() {
               <FileText className="w-5 h-5 mr-2" />
               Cartões Resposta Enviados ({images.length})
             </div>
-            {images.some((img) => img.isBatch && img.status !== 'Processada') && (
-              <Button
-                size="sm"
-                onClick={openBatchAiAssignDialog}
-                className="bg-teal-600 hover:bg-teal-700 text-white"
-              >
-                <Zap className="w-4 h-4 mr-1" />
-                Corrigir Lote Completo com IA
-              </Button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={String(omrPasses)} onValueChange={(value) => setOmrPasses(parseInt(value, 10))}>
+                <SelectTrigger className="h-9 w-[230px] text-sm" aria-label="Modo de leitura da IA">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="2">Precisão máxima (2 leituras)</SelectItem>
+                  <SelectItem value="1">Econômico (1 leitura)</SelectItem>
+                </SelectContent>
+              </Select>
+              {images.some((img) => img.isBatch && img.status !== 'Processada') && (
+                <Button
+                  size="sm"
+                  onClick={openBatchAiAssignDialog}
+                  className="bg-teal-600 hover:bg-teal-700 text-white"
+                >
+                  <Zap className="w-4 h-4 mr-1" />
+                  Corrigir Lote Completo com IA
+                </Button>
+              )}
+            </div>
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -1394,15 +1600,29 @@ export function SendImagesPage() {
             {images.map(image => (
               <Card key={image.id} className="border-2 hover:shadow-md transition-shadow">
                 <CardContent className="p-4">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center space-x-4 flex-1">
-                      <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        {image.isBatch ? (
-                          <Users className="w-6 h-6 text-slate-600" />
-                        ) : (
-                          <ImageIcon className="w-6 h-6 text-slate-600" />
-                        )}
-                      </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex items-center space-x-4 flex-1 min-w-[260px]">
+                      {image.mimeType?.startsWith('image/') && image.data ? (
+                        <button
+                          type="button"
+                          onClick={() => setPreviewImageId(image.id)}
+                          title="Ver a imagem anexada"
+                          className="relative group w-14 h-[72px] rounded-lg overflow-hidden border bg-slate-100 flex-shrink-0 hover:ring-2 hover:ring-amber-400 transition"
+                        >
+                          <img src={image.data} alt={image.filename} className="w-full h-full object-cover object-top" />
+                          <span className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition flex items-center justify-center">
+                            <Eye className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition" />
+                          </span>
+                        </button>
+                      ) : (
+                        <div className="w-12 h-12 bg-slate-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                          {image.isBatch ? (
+                            <Users className="w-6 h-6 text-slate-600" />
+                          ) : (
+                            <ImageIcon className="w-6 h-6 text-slate-600" />
+                          )}
+                        </div>
+                      )}
                       
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-1">
@@ -1428,12 +1648,41 @@ export function SendImagesPage() {
                       </div>
                     </div>
                     
-                    <div className="flex items-center space-x-2 ml-4">
+                    <div className="flex flex-wrap items-center gap-2 sm:ml-4">
                       {getStatusIcon(image.status)}
-                      
+
                       <Button
                         size="sm"
-                        onClick={() => image.isBatch ? handleAutoProcessBatch(image) : handleAutoProcessIndividual(image)}
+                        variant="outline"
+                        onClick={() => setPreviewImageId(image.id)}
+                      >
+                        <ImageIcon className="w-4 h-4 mr-1" />
+                        Ver imagem
+                      </Button>
+
+                      {image.status === 'Processada' && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleViewCorrection(image)}
+                          className="border-amber-400 text-zinc-900 hover:bg-amber-50"
+                        >
+                          <FileCheck className="w-4 h-4 mr-1" />
+                          Ver correção
+                        </Button>
+                      )}
+
+                      <Button
+                        size="sm"
+                        onClick={() => {
+                          if (
+                            image.status === 'Processada' &&
+                            !confirm('Este cartão já foi corrigido. Corrigir de novo cria uma nova correção para o aluno. Continuar?')
+                          ) {
+                            return;
+                          }
+                          image.isBatch ? handleAutoProcessBatch(image) : handleAutoProcessIndividual(image);
+                        }}
                         disabled={isAutoProcessing}
                         className="bg-teal-600 hover:bg-teal-700 text-white"
                       >
@@ -1521,13 +1770,13 @@ export function SendImagesPage() {
       <Dialog open={showAutoResults} onOpenChange={setShowAutoResults}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle className="flex items-center justify-between">
-              <span className="flex items-center">
-                <CheckCircle className="w-6 h-6 mr-2 text-green-600" />
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span className="flex items-center min-w-0">
+                <CheckCircle className="w-6 h-6 mr-2 text-green-600 flex-shrink-0" />
                 Correção Automática Concluída!
               </span>
-              <Badge className="bg-teal-100 text-teal-800">
-                {exams.find(e => e.id === selectedImage?.examId)?.title}
+              <Badge className="bg-teal-100 text-teal-800 max-w-[45%] min-w-0">
+                <span className="truncate">{exams.find(e => e.id === selectedImage?.examId)?.title}</span>
               </Badge>
             </DialogTitle>
             <DialogDescription>
@@ -1538,15 +1787,20 @@ export function SendImagesPage() {
           <div className="flex-1 min-h-0 overflow-y-auto pr-2">
             <div className="space-y-4">
               <Card className="border-green-200 bg-green-50">
-                <CardContent className="p-6">
+                <CardContent className="p-4">
                   <div className="text-center">
-                    <Zap className="w-16 h-16 text-green-600 mx-auto mb-4" />
-                    <h3 className="text-xl font-bold text-green-900 mb-2">
+                    <Zap className="w-9 h-9 text-green-600 mx-auto mb-2" />
+                    <h3 className="text-xl font-bold text-green-900 mb-1">
                       Processamento Completo!
                     </h3>
                     <p className="text-green-800">
                       {completedCorrections.length} alunos corrigidos automaticamente
                     </p>
+                    {completedCorrections.some((c) => (c.results || []).some((r) => r.needsReview)) && (
+                      <p className="text-amber-800 text-sm mt-2 font-medium">
+                        Alguns alunos têm questões marcadas para revisão: clique em "Conferir" para validar antes de usar as notas.
+                      </p>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -1572,6 +1826,57 @@ export function SendImagesPage() {
                   </CardContent>
                 </Card>
               )}
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Users className="w-5 h-5 mr-2" />
+                    Alunos do lote ({completedCorrections.length})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {completedCorrections.map((corr, idx) => {
+                    const pendingReview = (corr.results || []).filter((r) => r.needsReview).length;
+                    return (
+                      <div key={corr.id || idx} className="flex flex-wrap items-center justify-between gap-2 p-2.5 bg-slate-50 rounded-lg border">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-800 truncate">{corr.studentName}</p>
+                          {corr.lowQuality && (
+                            <p className="text-xs text-red-700 font-medium flex items-center gap-1 mt-0.5">
+                              <AlertTriangle className="w-3 h-3" />
+                              Imagem de baixa qualidade - confira o cartão inteiro
+                            </p>
+                          )}
+                          {pendingReview > 0 ? (
+                            <p className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
+                              <AlertTriangle className="w-3 h-3" />
+                              {pendingReview} questão(ões) para revisar - nota provisória
+                            </p>
+                          ) : (
+                            <p className="text-xs text-green-700 flex items-center gap-1 mt-0.5">
+                              <CheckCircle className="w-3 h-3" />
+                              Leitura clara, sem pendências
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge className={
+                            corr.percentage >= 70 ? 'bg-green-100 text-green-800' :
+                            corr.percentage >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                            'bg-red-100 text-red-800'
+                          }>
+                            {corr.percentage}% ({corr.score}/{corr.totalQuestions})
+                          </Badge>
+                          <Button size="sm" variant="outline" onClick={() => openReview(corr)}>
+                            <Eye className="w-4 h-4 mr-1" />
+                            Conferir
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
 
               <Card>
                 <CardHeader>
@@ -1610,25 +1915,6 @@ export function SendImagesPage() {
                     </div>
                   </div>
 
-                  <div className="border-t pt-4">
-                    <h4 className="text-sm font-medium text-slate-700 mb-3">
-                      Resumo das Correções:
-                    </h4>
-                    <div className="max-h-48 overflow-y-auto space-y-2">
-                      {completedCorrections.map((corr, idx) => (
-                        <div key={idx} className="flex items-center justify-between p-2 bg-slate-50 rounded">
-                          <span className="text-sm">{corr.studentName}</span>
-                          <Badge className={
-                            corr.percentage >= 70 ? 'bg-green-100 text-green-800' :
-                            corr.percentage >= 50 ? 'bg-yellow-100 text-yellow-800' :
-                            'bg-red-100 text-red-800'
-                          }>
-                            {corr.percentage}% ({corr.score}/{corr.totalQuestions})
-                          </Badge>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -1662,10 +1948,10 @@ export function SendImagesPage() {
       <Dialog open={showAnswerSheet} onOpenChange={setShowAnswerSheet}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle className="flex items-center justify-between">
-              <span>Correção Manual - {selectedImage?.studentName}</span>
-              <Badge className="bg-zinc-100 text-zinc-900">
-                {exams.find(e => e.id === selectedImage?.examId)?.title}
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate">Correção Manual - {selectedImage?.studentName}</span>
+              <Badge className="bg-zinc-100 text-zinc-900 max-w-[45%] min-w-0">
+                <span className="truncate">{exams.find(e => e.id === selectedImage?.examId)?.title}</span>
               </Badge>
             </DialogTitle>
             <DialogDescription>
@@ -1789,12 +2075,12 @@ export function SendImagesPage() {
       <Dialog open={showBatchProcessing} onOpenChange={setShowBatchProcessing}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
-            <DialogTitle className="flex items-center justify-between">
-              <span>
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate">
                 Correção em Lote - Aluno {currentBatchIndex + 1} de {batchImages.length}
               </span>
-              <Badge className="bg-teal-100 text-teal-800">
-                {exams.find(e => e.id === selectedImage?.examId)?.title}
+              <Badge className="bg-teal-100 text-teal-800 max-w-[45%] min-w-0">
+                <span className="truncate">{exams.find(e => e.id === selectedImage?.examId)?.title}</span>
               </Badge>
             </DialogTitle>
             <DialogDescription>
@@ -2070,13 +2356,18 @@ export function SendImagesPage() {
               return (
                 <Card key={image.id} className={`border-2 ${isDuplicate ? 'border-red-400 bg-red-50' : ''}`}>
                   <CardContent className="p-3 flex items-center space-x-3">
-                    <div className="w-16 h-16 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center flex-shrink-0 border">
+                    <button
+                      type="button"
+                      onClick={() => image.data && openImageFullSize(image.data)}
+                      title="Clique para ver o cartão em tamanho real (confira o nome do aluno na folha)"
+                      className="w-20 h-28 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center flex-shrink-0 border hover:ring-2 hover:ring-amber-400 transition"
+                    >
                       {image.mimeType?.startsWith('image/') ? (
-                        <img src={image.data} alt={image.filename} className="w-full h-full object-cover" />
+                        <img src={image.data} alt={image.filename} className="w-full h-full object-cover object-top" />
                       ) : (
                         <FileText className="w-6 h-6 text-slate-400" />
                       )}
-                    </div>
+                    </button>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium text-slate-800 truncate">{image.filename}</p>
                       <p className="text-xs text-slate-500 truncate">{exam?.title || 'Simulado não encontrado'}</p>
@@ -2115,6 +2406,9 @@ export function SendImagesPage() {
                 <span className="font-medium text-slate-800">{batchAiProgress.current}/{batchAiProgress.total}</span>
               </div>
               <Progress value={(batchAiProgress.current / Math.max(batchAiProgress.total, 1)) * 100} className="h-2" />
+              <p className="text-xs text-slate-500">
+                Lendo o cartão atual... {Math.round(readProgress * 100)}% (cada cartão é lido em faixas e conferido {omrPasses}x)
+              </p>
             </div>
           )}
 
@@ -2147,6 +2441,329 @@ export function SendImagesPage() {
                 </>
               )}
             </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Conferência da correção de um aluno: imagem do cartão + resultado questão por questão */}
+      <Dialog open={!!reviewSubmission} onOpenChange={(open) => { if (!open) closeReview(); }}>
+        <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate">Conferir Correção - {reviewSubmission?.studentName}</span>
+              <Badge
+                className={`flex-shrink-0 text-base px-3 py-1 ${
+                  (reviewSubmission?.percentage ?? 0) >= 70 ? 'bg-green-100 text-green-800' :
+                  (reviewSubmission?.percentage ?? 0) >= 50 ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-red-100 text-red-800'
+                }`}
+              >
+                {reviewSubmission?.percentage}%
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              {reviewSubmission?.examTitle}
+              {reviewSubmission?.studentClass ? ` · ${reviewSubmission.studentClass}` : ''}
+              {' · '}Compare a imagem do cartão com a leitura da IA e corrija qualquer letra clicando nela.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-12 gap-4 overflow-y-auto lg:overflow-hidden">
+            {/* Imagem do cartão resposta */}
+            <div className="lg:col-span-5 min-h-0 flex flex-col gap-2">
+              <div className="rounded-lg border bg-slate-50 overflow-auto max-h-[50vh] lg:max-h-none lg:flex-1 min-h-[200px]">
+                {reviewImage?.mimeType?.startsWith('image/') ? (
+                  <img src={reviewImage.data} alt="Cartão resposta do aluno" className="w-full h-auto block" />
+                ) : (
+                  <div className="h-full min-h-[200px] flex flex-col items-center justify-center text-center p-6 text-slate-500">
+                    <FileText className="w-10 h-10 mb-2 text-slate-300" />
+                    <p className="text-sm">
+                      {reviewImage ? 'Pré-visualização indisponível para este tipo de arquivo.' : 'A imagem deste cartão não está mais disponível.'}
+                    </p>
+                  </div>
+                )}
+              </div>
+              {reviewImage?.data && (
+                <Button variant="outline" size="sm" onClick={() => openImageFullSize(reviewImage.data)}>
+                  <Eye className="w-4 h-4 mr-2" />
+                  Abrir imagem em tamanho real
+                </Button>
+              )}
+            </div>
+
+            {/* Resultado questão por questão */}
+            <div className="lg:col-span-7 min-h-0 lg:overflow-y-auto pr-1 space-y-4">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                <div className="rounded-lg border p-3 text-center bg-white">
+                  <p className="text-2xl font-bold text-slate-800">{reviewSubmission?.percentage}%</p>
+                  <p className="text-xs text-slate-500">{reviewPending > 0 ? 'Nota provisória' : 'Nota'}</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center bg-green-50 border-green-200">
+                  <p className="text-2xl font-bold text-green-700">{reviewCorrect}</p>
+                  <p className="text-xs text-green-700">Acertos</p>
+                </div>
+                <div className="rounded-lg border p-3 text-center bg-red-50 border-red-200">
+                  <p className="text-2xl font-bold text-red-700">{reviewWrong}</p>
+                  <p className="text-xs text-red-700">Erros</p>
+                </div>
+                <div className={`rounded-lg border p-3 text-center ${reviewPending > 0 ? 'bg-amber-50 border-amber-300' : 'bg-white'}`}>
+                  <p className={`text-2xl font-bold ${reviewPending > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{reviewPending}</p>
+                  <p className={`text-xs ${reviewPending > 0 ? 'text-amber-700' : 'text-slate-500'}`}>Para revisar</p>
+                </div>
+              </div>
+
+              {reviewSubmission?.lowQuality && (
+                <div className="rounded-lg border-2 border-red-300 bg-red-50 p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-red-900">
+                    <strong>Imagem de baixa qualidade:</strong> muitas questões precisaram de revisão. Pode haver marcas fracas
+                    que a IA não enxergou, então confira o <strong>cartão inteiro</strong> na imagem ao lado (não só as questões
+                    sinalizadas) ou envie uma foto/scan melhor.
+                  </p>
+                </div>
+              )}
+
+              {reviewPending > 0 ? (
+                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-amber-900">
+                    A IA marcou {reviewPending} questão(ões) para você conferir na imagem ao lado (em branco, dupla marcação,
+                    marca leve ou leituras que não bateram). A nota é <strong>provisória</strong> até você conferir todas:
+                    clique na letra certa ou em <strong>Confirmar</strong> para cada uma.
+                  </p>
+                </div>
+              ) : (
+                <div className="rounded-lg border border-green-200 bg-green-50 p-3 flex items-start gap-2">
+                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-green-900">Todas as questões foram lidas com clareza ou já conferidas por você.</p>
+                </div>
+              )}
+
+              {(reviewSubmission?.subjectPerformances || []).length > 0 && (
+                <div className="rounded-lg border p-3 space-y-2 bg-white">
+                  <p className="text-sm font-semibold text-slate-700">Desempenho por matéria</p>
+                  {reviewSubmission.subjectPerformances.map((sp) => (
+                    <div key={sp.subject}>
+                      <div className="flex justify-between text-xs text-slate-600 mb-1">
+                        <span className="truncate pr-2">{sp.subject}</span>
+                        <span className="font-medium flex-shrink-0">{sp.correctAnswers}/{sp.totalQuestions} ({sp.percentage}%)</span>
+                      </div>
+                      <Progress value={sp.percentage} className="h-2" />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-700">Questão por questão</p>
+                  <div className="flex gap-1">
+                    {[
+                      { id: 'all', label: `Todas (${reviewResults.length})` },
+                      { id: 'wrong', label: `Erradas (${reviewResults.filter((r) => !r.isCorrect).length})` },
+                      { id: 'attention', label: `Revisar (${reviewPending})` }
+                    ].map((f) => (
+                      <Button
+                        key={f.id}
+                        size="sm"
+                        variant={reviewFilter === f.id ? 'default' : 'outline'}
+                        onClick={() => setReviewFilter(f.id)}
+                        className={reviewFilter === f.id ? 'bg-zinc-800 hover:bg-zinc-900 h-8' : 'h-8'}
+                      >
+                        {f.label}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Letra preenchida = o que a IA leu no cartão · borda verde = gabarito · clique em uma letra para corrigir · "—" = em branco
+                </p>
+
+                {reviewResults.map((r, i) => {
+                  const needsReview = !!r.needsReview;
+                  if (reviewFilter === 'wrong' && r.isCorrect) return null;
+                  if (reviewFilter === 'attention' && !needsReview) return null;
+
+                  const marked = reviewAnswers[i];
+                  return (
+                    <div
+                      key={i}
+                      className={`rounded-lg border p-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 ${
+                        needsReview ? 'bg-amber-50 border-amber-300' :
+                        r.isCorrect ? 'bg-green-50/60 border-green-200' :
+                        'bg-red-50/70 border-red-200'
+                      }`}
+                    >
+                      <div className="w-16 flex-shrink-0">
+                        <p className="text-sm font-bold text-slate-800">Q{i + 1}</p>
+                        <p className="text-[11px] text-slate-500 truncate" title={r.subject}>{r.subject || 'Geral'}</p>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        {Array.from({ length: reviewOptionsCount }).map((_, o) => {
+                          const selected = marked === o;
+                          const isKey = reviewKey[i] === o;
+                          return (
+                            <button
+                              key={o}
+                              type="button"
+                              onClick={() => handleReviewChangeAnswer(i, o)}
+                              aria-label={`Marcar alternativa ${String.fromCharCode(65 + o)} na questão ${i + 1}`}
+                              className={`w-9 h-9 rounded-md border text-sm font-semibold transition-colors ${
+                                selected
+                                  ? isKey
+                                    ? 'bg-green-600 text-white border-green-600'
+                                    : 'bg-red-600 text-white border-red-600'
+                                  : isKey
+                                    ? 'bg-white text-green-700 border-green-500 border-2'
+                                    : 'bg-white text-slate-600 hover:bg-slate-100'
+                              }`}
+                            >
+                              {String.fromCharCode(65 + o)}
+                            </button>
+                          );
+                        })}
+                        <button
+                          type="button"
+                          onClick={() => handleReviewChangeAnswer(i, -1)}
+                          aria-label={`Marcar questão ${i + 1} como em branco`}
+                          title="Em branco"
+                          className={`w-9 h-9 rounded-md border text-sm font-semibold transition-colors ${
+                            marked === -1 || marked === undefined
+                              ? 'bg-zinc-700 text-white border-zinc-700'
+                              : 'bg-white text-slate-500 hover:bg-slate-100'
+                          }`}
+                        >
+                          —
+                        </button>
+                      </div>
+
+                      <div className="ml-auto flex items-center gap-2 text-xs font-medium">
+                        {needsReview ? (
+                          <>
+                            <span className="text-amber-800 flex items-center gap-1" title={r.reviewReason || ''}>
+                              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                              Revisar: {r.reviewReason}
+                            </span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 border-amber-400 bg-white hover:bg-amber-100"
+                              onClick={() => handleReviewChangeAnswer(i, marked ?? -1)}
+                            >
+                              Confirmar
+                            </Button>
+                          </>
+                        ) : r.isCorrect ? (
+                          <span className="text-green-700 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-4 h-4" />Correta</span>
+                        ) : (
+                          <span className="text-red-700 flex items-center gap-1 whitespace-nowrap"><XCircle className="w-4 h-4" />Gabarito: {r.correctAnswer}</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <div className="flex-shrink-0 flex flex-wrap justify-between items-center gap-3 pt-4 border-t">
+            <p className="text-xs text-slate-500">
+              {!reviewSubmission?.id
+                ? 'Esta correção não pode ser editada (sem identificador).'
+                : reviewHasChanges
+                  ? 'Você tem alterações não salvas.'
+                  : 'Nenhuma alteração pendente.'}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeReview}>
+                Fechar
+              </Button>
+              <Button
+                onClick={handleSaveReview}
+                disabled={!reviewHasChanges || isSavingReview || !reviewSubmission?.id}
+                className="bg-amber-400 hover:bg-amber-500 text-zinc-900 font-semibold"
+              >
+                {isSavingReview ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <FileCheck className="w-4 h-4 mr-2" />
+                    Salvar correções
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Visualizador das imagens anexadas (navega entre todas com as setas) */}
+      <Dialog open={!!previewImg} onOpenChange={(open) => { if (!open) setPreviewImageId(null); }}>
+        <DialogContent className="max-w-5xl max-h-[94vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
+            <DialogTitle className="flex items-center justify-between gap-3">
+              <span className="min-w-0 truncate">{previewImg?.filename}</span>
+              <Badge className="bg-zinc-100 text-zinc-900 flex-shrink-0">
+                {previewIndex + 1} de {images.length}
+              </Badge>
+            </DialogTitle>
+            <DialogDescription>
+              {previewImg?.examTitle}
+              {previewImg?.isBatch && previewImg?.studentId === 'batch' ? ' · Aluno ainda não atribuído' : previewImg?.studentName ? ` · ${previewImg.studentName}` : ''}
+              {' · '}{previewImg?.status}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 min-h-0 rounded-lg border bg-slate-100 overflow-auto flex items-start justify-center">
+            {previewImg?.mimeType?.startsWith('image/') ? (
+              <img
+                src={previewImg.data}
+                alt={previewImg.filename}
+                className={previewFit ? 'max-h-[64vh] w-auto max-w-full object-contain' : 'max-w-none w-full h-auto'}
+              />
+            ) : previewImg?.data ? (
+              <embed src={previewImg.data} type="application/pdf" className="w-full h-[64vh]" />
+            ) : (
+              <p className="p-8 text-sm text-slate-500">Imagem indisponível.</p>
+            )}
+          </div>
+
+          <div className="flex-shrink-0 flex flex-wrap items-center justify-between gap-2 pt-3 border-t">
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={images.length < 2}
+                onClick={() => setPreviewImageId(images[(previewIndex - 1 + images.length) % images.length].id)}
+              >
+                ← Anterior
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={images.length < 2}
+                onClick={() => setPreviewImageId(images[(previewIndex + 1) % images.length].id)}
+              >
+                Próxima →
+              </Button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => setPreviewFit((v) => !v)}>
+                {previewFit ? 'Tamanho real' : 'Ajustar à tela'}
+              </Button>
+              {previewImg?.data && (
+                <Button variant="outline" size="sm" onClick={() => openImageFullSize(previewImg.data)}>
+                  Abrir em nova aba
+                </Button>
+              )}
+              <Button size="sm" onClick={() => setPreviewImageId(null)} className="bg-zinc-800 hover:bg-zinc-900">
+                Fechar
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>

@@ -7,9 +7,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { 
-  Plus, 
-  Save, 
+import { Switch } from '@/components/ui/switch';
+import {
+  Plus,
+  Save,
   ArrowLeft,
   BookOpen,
   FileText,
@@ -17,7 +18,10 @@ import {
   Trash2,
   Edit2,
   GripVertical,
-  List
+  List,
+  Database,
+  CheckCircle2,
+  Loader2
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -142,6 +146,12 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
 
+  // Banco de questões: por padrão, toda questão nova criada aqui também vai para o banco
+  const [alsoSaveToBank, setAlsoSaveToBank] = useState(true);
+  const [savedToBankIds, setSavedToBankIds] = useState<Set<string>>(new Set());
+  const [savingToBankIds, setSavingToBankIds] = useState<Set<string>>(new Set());
+  const [isSavingAllToBank, setIsSavingAllToBank] = useState(false);
+
   useEffect(() => {
     loadBankQuestions();
     loadClasses();
@@ -180,6 +190,57 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       setBankQuestions([]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const normalizeText = (s: string) => (s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+
+  const isQuestionInBank = (question: Question) =>
+    !!question.fromBank ||
+    savedToBankIds.has(question.id) ||
+    bankQuestions.some(b => normalizeText(b.question) === normalizeText(question.question));
+
+  const newQuestionAlreadyInBank =
+    !!newQuestion.question.trim() &&
+    bankQuestions.some(b => normalizeText(b.question) === normalizeText(newQuestion.question));
+
+  // Salva uma questão no Banco de Questões. A matéria é obrigatória no banco: se o professor
+  // deixou em branco, usa o nome da seção (ex: "Matemática") em vez de falhar.
+  const saveQuestionToBank = async (
+    question: Question,
+    sectionName?: string,
+    skipInBankCheck = false
+  ): Promise<boolean> => {
+    if (!skipInBankCheck && isQuestionInBank(question)) return true;
+
+    setSavingToBankIds(prev => new Set(prev).add(question.id));
+    try {
+      const response = await apiService.createQuestion({
+        question: question.question,
+        subject: question.subject?.trim() || sectionName || 'Geral',
+        difficulty: question.difficulty || 'Médio',
+        type: question.type,
+        options: question.options,
+        correctAnswer: question.correctAnswer,
+        tags: question.tags,
+        points: question.points,
+        weight: question.points
+      });
+
+      if (response && !response.error) {
+        setSavedToBankIds(prev => new Set(prev).add(question.id));
+        return true;
+      }
+      throw new Error(response?.error || 'Erro ao salvar');
+    } catch (error) {
+      console.error('Error saving to bank:', error);
+      return false;
+    } finally {
+      setSavingToBankIds(prev => {
+        const next = new Set(prev);
+        next.delete(question.id);
+        return next;
+      });
     }
   };
 
@@ -256,11 +317,13 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       points: 1
     });
     setEditingQuestionId(null);
+    setAlsoSaveToBank(true);
     setShowQuestionDialog(true);
   };
 
   const handleEditQuestion = (sectionId: string, question: Question) => {
     setCurrentSectionId(sectionId);
+    setAlsoSaveToBank(true);
     setNewQuestion({
       question: question.question,
       subject: question.subject,
@@ -325,6 +388,28 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     }));
 
     toast.success(editingQuestionId ? 'Questão atualizada!' : 'Questão adicionada!');
+
+    // Se a questão foi editada, o vínculo antigo com o banco não vale mais (o texto pode ter mudado)
+    if (editingQuestionId) {
+      setSavedToBankIds(prev => {
+        const next = new Set(prev);
+        next.delete(editingQuestionId);
+        return next;
+      });
+    }
+
+    if (alsoSaveToBank && !newQuestionAlreadyInBank) {
+      const sectionName = simuladoData.sections.find(s => s.id === currentSectionId)?.name;
+      saveQuestionToBank({ ...questionData, fromBank: false }, sectionName, true).then(ok => {
+        if (ok) {
+          toast.success('Questão também salva no Banco de Questões!');
+          loadBankQuestions();
+        } else {
+          toast.error('A questão foi adicionada ao simulado, mas não foi salva no Banco de Questões. Use o botão "Salvar no Banco" na questão.');
+        }
+      });
+    }
+
     setShowQuestionDialog(false);
     setCurrentSectionId(null);
     setEditingQuestionId(null);
@@ -379,28 +464,57 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     }
   };
 
-  const handleSaveQuestionToBank = async (question: Question) => {
-    try {
-      const response = await apiService.createQuestion({
-        question: question.question,
-        subject: question.subject,
-        difficulty: question.difficulty,
-        type: question.type,
-        options: question.options,
-        correctAnswer: question.correctAnswer,
-        tags: question.tags,
-        points: question.points
-      });
+  const handleSaveQuestionToBank = async (question: Question, sectionName?: string) => {
+    const ok = await saveQuestionToBank(question, sectionName);
+    if (ok) {
+      toast.success('Questão salva no Banco de Questões!');
+      loadBankQuestions();
+    } else {
+      toast.error('Erro ao salvar no Banco de Questões');
+    }
+  };
 
-      if (response && !response.error) {
-        toast.success('Questão salva no banco!');
-        loadBankQuestions();
-      } else {
-        throw new Error(response.error || 'Erro ao salvar');
-      }
-    } catch (error: any) {
-      console.error('Error saving to bank:', error);
-      toast.error('Erro ao salvar no banco de questões');
+  const getQuestionsNotInBank = () => {
+    const seen = new Set<string>();
+    const pending: { question: Question; sectionName: string }[] = [];
+
+    simuladoData.sections.forEach(section => {
+      section.questions.forEach(q => {
+        const key = normalizeText(q.question);
+        if (!key || seen.has(key) || isQuestionInBank(q)) return;
+        seen.add(key);
+        pending.push({ question: q, sectionName: section.name });
+      });
+    });
+
+    return pending;
+  };
+
+  const handleSaveAllToBank = async () => {
+    const pending = getQuestionsNotInBank();
+
+    if (pending.length === 0) {
+      toast.info('Todas as questões deste simulado já estão no Banco de Questões');
+      return;
+    }
+
+    setIsSavingAllToBank(true);
+    let saved = 0;
+    let failed = 0;
+
+    for (const { question, sectionName } of pending) {
+      const ok = await saveQuestionToBank(question, sectionName);
+      if (ok) saved++;
+      else failed++;
+    }
+
+    setIsSavingAllToBank(false);
+    await loadBankQuestions();
+
+    if (failed === 0) {
+      toast.success(`${saved} questão(ões) salva(s) no Banco de Questões!`);
+    } else {
+      toast.error(`${saved} salva(s) e ${failed} com erro. Clique novamente para tentar as que faltam.`);
     }
   };
 
@@ -523,6 +637,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
   };
 
   const uniqueSubjects = Array.from(new Set(bankQuestions.map(q => q.subject)));
+  const pendingBankCount = getQuestionsNotInBank().length;
 
   return (
     <div className="space-y-6">
@@ -671,6 +786,49 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
             </CardContent>
           </Card>
 
+          <Card className="border-2 border-amber-400 bg-gradient-to-r from-zinc-900 to-zinc-800 text-white overflow-hidden">
+            <CardContent className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="flex items-start gap-4 min-w-0">
+                <div className="w-12 h-12 rounded-xl bg-amber-400 flex items-center justify-center flex-shrink-0">
+                  <Database className="w-6 h-6 text-zinc-900" />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-lg font-bold">Banco de Questões</p>
+                  <p className="text-sm text-zinc-300">
+                    {getTotalQuestions() === 0
+                      ? 'As questões que você criar aqui podem ser salvas no banco para reutilizar em outros simulados.'
+                      : pendingBankCount > 0
+                        ? `${pendingBankCount} questão(ões) deste simulado ainda não estão no banco. Salve para reutilizar em outros simulados.`
+                        : 'Todas as questões deste simulado já estão no Banco de Questões.'}
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="lg"
+                onClick={handleSaveAllToBank}
+                disabled={isSavingAllToBank || pendingBankCount === 0}
+                className="bg-amber-400 hover:bg-amber-300 text-zinc-900 font-bold h-12 px-6 flex-shrink-0 disabled:bg-zinc-700 disabled:text-zinc-300 disabled:opacity-100"
+              >
+                {isSavingAllToBank ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Salvando no banco...
+                  </>
+                ) : pendingBankCount > 0 ? (
+                  <>
+                    <Database className="w-5 h-5 mr-2" />
+                    Salvar todas no Banco ({pendingBankCount})
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-5 h-5 mr-2" />
+                    {getTotalQuestions() === 0 ? 'Nenhuma questão ainda' : 'Tudo salvo no Banco'}
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
+
           <div className="flex justify-between items-center">
             <h3 className="text-lg font-semibold text-slate-800">Seções do Simulado</h3>
             <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
@@ -762,8 +920,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                         {section.questions.map((question, qIndex) => (
                           <Card key={question.id} className="border">
                             <CardContent className="p-4">
-                              <div className="flex items-start justify-between mb-2">
-                                <div className="flex items-center space-x-2 flex-wrap gap-1">
+                              <div className="flex items-start justify-between gap-3 mb-2">
+                                <div className="flex items-center space-x-2 flex-wrap gap-1 min-w-0">
                                   <Badge variant="outline">
                                     Q{qIndex + 1}
                                   </Badge>
@@ -784,21 +942,26 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                                   }>
                                     {question.difficulty}
                                   </Badge>
-                                  {question.fromBank && (
-                                    <Badge className="bg-teal-100 text-teal-800">
-                                      Banco
-                                    </Badge>
-                                  )}
                                 </div>
-                                <div className="flex items-center space-x-2">
-                                  {!question.fromBank && (
+                                <div className="flex items-center justify-end flex-wrap gap-2 flex-shrink-0">
+                                  {isQuestionInBank(question) ? (
+                                    <Badge className="bg-green-100 text-green-800 border border-green-200 gap-1.5 py-1.5 px-2.5 whitespace-nowrap">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      No Banco de Questões
+                                    </Badge>
+                                  ) : (
                                     <Button
                                       size="sm"
-                                      variant="ghost"
-                                      onClick={() => handleSaveQuestionToBank(question)}
-                                      title="Salvar no banco"
+                                      onClick={() => handleSaveQuestionToBank(question, section.name)}
+                                      disabled={savingToBankIds.has(question.id) || isSavingAllToBank}
+                                      className="bg-amber-400 hover:bg-amber-500 text-zinc-900 font-semibold whitespace-nowrap"
                                     >
-                                      <Save className="w-4 h-4" />
+                                      {savingToBankIds.has(question.id) ? (
+                                        <Loader2 className="w-4 h-4 mr-1.5 animate-spin" />
+                                      ) : (
+                                        <Database className="w-4 h-4 mr-1.5" />
+                                      )}
+                                      Salvar no Banco
                                     </Button>
                                   )}
                                   <Button
@@ -970,7 +1133,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
 
       {/* Question Dialog */}
       <Dialog open={showQuestionDialog} onOpenChange={setShowQuestionDialog}>
-        <DialogContent className="max-w-3xl max-h-[85vh]">
+        <DialogContent className="max-w-3xl max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>
               {editingQuestionId ? 'Editar Questão' : 'Nova Questão'}
@@ -980,7 +1143,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
             </DialogDescription>
           </DialogHeader>
           
-          <ScrollArea className="max-h-[calc(85vh-180px)] pr-4">
+          <ScrollArea className="max-h-[calc(90vh-310px)] min-h-[160px] pr-4">
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -1104,6 +1267,43 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
               )}
             </div>
           </ScrollArea>
+
+          {newQuestionAlreadyInBank ? (
+            <div className="rounded-xl border-2 border-green-300 bg-green-50 p-4 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-lg bg-green-600 flex items-center justify-center flex-shrink-0">
+                <CheckCircle2 className="w-5 h-5 text-white" />
+              </div>
+              <div className="min-w-0">
+                <p className="font-semibold text-green-900">Esta questão já está no Banco de Questões</p>
+                <p className="text-sm text-green-800">Ela não será duplicada no banco.</p>
+              </div>
+            </div>
+          ) : (
+            <div
+              className={`rounded-xl border-2 p-4 flex items-center justify-between gap-4 transition-colors ${
+                alsoSaveToBank ? 'border-amber-400 bg-amber-50' : 'border-slate-200 bg-slate-50'
+              }`}
+            >
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-lg bg-zinc-900 flex items-center justify-center flex-shrink-0">
+                  <Database className="w-5 h-5 text-amber-400" />
+                </div>
+                <div className="min-w-0">
+                  <p className="font-semibold text-zinc-900">Salvar também no Banco de Questões</p>
+                  <p className="text-sm text-slate-600">
+                    {alsoSaveToBank
+                      ? 'Esta questão ficará guardada no banco para reutilizar em outros simulados.'
+                      : 'Esta questão ficará apenas neste simulado (você ainda pode salvá-la no banco depois).'}
+                  </p>
+                </div>
+              </div>
+              <Switch
+                checked={alsoSaveToBank}
+                onCheckedChange={setAlsoSaveToBank}
+                aria-label="Salvar também no Banco de Questões"
+              />
+            </div>
+          )}
 
           <div className="flex justify-end space-x-2 pt-4 border-t">
             <Button variant="outline" onClick={() => setShowQuestionDialog(false)}>
