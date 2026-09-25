@@ -13,12 +13,14 @@ export const OMR_BUBBLES = 5;
 
 export interface OmrResult {
   answers: number[]; // índice da alternativa marcada (0=A...), -1 = sem resposta válida
-  flags: Record<number, string>; // número da questão (1-based) -> motivo da revisão
+  flags: Record<number, string>; // número da questão (1-based) -> leitura INCERTA (conferir é opcional; conta como errada)
+  notes: Record<number, string>; // 'dupla marcação' / 'em branco': regras fixas, contam como errada, sem revisão
 }
 
 interface RowReading {
   answer: number;
-  reason: string | null;
+  reason: string | null; // leitura incerta
+  note: string | null; // 'dupla marcação' | 'em branco'
 }
 
 const ROW_RE = /^\s*(\d{1,3})\s*:\s*((?:[A-E][0-3]){5})\s*$/;
@@ -153,17 +155,17 @@ const mapPool = async <T, R>(items: T[], limit: number, fn: (item: T) => Promise
   return results;
 };
 
-// Decide a alternativa marcada a partir dos níveis de preenchimento. Só é "limpa" (sem revisão)
-// quando há exatamente UMA bolha bem marcada e nenhuma outra suspeita.
+// Regras fixas: uma bolha bem marcada = resposta (borrão leve ao lado é ignorado); duas ou mais bem marcadas =
+// DUPLA MARCAÇÃO (conta como errada); nenhuma marcada = EM BRANCO (conta como errada). Só é leitura INCERTA
+// quando há apenas uma marca leve, sem nenhuma bolha claramente marcada.
 export const deriveAnswer = (levels: number[]): RowReading => {
   const strong = levels.map((l, i) => (l >= 2 ? i : -1)).filter((i) => i >= 0);
   const faint = levels.filter((l) => l === 1).length;
 
-  if (strong.length === 1 && faint === 0) return { answer: strong[0], reason: null };
-  if (strong.length === 1) return { answer: strong[0], reason: 'marca leve extra' };
-  if (strong.length >= 2) return { answer: -1, reason: 'dupla marcação' };
-  if (faint > 0) return { answer: -1, reason: 'marca leve/incerta' };
-  return { answer: -1, reason: 'em branco' };
+  if (strong.length === 1) return { answer: strong[0], reason: null, note: null };
+  if (strong.length >= 2) return { answer: -1, reason: null, note: 'dupla marcação' };
+  if (faint > 0) return { answer: -1, reason: 'marca leve/incerta', note: null };
+  return { answer: -1, reason: null, note: 'em branco' };
 };
 
 interface PassReading {
@@ -206,6 +208,7 @@ export const parseRows = (rowsPerTile: string[][], totalQuestions: number): Pass
 export const mergePasses = (passes: PassReading[], totalQuestions: number): OmrResult => {
   const answers: number[] = [];
   const flags: Record<number, string> = {};
+  const notes: Record<number, string> = {};
 
   for (let q = 1; q <= totalQuestions; q++) {
     const reads = passes.map((p) => p.reading.get(q)).filter((r): r is RowReading => !!r);
@@ -228,9 +231,12 @@ export const mergePasses = (passes: PassReading[], totalQuestions: number): OmrR
     const reason = reads.find((r) => r.reason)?.reason;
     if (reason) flags[q] = reason;
     else if (reads.length < passes.length) flags[q] = 'lida apenas uma vez';
+
+    const note = reads.find((r) => r.note)?.note;
+    if (note) notes[q] = note;
   }
 
-  return { answers, flags };
+  return { answers, flags, notes };
 };
 
 export const bandCountFor = (totalQuestions: number) => Math.max(2, Math.round(totalQuestions / 20) + 1);

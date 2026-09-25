@@ -2,6 +2,8 @@
 
 Este documento conta, na ordem em que aconteceu, tudo que foi feito, testado, o que deu errado e como ficou.
 
+> **Atualização mais recente (regra de nota):** a IA faz todo o trabalho e a **nota já sai final**, sem etapa obrigatória de conferência. **Dupla marcação e questão em branco contam como errada**, automaticamente. Leituras que a IA não conseguiu decidir (marca muito leve, leituras que não bateram) também contam como erradas. A tela "Ver correção" mostra a foto do cartão e, questão por questão, certa/errada; se a IA errar uma letra, você **pode** clicar na letra certa e salvar (opcional). Os trechos abaixo que falam em "nota provisória" e "revisar" descrevem uma versão anterior. Isso foi ajustado sem novos testes pagos (só teste simulado, sem IA).
+
 ## 1. Resposta direta
 
 **A correção por IA está 100% perfeita?** Não dá para prometer 100% de acerto automático com foto/scan de qualidade variável — nenhum leitor de cartão por IA garante isso. O que foi construído é um sistema que **não deixa um erro passar em silêncio**: tudo que não for uma marcação clara e confirmada é sinalizado para você conferir na tela, com a foto do lado.

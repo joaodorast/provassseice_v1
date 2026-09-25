@@ -216,8 +216,8 @@ export function SendImagesPage() {
       }
 
       const flags = {};
-      for (let q = 1; q <= totalQuestions; q++) flags[q] = 'leitura de PDF (confira na imagem)';
-      return { answers: response.answers, flags };
+      for (let q = 1; q <= totalQuestions; q++) flags[q] = 'leitura de PDF (menos precisa)';
+      return { answers: response.answers, flags, notes: {} };
     }
 
     setReadProgress(0);
@@ -293,7 +293,7 @@ export function SendImagesPage() {
 
     const optionsPerQuestion = Math.max(...examData.questions.map((q) => (q.options?.length || 5)));
 
-    const { answers: detectedAnswers, flags } = await detectAnswersFromImage(
+    const { answers: detectedAnswers, flags, notes } = await detectAnswersFromImage(
       image.data,
       examData.questions.length,
       optionsPerQuestion
@@ -309,8 +309,8 @@ export function SendImagesPage() {
 
       let answerLabel = 'Não detectada';
       if (studentAnswer >= 0) answerLabel = String.fromCharCode(65 + studentAnswer);
-      else if (reviewReason === 'dupla marcação') answerLabel = 'Dupla marcação';
-      else if (reviewReason === 'em branco') answerLabel = 'Em branco';
+      else if (notes?.[index + 1] === 'dupla marcação') answerLabel = 'Dupla marcação';
+      else if (notes?.[index + 1] === 'em branco') answerLabel = 'Em branco';
 
       return {
         question: question.question,
@@ -363,8 +363,9 @@ export function SendImagesPage() {
       timeSpent: 0,
       results,
       submittedAt: new Date().toISOString(),
-      // Enquanto houver questões sinalizadas, a nota é provisória e a correção fica aguardando conferência
-      gradingStatus: reviewCount > 0 ? 'pending-review' : 'graded',
+      // Nota final calculada automaticamente. Dupla marcação e em branco contam como erradas; leituras incertas
+      // também contam como erradas e ficam só sinalizadas (conferir é opcional).
+      gradingStatus: 'graded',
       reviewCount,
       // Muitas questões duvidosas = foto/scan ruim; nesse caso pode haver marcas fracas que a IA nem viu
       lowQuality: reviewCount / examData.questions.length >= 0.1,
@@ -399,9 +400,8 @@ export function SendImagesPage() {
     return { ...submissionData, id: savedSubmissionId };
   };
 
-  // Recalcula nota/acertos/desempenho por matéria de uma correção quando o professor
-  // ajusta manualmente alguma resposta na conferência. Usa o gabarito salvo na própria
-  // correção (correctAnswers), sem depender de a prova ainda existir/estar carregada.
+  // Correção manual OPCIONAL: se a IA tiver lido alguma letra errada, o professor pode clicar na letra certa.
+  // Recalcula nota, acertos e desempenho por matéria com o gabarito salvo na própria correção.
   const recomputeSubmission = (sub, newAnswers) => {
     const correctAnswers = sub.correctAnswers || [];
     let correctCount = 0;
@@ -409,8 +409,7 @@ export function SendImagesPage() {
 
     const results = (sub.results || []).map((r, index) => {
       const answer = newAnswers[index];
-      const correct = correctAnswers[index];
-      const isCorrect = answer === correct;
+      const isCorrect = answer === correctAnswers[index];
       if (isCorrect) correctCount++;
 
       const subject = r.subject || 'Geral';
@@ -420,23 +419,21 @@ export function SendImagesPage() {
 
       return {
         ...r,
-        // Enquanto a linha ainda está sinalizada mantém o rótulo original (ex: "Dupla marcação")
-        studentAnswer: answer >= 0 ? String.fromCharCode(65 + answer) : (r.needsReview ? r.studentAnswer : 'Em branco'),
-        isCorrect
+        studentAnswer: answer >= 0 ? String.fromCharCode(65 + answer) : (r.studentAnswer === 'Dupla marcação' ? 'Dupla marcação' : 'Em branco'),
+        isCorrect,
+        needsReview: false,
+        reviewReason: null
       };
     });
-
-    const total = results.length || 1;
-    const reviewCount = results.filter((r) => r.needsReview).length;
 
     return {
       ...sub,
       answers: newAnswers,
       results,
-      reviewCount,
-      gradingStatus: reviewCount > 0 ? 'pending-review' : 'graded',
+      reviewCount: 0,
+      gradingStatus: 'graded',
       score: correctCount,
-      percentage: Math.round((correctCount / total) * 100),
+      percentage: Math.round((correctCount / (results.length || 1)) * 100),
       subjectPerformances: Object.entries(subjectMap).map(([subject, d]: [string, any]) => ({
         subject,
         totalQuestions: d.total,
@@ -460,19 +457,15 @@ export function SendImagesPage() {
     setReviewHasChanges(false);
   };
 
-  // Marcar uma alternativa (ou clicar na que já está marcada) = o professor conferiu essa questão,
-  // então ela deixa de estar sinalizada para revisão.
   const handleReviewChangeAnswer = (questionIndex, newAnswer) => {
     setReviewSubmission((prev) => {
       if (!prev) return prev;
       const answers = [...(prev.answers || [])];
+      if (answers[questionIndex] === newAnswer) return prev;
       answers[questionIndex] = newAnswer;
-      const results = (prev.results || []).map((r, idx) =>
-        idx === questionIndex ? { ...r, needsReview: false, reviewReason: null, reviewed: true } : r
-      );
-      return recomputeSubmission({ ...prev, results }, answers);
+      setReviewHasChanges(true);
+      return recomputeSubmission(prev, answers);
     });
-    setReviewHasChanges(true);
   };
 
   const handleSaveReview = async () => {
@@ -483,7 +476,7 @@ export function SendImagesPage() {
 
     setIsSavingReview(true);
     try {
-      const { id, answers, results, score, percentage, subjectPerformances, reviewCount, gradingStatus } = reviewSubmission;
+      const { id, answers, results, score, percentage, subjectPerformances } = reviewSubmission;
       const response = await apiService.bulkUpdateSubmissions([
         {
           id,
@@ -492,8 +485,8 @@ export function SendImagesPage() {
           score,
           percentage,
           subjectPerformances,
-          reviewCount,
-          gradingStatus,
+          reviewCount: 0,
+          gradingStatus: 'graded',
           manuallyReviewed: true,
           reviewedAt: new Date().toISOString()
         }
@@ -507,7 +500,7 @@ export function SendImagesPage() {
       setReviewHasChanges(false);
       toast.success('Correção atualizada com sucesso!');
     } catch (error) {
-      console.error('Erro ao salvar conferência:', error);
+      console.error('Erro ao salvar correção:', error);
       toast.error('Erro ao salvar: ' + friendlyErrorMessage(error));
     } finally {
       setIsSavingReview(false);
@@ -1292,9 +1285,9 @@ export function SendImagesPage() {
   const reviewAnswers = reviewSubmission?.answers || [];
   const reviewKey = reviewSubmission?.correctAnswers || [];
   const reviewOptionsCount = reviewSubmission?.optionsPerQuestion || 5;
-  const reviewPending = reviewResults.filter((r) => r.needsReview).length;
-  const reviewCorrect = reviewResults.filter((r) => r.isCorrect && !r.needsReview).length;
-  const reviewWrong = reviewResults.length - reviewCorrect - reviewPending;
+  const reviewNoAnswer = reviewResults.filter((r) => !r.isCorrect && ['Em branco', 'Dupla marcação', 'Não detectada'].includes(r.studentAnswer)).length;
+  const reviewCorrect = reviewResults.filter((r) => r.isCorrect).length;
+  const reviewWrong = reviewResults.length - reviewCorrect - reviewNoAnswer;
 
   if (loading) {
     return (
@@ -1797,7 +1790,7 @@ export function SendImagesPage() {
                     </p>
                     {completedCorrections.some((c) => (c.results || []).some((r) => r.needsReview)) && (
                       <p className="text-amber-800 text-sm mt-2 font-medium">
-                        Alguns alunos têm questões marcadas para revisão: clique em "Conferir" para validar antes de usar as notas.
+                        Alguns alunos têm questões com leitura incerta (contadas como erradas). As notas já estão calculadas; conferir é opcional.
                       </p>
                     )}
                   </div>
@@ -1849,7 +1842,7 @@ export function SendImagesPage() {
                           {pendingReview > 0 ? (
                             <p className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
                               <AlertTriangle className="w-3 h-3" />
-                              {pendingReview} questão(ões) para revisar - nota provisória
+                              {pendingReview} questão(ões) com leitura incerta (contadas como erradas)
                             </p>
                           ) : (
                             <p className="text-xs text-green-700 flex items-center gap-1 mt-0.5">
@@ -1868,7 +1861,7 @@ export function SendImagesPage() {
                           </Badge>
                           <Button size="sm" variant="outline" onClick={() => openReview(corr)}>
                             <Eye className="w-4 h-4 mr-1" />
-                            Conferir
+                            Ver correção
                           </Button>
                         </div>
                       </div>
@@ -2449,7 +2442,7 @@ export function SendImagesPage() {
         <DialogContent className="max-w-6xl max-h-[92vh] overflow-hidden flex flex-col">
           <DialogHeader className="flex-shrink-0">
             <DialogTitle className="flex items-center justify-between gap-3">
-              <span className="min-w-0 truncate">Conferir Correção - {reviewSubmission?.studentName}</span>
+              <span className="min-w-0 truncate">Correção - {reviewSubmission?.studentName}</span>
               <Badge
                 className={`flex-shrink-0 text-base px-3 py-1 ${
                   (reviewSubmission?.percentage ?? 0) >= 70 ? 'bg-green-100 text-green-800' :
@@ -2463,7 +2456,7 @@ export function SendImagesPage() {
             <DialogDescription>
               {reviewSubmission?.examTitle}
               {reviewSubmission?.studentClass ? ` · ${reviewSubmission.studentClass}` : ''}
-              {' · '}Compare a imagem do cartão com a leitura da IA e corrija qualquer letra clicando nela.
+              {' · '}Cartão do aluno e resultado questão por questão (se a IA errou alguma letra, é só clicar na letra certa).
             </DialogDescription>
           </DialogHeader>
 
@@ -2495,7 +2488,7 @@ export function SendImagesPage() {
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div className="rounded-lg border p-3 text-center bg-white">
                   <p className="text-2xl font-bold text-slate-800">{reviewSubmission?.percentage}%</p>
-                  <p className="text-xs text-slate-500">{reviewPending > 0 ? 'Nota provisória' : 'Nota'}</p>
+                  <p className="text-xs text-slate-500">Nota</p>
                 </div>
                 <div className="rounded-lg border p-3 text-center bg-green-50 border-green-200">
                   <p className="text-2xl font-bold text-green-700">{reviewCorrect}</p>
@@ -2505,9 +2498,9 @@ export function SendImagesPage() {
                   <p className="text-2xl font-bold text-red-700">{reviewWrong}</p>
                   <p className="text-xs text-red-700">Erros</p>
                 </div>
-                <div className={`rounded-lg border p-3 text-center ${reviewPending > 0 ? 'bg-amber-50 border-amber-300' : 'bg-white'}`}>
-                  <p className={`text-2xl font-bold ${reviewPending > 0 ? 'text-amber-700' : 'text-slate-400'}`}>{reviewPending}</p>
-                  <p className={`text-xs ${reviewPending > 0 ? 'text-amber-700' : 'text-slate-500'}`}>Para revisar</p>
+                <div className="rounded-lg border p-3 text-center bg-white">
+                  <p className="text-2xl font-bold text-slate-700">{reviewNoAnswer}</p>
+                  <p className="text-xs text-slate-500">Em branco / dupla</p>
                 </div>
               </div>
 
@@ -2515,26 +2508,9 @@ export function SendImagesPage() {
                 <div className="rounded-lg border-2 border-red-300 bg-red-50 p-3 flex items-start gap-2">
                   <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
                   <p className="text-sm text-red-900">
-                    <strong>Imagem de baixa qualidade:</strong> muitas questões precisaram de revisão. Pode haver marcas fracas
-                    que a IA não enxergou, então confira o <strong>cartão inteiro</strong> na imagem ao lado (não só as questões
-                    sinalizadas) ou envie uma foto/scan melhor.
+                    <strong>Imagem de baixa qualidade:</strong> a IA teve dificuldade de ler esta folha e a nota pode estar
+                    errada. Envie uma foto/scan melhor.
                   </p>
-                </div>
-              )}
-
-              {reviewPending > 0 ? (
-                <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex items-start gap-2">
-                  <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-amber-900">
-                    A IA marcou {reviewPending} questão(ões) para você conferir na imagem ao lado (em branco, dupla marcação,
-                    marca leve ou leituras que não bateram). A nota é <strong>provisória</strong> até você conferir todas:
-                    clique na letra certa ou em <strong>Confirmar</strong> para cada uma.
-                  </p>
-                </div>
-              ) : (
-                <div className="rounded-lg border border-green-200 bg-green-50 p-3 flex items-start gap-2">
-                  <CheckCircle className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
-                  <p className="text-sm text-green-900">Todas as questões foram lidas com clareza ou já conferidas por você.</p>
                 </div>
               )}
 
@@ -2559,8 +2535,7 @@ export function SendImagesPage() {
                   <div className="flex gap-1">
                     {[
                       { id: 'all', label: `Todas (${reviewResults.length})` },
-                      { id: 'wrong', label: `Erradas (${reviewResults.filter((r) => !r.isCorrect).length})` },
-                      { id: 'attention', label: `Revisar (${reviewPending})` }
+                      { id: 'wrong', label: `Erradas (${reviewResults.filter((r) => !r.isCorrect).length})` }
                     ].map((f) => (
                       <Button
                         key={f.id}
@@ -2575,20 +2550,17 @@ export function SendImagesPage() {
                   </div>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Letra preenchida = o que a IA leu no cartão · borda verde = gabarito · clique em uma letra para corrigir · "—" = em branco
+                  Letra preenchida = o que o aluno marcou · borda verde = gabarito · "—" = sem resposta válida (em branco ou dupla marcação)
                 </p>
 
                 {reviewResults.map((r, i) => {
-                  const needsReview = !!r.needsReview;
                   if (reviewFilter === 'wrong' && r.isCorrect) return null;
-                  if (reviewFilter === 'attention' && !needsReview) return null;
 
                   const marked = reviewAnswers[i];
                   return (
                     <div
                       key={i}
                       className={`rounded-lg border p-2.5 flex flex-wrap items-center gap-x-3 gap-y-2 ${
-                        needsReview ? 'bg-amber-50 border-amber-300' :
                         r.isCorrect ? 'bg-green-50/60 border-green-200' :
                         'bg-red-50/70 border-red-200'
                       }`}
@@ -2625,8 +2597,7 @@ export function SendImagesPage() {
                         <button
                           type="button"
                           onClick={() => handleReviewChangeAnswer(i, -1)}
-                          aria-label={`Marcar questão ${i + 1} como em branco`}
-                          title="Em branco"
+                          title="Sem resposta válida"
                           className={`w-9 h-9 rounded-md border text-sm font-semibold transition-colors ${
                             marked === -1 || marked === undefined
                               ? 'bg-zinc-700 text-white border-zinc-700'
@@ -2638,25 +2609,10 @@ export function SendImagesPage() {
                       </div>
 
                       <div className="ml-auto flex items-center gap-2 text-xs font-medium">
-                        {needsReview ? (
-                          <>
-                            <span className="text-amber-800 flex items-center gap-1" title={r.reviewReason || ''}>
-                              <AlertTriangle className="w-4 h-4 flex-shrink-0" />
-                              Revisar: {r.reviewReason}
-                            </span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-7 border-amber-400 bg-white hover:bg-amber-100"
-                              onClick={() => handleReviewChangeAnswer(i, marked ?? -1)}
-                            >
-                              Confirmar
-                            </Button>
-                          </>
-                        ) : r.isCorrect ? (
+                        {r.isCorrect ? (
                           <span className="text-green-700 flex items-center gap-1 whitespace-nowrap"><CheckCircle className="w-4 h-4" />Correta</span>
                         ) : (
-                          <span className="text-red-700 flex items-center gap-1 whitespace-nowrap"><XCircle className="w-4 h-4" />Gabarito: {r.correctAnswer}</span>
+                          <span className="text-red-700 flex items-center gap-1 whitespace-nowrap"><XCircle className="w-4 h-4" />{r.studentAnswer === 'Dupla marcação' || r.studentAnswer === 'Em branco' ? `${r.studentAnswer} · ` : ''}Gabarito: {r.correctAnswer}</span>
                         )}
                       </div>
                     </div>
@@ -2668,33 +2624,31 @@ export function SendImagesPage() {
 
           <div className="flex-shrink-0 flex flex-wrap justify-between items-center gap-3 pt-4 border-t">
             <p className="text-xs text-slate-500">
-              {!reviewSubmission?.id
-                ? 'Esta correção não pode ser editada (sem identificador).'
-                : reviewHasChanges
-                  ? 'Você tem alterações não salvas.'
-                  : 'Nenhuma alteração pendente.'}
+              {reviewHasChanges ? 'Você alterou letras. Clique em Salvar para atualizar a nota.' : 'A nota já foi calculada automaticamente.'}
             </p>
             <div className="flex gap-2">
               <Button variant="outline" onClick={closeReview}>
                 Fechar
               </Button>
-              <Button
-                onClick={handleSaveReview}
-                disabled={!reviewHasChanges || isSavingReview || !reviewSubmission?.id}
-                className="bg-amber-400 hover:bg-amber-500 text-zinc-900 font-semibold"
-              >
-                {isSavingReview ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Salvando...
-                  </>
-                ) : (
-                  <>
-                    <FileCheck className="w-4 h-4 mr-2" />
-                    Salvar correções
-                  </>
-                )}
-              </Button>
+              {reviewHasChanges && (
+                <Button
+                  onClick={handleSaveReview}
+                  disabled={isSavingReview || !reviewSubmission?.id}
+                  className="bg-amber-400 hover:bg-amber-500 text-zinc-900 font-semibold"
+                >
+                  {isSavingReview ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Salvando...
+                    </>
+                  ) : (
+                    <>
+                      <FileCheck className="w-4 h-4 mr-2" />
+                      Salvar
+                    </>
+                  )}
+                </Button>
+              )}
             </div>
           </div>
         </DialogContent>
