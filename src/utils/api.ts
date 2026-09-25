@@ -451,7 +451,7 @@ class ApiService {
 
   // Lê UMA faixa do cartão-resposta e devolve os níveis de preenchimento por linha ("NN:ddddd").
   // Lança erro em caso de falha (quem chama decide como tratar), diferente do request() comum.
-  async readBubblesAI(imageData: string, optionsPerQuestion = 5): Promise<string[]> {
+  async readBubblesAI(imageData: string): Promise<string[]> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 150000);
 
@@ -459,7 +459,7 @@ class ApiService {
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/omr-reader`, {
         method: 'POST',
         headers: this.getHeaders(),
-        body: JSON.stringify({ imageData, optionsPerQuestion }),
+        body: JSON.stringify({ imageData }),
         signal: controller.signal,
       });
 

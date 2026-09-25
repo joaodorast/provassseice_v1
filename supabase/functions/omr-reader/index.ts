@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js'
 
 // Leitor óptico de cartão-resposta. Recebe UM trecho (faixa) da imagem do cartão e devolve, para cada
-// linha de questão totalmente visível, o nível de preenchimento (0-3) de cada bolha no formato "NN:ddddd".
+// linha de questão totalmente visível, letra + nível de preenchimento (0-3) de cada bolha no formato "NN:A0B3C0D0E0".
 // A decisão de qual alternativa foi marcada (e o que precisa de revisão humana) é feita no cliente,
 // combinando várias faixas e leituras independentes.
 
@@ -33,19 +33,16 @@ const getClaudeApiKey = async (): Promise<string | undefined> => {
   return data?.value?.claudeApiKey || Deno.env.get('ANTHROPIC_API_KEY');
 };
 
-const buildPrompt = (optionsPerQuestion: number) => {
-  const letters = 'ABCDE'.slice(0, optionsPerQuestion).split('').join(', ');
-  return `Você é um leitor óptico de cartão-resposta. A imagem é um TRECHO de um cartão de múltipla escolha; cada questão tem ${optionsPerQuestion} bolhas em ordem (${letters}).
-Para CADA linha de questão COMPLETAMENTE visível (número impresso + todas as bolhas), escreva uma string no formato "NN:d...d" com o número impresso da questão, dois-pontos e ${optionsPerQuestion} dígitos (um por bolha, na ordem), onde cada dígito é o nível de preenchimento daquela bolha:
-0 = vazia (só contorno e letra)
-1 = marca leve/incerta (rabisco fraco, sombra, borracha, mancha, lápis muito claro)
-2 = preenchida parcialmente ou com traço claro
-3 = totalmente preenchida/escura ou com X evidente.
-Descreva só o que vê, bolha por bolha, sem usar gabarito nem supor a resposta. Linha cortada na borda da imagem: IGNORE. Ignore textos que não são linhas de questão.
-Exemplo para 5 bolhas com a 2ª pintada: "07:03000". Responda pela tool return_result.`;
-};
+const buildPrompt = () =>
+  `Você é um leitor óptico de cartão-resposta. A imagem é um TRECHO de um cartão de múltipla escolha. Em cada linha há: o número da questão à esquerda e 5 bolhas (círculos) em sequência, da esquerda para a direita; a letra de cada alternativa (A, B, C, D, E) está escrita imediatamente À DIREITA da sua bolha. Conte os círculos: um círculo por letra.
+Para CADA linha de questão COMPLETAMENTE visível (número + as 5 bolhas), escreva uma string no formato "NN:A?B?C?D?E?": o número impresso da questão, dois-pontos e, para cada bolha em ordem, a LETRA seguida do nível de preenchimento daquela bolha:
+0 = vazia (só contorno)
+1 = marca leve/incerta (rabisco fraco, sombra, mancha)
+2 = preenchida parcialmente
+3 = totalmente preenchida/escura.
+Descreva só o que vê, bolha por bolha, sem supor resposta. Linha cortada na borda da imagem: IGNORE. Ignore cabeçalhos, QR Code e instruções. Exemplo com a 2ª bolha (B) pintada: "07:A0B3C0D0E0". Responda pela tool return_result.`;
 
-const callClaude = async (apiKey: string, imageData: string, optionsPerQuestion: number) => {
+const callClaude = async (apiKey: string, imageData: string) => {
   const match = imageData.match(/^data:([\w.+-]+\/[\w.+-]+);base64,(.*)$/s);
   const mediaType = match?.[1] || 'image/jpeg';
   const base64 = match ? match[2] : imageData;
@@ -58,7 +55,7 @@ const callClaude = async (apiKey: string, imageData: string, optionsPerQuestion:
         role: 'user',
         content: [
           { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
-          { type: 'text', text: buildPrompt(optionsPerQuestion) },
+          { type: 'text', text: buildPrompt() },
         ],
       },
     ],
@@ -134,7 +131,6 @@ Deno.serve(async (req: Request) => {
 
     const body = await req.json();
     const { imageData } = body;
-    const optionsPerQuestion = Math.min(5, Math.max(2, Number(body.optionsPerQuestion) || 5));
 
     if (!imageData || typeof imageData !== 'string') {
       return json({ error: 'imageData is required' }, 400);
@@ -143,7 +139,7 @@ Deno.serve(async (req: Request) => {
     const apiKey = await getClaudeApiKey();
     if (!apiKey) return json({ error: 'Claude API key not configured' }, 500);
 
-    const rows = await callClaude(apiKey, imageData, optionsPerQuestion);
+    const rows = await callClaude(apiKey, imageData);
     return json({ success: true, rows });
   } catch (error) {
     console.error('omr-reader error:', error);

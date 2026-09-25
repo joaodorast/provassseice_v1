@@ -25,6 +25,28 @@ Onde há risco, o sistema avisa: questões em amarelo ("Revisar"), nota marcada 
 
 Ou seja: a leitura ficou **muito mais confiável e honesta** do que era (antes errava até 15 questões e mudava a cada tentativa), mas o que garante zero erro na nota final é **você conferir as questões em amarelo** antes de usar as notas.
 
+### Atualização final — testes com o cartão-resposta REAL do sistema
+
+Até aqui os cartões de teste eram desenhados por mim. Nesta rodada usei o cartão que o próprio sistema gera (Gerenciar Simulados → ícone QR Code): A4, 2 colunas "GABARITO", bolhas pequenas de contorno azul e a **letra escrita à direita** de cada bolha. Renderizei esse cartão, preenchi com marcações simuladas (marcação cheia, parcial, borrão, em branco e dupla marcação) e degradei a imagem.
+
+| Teste | Resultado |
+|---|---|
+| Leitura anterior no cartão real, qualidade média | 55/60 certas, **3 erros sem aviso** — a IA associava a bolha à letra errada (C lida como B, E como D) |
+| **Nova leitura** (cada coluna lida separadamente, bolhas ampliadas, IA escreve letra + nível de cada bolha), cartão A, qualidade média | **60/60, 0 erros sem aviso**; as 5 sinalizações eram exatamente as anomalias plantadas (2 em branco, 2 dupla marcação, 1 borrão) |
+| Nova leitura, cartão B, qualidade média (1 e 2 leituras) | **59/60, 0 erros sem aviso**; a única diferente era uma marcação parcial, sinalizada para revisão. 1 leitura e 2 leituras deram o mesmo resultado |
+| Teste integrado no sistema (simulado criado pelo sistema, navegador real), cartão de **qualidade baixa** (borrado, granulado, letras quase ilegíveis) | **NÃO ficou perfeito:** 26 questões sinalizadas (43%), alerta vermelho de "imagem de baixa qualidade" apareceu, mas **4 questões (25, 27, 28, 29) foram lidas erradas sem aviso** |
+
+Conclusão honesta:
+- **Qualidade média** (como pediu): 0 erros sem aviso nos 2 cartões reais testados (120 questões). Não dá para garantir 100% em todos os casos, mas nada errado passou sem sinalização nesses testes.
+- **Qualidade baixa:** o sistema detecta que a imagem é ruim e avisa, mas não é confiável sozinho. Nesse caso, confira o cartão inteiro na tela "Conferir" ou envie foto/scan melhor.
+- Por causa disso, foi adicionado um reforço: se uma leitura marcar 10% ou mais das questões como duvidosas, o sistema faz **sozinho uma segunda leitura** e compara. Esse reforço só acrescenta avisos (nunca remove) e **não foi testado com IA paga** (limite de gasto), só o fluxo foi validado em simulação.
+- A leitura padrão agora é **1 leitura** (metade do custo). A opção "Precisão máxima" (2 leituras) continua disponível.
+- A leitura foi feita para o **cartão do sistema (2 colunas, letra à direita)**. Cartões de outro formato podem ter muitas linhas sinalizadas.
+
+Custo dessa rodada de testes: cerca de **US$ 0,18** (limite pedido: US$ 0,25; teste de qualidade baixa: 1 prova, ~US$ 0,03). Custo por cartão de 60 questões: ~US$ 0,04 com 1 leitura, ~US$ 0,09 com 2 leituras (400 cartões/mês ≈ US$ 16 com 1 leitura).
+
+Toda a IA usa **somente a API da Claude** (sua chave, guardada no servidor). O Gemini foi removido do código.
+
 ## 2. Linha do tempo
 
 ### 2.1 Troca do Gemini pela Claude
@@ -63,9 +85,8 @@ Problemas: linhas "deslizavam" nas últimas linhas de cartões grandes, branco/d
 1. O app recorta a imagem em faixas e remove as margens vazias.
 2. Nova função no servidor (`omr-reader`) lê cada faixa e devolve o nível de preenchimento (0–3) de cada bolha.
 3. O app decide a resposta: **só é "limpa" se houver exatamente uma bolha bem marcada e nada suspeito**.
-4. O cartão é lido **2 vezes** (cortes diferentes) e as leituras são comparadas.
+4. (Versão inicial: o cartão era lido 2 vezes. **Versão final:** padrão de 1 leitura, com blocos por coluna e ampliados, e 2ª leitura automática se a imagem for ruim ou se você escolher "Precisão máxima" — ver "Atualização final" acima.)
 5. Em branco, dupla marcação, marca leve, leituras divergentes ou linha não lida → **"Revisar"**.
-6. Modo **Econômico (1 leitura)** disponível.
 
 ### 2.6 Teste integrado (simulado criado pelo sistema)
 Feito no navegador real: criado usuário, alunos, e um simulado de 60 questões pelo próprio sistema; login; envio de 3 cartões em lote; atribuição dos alunos; correção do lote; conferência; salvamento.
@@ -100,8 +121,8 @@ Feito no navegador real: criado usuário, alunos, e um simulado de 60 questões 
 
 ## 3. Custos
 - **Gasto nos testes: cerca de US$ 2** (maior parte nos experimentos da seção 2.4). Não foram rodados mais testes com IA depois que você avisou.
-- **Custo daqui para frente (cartão de 60 questões):** ~US$ 0,03–0,05 com 2 leituras; ~US$ 0,02 no modo Econômico.
-- Isso **substitui a estimativa antiga** (US$ 0,005–0,01). 400 cartões/mês ≈ US$ 12–20 (2 leituras) ou ≈ US$ 8 (1 leitura). Com US$ 5 de crédito: cerca de 100–150 cartões no modo máximo.
+- **Custo daqui para frente (cartão de 60 questões, medido no cartão real):** ~US$ 0,04 com 1 leitura (padrão); ~US$ 0,09 com 2 leituras; imagens pequenas/ruins custam menos por leitura.
+- Isso **substitui as estimativas anteriores** (inclusive a antiga de US$ 0,005–0,01). 400 cartões/mês ≈ US$ 16 (1 leitura). Com US$ 5 de crédito: cerca de 120 cartões no modo padrão.
 
 ## 4. Limites e o que NÃO foi testado
 - Os cartões de teste foram sintéticos (gerados por computador). Fotos reais de celular podem se comportar diferente — nas primeiras provas reais, confira os cartões sinalizados.

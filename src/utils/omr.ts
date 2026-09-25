@@ -1,11 +1,15 @@
 import { apiService } from './api';
 
-// Leitura de cartão-resposta por IA com foco em NÃO errar em silêncio:
-//  - a imagem é recortada em faixas pequenas (a IA erra muito ao ler 60+ linhas de uma vez);
-//  - cada bolha recebe um nível de preenchimento (0-3), e a decisão da alternativa é tomada aqui;
-//  - o cartão é lido mais de uma vez com cortes diferentes e as leituras são comparadas;
-//  - qualquer linha que não seja "exatamente uma bolha claramente marcada, confirmada pelas leituras"
-//    (em branco, dupla marcação, marca leve, leituras divergentes) é SINALIZADA para revisão humana.
+// Leitura de cartão-resposta por IA com foco em NÃO errar em silêncio.
+// Feita para o cartão-resposta gerado pelo próprio sistema (Gerenciar Simulados > QR Code):
+// 2 colunas de questões, número à esquerda, 5 bolhas (A-E) com a letra à DIREITA de cada bolha.
+//  - a imagem é recortada em blocos pequenos (faixa x coluna) e ampliada: a IA erra ao ler linhas pequenas/muitas de uma vez;
+//  - para cada bolha a IA escreve LETRA + nível de preenchimento (0-3); letras fora de ordem invalidam a linha;
+//  - a decisão da alternativa é tomada aqui, e o cartão pode ser lido mais de uma vez com cortes diferentes;
+//  - qualquer linha que não seja "exatamente uma bolha claramente marcada e confirmada" (em branco, dupla marcação,
+//    marca leve, leituras divergentes, linha não lida) é SINALIZADA para revisão humana.
+
+export const OMR_BUBBLES = 5;
 
 export interface OmrResult {
   answers: number[]; // índice da alternativa marcada (0=A...), -1 = sem resposta válida
@@ -17,10 +21,15 @@ interface RowReading {
   reason: string | null;
 }
 
-const ROW_RE = /^\s*(\d{1,3})\s*:\s*([0-3]+)\s*$/;
+const ROW_RE = /^\s*(\d{1,3})\s*:\s*((?:[A-E][0-3]){5})\s*$/;
 const MAX_SIDE = 2600;
 const BAND_OVERLAP = 0.15;
-const BAND_CONCURRENCY = 3;
+const COLUMN_COUNT = 2;
+const COLUMN_OVERLAP = 0.04;
+const TILE_UPSCALE = 1.5;
+const TILE_MAX_SIDE = 1500;
+const CALL_CONCURRENCY = 3;
+const ADAPTIVE_FLAG_RATIO = 0.1;
 
 const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
@@ -49,7 +58,7 @@ const renderScaled = (img: HTMLImageElement, maxSide: number): HTMLCanvasElement
   return canvas;
 };
 
-// Remove as margens vazias do cartão (economiza chamadas e deixa as linhas maiores nas faixas).
+// Remove as margens vazias do cartão (deixa as linhas maiores nos blocos).
 const trimToContent = (canvas: HTMLCanvasElement): HTMLCanvasElement => {
   const probeScale = Math.min(1, 700 / Math.max(canvas.width, canvas.height));
   const pw = Math.max(1, Math.round(canvas.width * probeScale));
@@ -96,25 +105,37 @@ const trimToContent = (canvas: HTMLCanvasElement): HTMLCanvasElement => {
   return out;
 };
 
-const splitIntoBands = (canvas: HTMLCanvasElement, bandCount: number): string[] => {
+// Divide o cartão em blocos (faixas horizontais x colunas) com sobreposição e amplia cada bloco,
+// para as bolhas ficarem grandes o bastante para a IA distinguir bolha preenchida de vazia.
+const splitIntoTiles = (canvas: HTMLCanvasElement, bandCount: number): string[] => {
   const { width, height } = canvas;
   const step = height / bandCount;
-  const overlap = step * BAND_OVERLAP;
-  const bands: string[] = [];
+  const bandOverlap = step * BAND_OVERLAP;
+  const tiles: string[] = [];
 
-  for (let i = 0; i < bandCount; i++) {
-    const y0 = Math.max(0, Math.floor(i * step - overlap));
-    const y1 = Math.min(height, Math.ceil((i + 1) * step + overlap));
-    const band = document.createElement('canvas');
-    band.width = width;
-    band.height = y1 - y0;
-    const bctx = band.getContext('2d');
-    if (!bctx) throw new Error('Canvas indisponível');
-    bctx.drawImage(canvas, 0, y0, width, y1 - y0, 0, 0, width, y1 - y0);
-    bands.push(band.toDataURL('image/jpeg', 0.95));
+  for (let b = 0; b < bandCount; b++) {
+    const y0 = Math.max(0, Math.floor(b * step - bandOverlap));
+    const y1 = Math.min(height, Math.ceil((b + 1) * step + bandOverlap));
+
+    for (let c = 0; c < COLUMN_COUNT; c++) {
+      const x0 = Math.max(0, Math.floor((c * width) / COLUMN_COUNT - COLUMN_OVERLAP * width));
+      const x1 = Math.min(width, Math.ceil(((c + 1) * width) / COLUMN_COUNT + COLUMN_OVERLAP * width));
+      const tw = x1 - x0;
+      const th = y1 - y0;
+      const scale = Math.min(TILE_UPSCALE, TILE_MAX_SIDE / Math.max(tw, th));
+
+      const tile = document.createElement('canvas');
+      tile.width = Math.max(1, Math.round(tw * scale));
+      tile.height = Math.max(1, Math.round(th * scale));
+      const tctx = tile.getContext('2d');
+      if (!tctx) throw new Error('Canvas indisponível');
+      tctx.imageSmoothingQuality = 'high';
+      tctx.drawImage(canvas, x0, y0, tw, th, 0, 0, tile.width, tile.height);
+      tiles.push(tile.toDataURL('image/jpeg', 0.95));
+    }
   }
 
-  return bands;
+  return tiles;
 };
 
 const mapPool = async <T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> => {
@@ -150,20 +171,23 @@ interface PassReading {
   conflicts: Set<number>;
 }
 
-const parseRows = (rowsPerBand: string[][], totalQuestions: number, optionsPerQuestion: number): PassReading => {
+export const parseRows = (rowsPerTile: string[][], totalQuestions: number): PassReading => {
   const reading = new Map<number, RowReading>();
   const conflicts = new Set<number>();
 
-  rowsPerBand.forEach((rows) => {
+  rowsPerTile.forEach((rows) => {
     rows.forEach((raw) => {
       const match = ROW_RE.exec(raw);
       if (!match) return;
 
       const question = parseInt(match[1], 10);
-      const levels = match[2].split('').map((c) => parseInt(c, 10));
-      if (question < 1 || question > totalQuestions || levels.length !== optionsPerQuestion) return;
+      const pairs = [...match[2].matchAll(/([A-E])([0-3])/g)];
+      // As letras precisam vir na ordem A-E; se a IA embaralhou, a linha não é confiável e é descartada
+      // (a questão acaba sinalizada como "linha não lida").
+      if (pairs.map((p) => p[1]).join('') !== 'ABCDE') return;
+      if (question < 1 || question > totalQuestions) return;
 
-      const derived = deriveAnswer(levels);
+      const derived = deriveAnswer(pairs.map((p) => parseInt(p[2], 10)));
       const existing = reading.get(question);
 
       if (!existing) {
@@ -215,37 +239,48 @@ export async function readAnswerSheet(
   dataUrl: string,
   options: {
     totalQuestions: number;
-    optionsPerQuestion?: number;
     passes?: number;
     onProgress?: (fraction: number) => void;
   }
 ): Promise<OmrResult> {
-  const { totalQuestions, optionsPerQuestion = 5, passes = 2, onProgress } = options;
+  const { totalQuestions, passes = 1, onProgress } = options;
 
   const img = await loadImage(dataUrl);
   const content = trimToContent(renderScaled(img, MAX_SIDE));
 
   const baseBands = bandCountFor(totalQuestions);
-  const totalCalls = Array.from({ length: passes }, (_, p) => baseBands + p).reduce((a, b) => a + b, 0);
+  const totalCalls = Array.from({ length: passes }, (_, p) => (baseBands + p) * COLUMN_COUNT).reduce((a, b) => a + b, 0);
   let completed = 0;
   onProgress?.(0);
 
   const passReadings: PassReading[] = [];
 
-  for (let p = 0; p < passes; p++) {
+  const runPass = async (p: number) => {
     // Cada leitura usa uma quantidade diferente de faixas, para que os cortes caiam em lugares
     // diferentes e um erro de corte não se repita na leitura seguinte.
-    const bands = splitIntoBands(content, baseBands + p);
+    const tiles = splitIntoTiles(content, baseBands + p);
 
-    const rowsPerBand = await mapPool(bands, BAND_CONCURRENCY, async (band) => {
-      const rows = await apiService.readBubblesAI(band, optionsPerQuestion);
+    const rowsPerTile = await mapPool(tiles, CALL_CONCURRENCY, async (tile) => {
+      const rows = await apiService.readBubblesAI(tile);
       completed++;
-      onProgress?.(completed / totalCalls);
+      onProgress?.(Math.min(0.99, completed / totalCalls));
       return rows;
     });
 
-    passReadings.push(parseRows(rowsPerBand, totalQuestions, optionsPerQuestion));
+    passReadings.push(parseRows(rowsPerTile, totalQuestions));
+  };
+
+  for (let p = 0; p < passes; p++) {
+    await runPass(p);
   }
 
+  // Imagem ruim (muitas linhas duvidosas): faz automaticamente mais uma leitura e compara com a anterior.
+  // Só acrescenta comparação/sinalização, nunca remove aviso; só é usada quando a imagem já é ruim.
+  const firstMerge = mergePasses(passReadings, totalQuestions);
+  if (Object.keys(firstMerge.flags).length >= totalQuestions * ADAPTIVE_FLAG_RATIO && passes < 2) {
+    await runPass(passes);
+  }
+
+  onProgress?.(1);
   return mergePasses(passReadings, totalQuestions);
 }

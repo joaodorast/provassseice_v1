@@ -49,7 +49,7 @@ export function SendImagesPage() {
   const [batchAiErrors, setBatchAiErrors] = useState([]);
   const [previewImageId, setPreviewImageId] = useState<string | null>(null);
   const [previewFit, setPreviewFit] = useState(true);
-  const [omrPasses, setOmrPasses] = useState(2);
+  const [omrPasses, setOmrPasses] = useState(1);
   const [readProgress, setReadProgress] = useState(0);
   const [reviewSubmission, setReviewSubmission] = useState(null);
   const [reviewFilter, setReviewFilter] = useState('all');
@@ -223,7 +223,6 @@ export function SendImagesPage() {
     setReadProgress(0);
     return readAnswerSheet(imageData, {
       totalQuestions,
-      optionsPerQuestion,
       passes: omrPasses,
       onProgress: (fraction) => {
         setReadProgress(fraction);
@@ -1574,12 +1573,12 @@ export function SendImagesPage() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Select value={String(omrPasses)} onValueChange={(value) => setOmrPasses(parseInt(value, 10))}>
-                <SelectTrigger className="h-9 w-[230px] text-sm" aria-label="Modo de leitura da IA">
+                <SelectTrigger className="h-9 w-[300px] text-sm" aria-label="Modo de leitura da IA">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="2">Precisão máxima (2 leituras)</SelectItem>
-                  <SelectItem value="1">Econômico (1 leitura)</SelectItem>
+                  <SelectItem value="1">Padrão (1 leitura)</SelectItem>
+                  <SelectItem value="2">Precisão máxima (2 leituras, custa o dobro)</SelectItem>
                 </SelectContent>
               </Select>
               {images.some((img) => img.isBatch && img.status !== 'Processada') && (
@@ -2407,7 +2406,7 @@ export function SendImagesPage() {
               </div>
               <Progress value={(batchAiProgress.current / Math.max(batchAiProgress.total, 1)) * 100} className="h-2" />
               <p className="text-xs text-slate-500">
-                Lendo o cartão atual... {Math.round(readProgress * 100)}% (cada cartão é lido em faixas e conferido {omrPasses}x)
+                Lendo o cartão atual... {Math.round(readProgress * 100)}% ({omrPasses === 1 ? 'leitura em blocos ampliados' : 'leitura em blocos ampliados, conferida 2x'})
               </p>
             </div>
           )}
