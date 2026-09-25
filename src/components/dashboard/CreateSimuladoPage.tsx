@@ -159,14 +159,15 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
 
   const loadClasses = async () => {
     try {
-      const response = await apiService.getStudents();
-      if (response && response.students) {
-        const students = response.students || [];
-        const classes = Array.from(new Set(students.map((s: any) => s.class).filter(Boolean)));
-        setAvailableClasses(classes as string[]);
-      } else {
-        setAvailableClasses([]);
-      }
+      const [studentsResponse, classesResponse] = await Promise.all([
+        apiService.getStudents().catch(() => null),
+        apiService.getClasses().catch(() => null),
+      ]);
+      const fromStudents = (studentsResponse?.students || []).map((s: any) => s.class);
+      const fromClasses = (classesResponse?.classes || []).map((c: any) => c.name);
+      const all = [...fromClasses, ...fromStudents].filter(Boolean).map((c: string) => String(c).trim());
+      const unique = Array.from(new Map(all.map(c => [c.toLowerCase(), c])).values());
+      setAvailableClasses(unique.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true })));
     } catch (error) {
       console.error('Error loading classes:', error);
       setAvailableClasses([]);
@@ -219,7 +220,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
         question: question.question,
         subject: question.subject?.trim() || sectionName || 'Geral',
         difficulty: question.difficulty || 'Médio',
-        type: question.type,
+        type: question.type === 'essay' ? 'Dissertativa' : 'Objetiva',
+        questionType: question.type,
         options: question.options,
         correctAnswer: question.correctAnswer,
         tags: question.tags,
@@ -933,7 +935,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                                       ? 'bg-zinc-100 text-zinc-900'
                                       : 'bg-cyan-100 text-cyan-800'
                                   }>
-                                    {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
+                                    {question.type === 'essay' ? 'Dissertativa' : 'Objetiva'}
                                   </Badge>
                                   <Badge className={
                                     question.difficulty === 'Fácil' ? 'bg-green-100 text-green-800' :
@@ -1157,7 +1159,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="multiple-choice">Múltipla Escolha</SelectItem>
+                    <SelectItem value="multiple-choice">Objetiva</SelectItem>
                     <SelectItem value="essay">Dissertativa</SelectItem>
                   </SelectContent>
                 </Select>
@@ -1395,7 +1397,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                                 ? 'bg-zinc-100 text-zinc-900'
                                 : 'bg-cyan-100 text-cyan-800'
                             }>
-                              {question.type === 'essay' ? 'Dissertativa' : 'Múltipla Escolha'}
+                              {question.type === 'essay' ? 'Dissertativa' : 'Objetiva'}
                             </Badge>
                             <Badge className={
                               question.difficulty === 'Fácil' ? 'bg-green-100 text-green-800' :

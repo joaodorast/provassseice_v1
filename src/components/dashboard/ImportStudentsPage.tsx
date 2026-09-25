@@ -172,6 +172,7 @@ export function ManageStudentsPage() {
       console.log(`Importing ${newStudents.length} students:`, newStudents.slice(0, 3));
 
       await apiService.createStudents(newStudents);
+      await ensureClassesExist(newStudents);
       await loadStudents();
       toast.success(`${newStudents.length} alunos importados com sucesso!`);
       
@@ -185,6 +186,37 @@ export function ManageStudentsPage() {
     }
   };
 
+  // Cadastra em "Gerenciar Turmas" as turmas dos alunos que ainda não existem lá
+  const ensureClassesExist = async (studentsList: { class?: string; grade?: string }[]) => {
+    try {
+      const names = new Map<string, string>();
+      studentsList.forEach(s => {
+        const name = (s.class || '').trim();
+        if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), s.grade?.trim() || '');
+      });
+      if (names.size === 0) return;
+
+      const existing = (await apiService.getClasses())?.classes || [];
+      const existingNames = new Set(existing.map((c: any) => String(c.name).trim().toLowerCase()));
+      const missing = Array.from(names.entries()).filter(([key]) => !existingNames.has(key));
+
+      for (const [key, grade] of missing) {
+        const original = studentsList.find(s => (s.class || '').trim().toLowerCase() === key)!.class!.trim();
+        await apiService.createClass({
+          name: original,
+          grade: grade || original,
+          shift: 'Matutino',
+          year: new Date().getFullYear().toString()
+        });
+      }
+      if (missing.length > 0) {
+        toast.success(`${missing.length} turma(s) cadastrada(s) automaticamente em Gerenciar Turmas`);
+      }
+    } catch (error) {
+      console.error('Error auto-registering classes:', error);
+    }
+  };
+
   const handleAddStudent = async () => {
     if (!newStudent.name || !newStudent.email) {
       toast.error('Nome e email são obrigatórios');
@@ -194,6 +226,7 @@ export function ManageStudentsPage() {
     try {
       setLoading(true);
       await apiService.createStudents([newStudent]);
+      await ensureClassesExist([newStudent]);
       await loadStudents();
       setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
       setShowAddForm(false);

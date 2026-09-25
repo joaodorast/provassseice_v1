@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
 import { Badge } from '../ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import { 
   GraduationCap, 
@@ -240,51 +241,63 @@ export function ManageClassesPage() {
         </Card>
       </div>
 
-      {/* Add/Edit Form */}
-      {(showAddForm || editingClass) && (
-        <Card className="seice-card">
-          <CardHeader>
-            <CardTitle>{editingClass ? 'Editar Turma' : 'Nova Turma'}</CardTitle>
-            <CardDescription>
-              {editingClass ? 'Altere os dados da turma' : 'Preencha os dados da nova turma'}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      {/* Modal de criar/editar turma */}
+      <Dialog
+        open={showAddForm || !!editingClass}
+        onOpenChange={(open) => {
+          if (!open) {
+            setShowAddForm(false);
+            setEditingClass(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-xl bg-yellow-400 flex items-center justify-center flex-shrink-0">
+                <GraduationCap className="w-6 h-6 text-zinc-900" />
+              </div>
               <div>
-                <Label htmlFor="name">Nome da Turma</Label>
+                <DialogTitle>{editingClass ? 'Editar Turma' : 'Nova Turma'}</DialogTitle>
+                <DialogDescription>
+                  {editingClass ? 'Altere os dados da turma' : 'Preencha os dados para cadastrar a turma'}
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+          <form
+            className="space-y-5"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (editingClass) handleUpdateClass(); else handleAddClass();
+            }}
+          >
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="sm:col-span-2">
+                <Label htmlFor="name">Nome da Turma *</Label>
                 <Input
                   id="name"
+                  autoFocus
                   value={editingClass ? editingClass.name : newClass.name}
-                  onChange={(e) => editingClass 
+                  onChange={(e) => editingClass
                     ? setEditingClass({ ...editingClass, name: e.target.value })
                     : setNewClass(prev => ({ ...prev, name: e.target.value }))
                   }
-                  placeholder="Ex: Turma A, 301, etc"
+                  placeholder="Ex: 301, Turma A"
+                  className="mt-1"
                 />
               </div>
               <div>
-                <Label htmlFor="grade">Série/Ano</Label>
+                <Label htmlFor="grade">Série/Ano *</Label>
                 <Input
                   id="grade"
                   value={editingClass ? editingClass.grade : newClass.grade}
-                  onChange={(e) => editingClass 
+                  onChange={(e) => editingClass
                     ? setEditingClass({ ...editingClass, grade: e.target.value })
                     : setNewClass(prev => ({ ...prev, grade: e.target.value }))
                   }
-                  placeholder="Ex: 1º Ano, 6º Ano, etc"
-                />
-              </div>
-              <div>
-                <Label htmlFor="shift">Turno</Label>
-                <Input
-                  id="shift"
-                  value={editingClass ? editingClass.shift : newClass.shift}
-                  onChange={(e) => editingClass 
-                    ? setEditingClass({ ...editingClass, shift: e.target.value })
-                    : setNewClass(prev => ({ ...prev, shift: e.target.value }))
-                  }
-                  placeholder="Ex: Matutino, Vespertino, Noturno"
+                  placeholder="Ex: 1º Ano, 6º Ano"
+                  className="mt-1"
                 />
               </div>
               <div>
@@ -292,42 +305,58 @@ export function ManageClassesPage() {
                 <Input
                   id="year"
                   value={editingClass ? editingClass.year : newClass.year}
-                  onChange={(e) => editingClass 
+                  onChange={(e) => editingClass
                     ? setEditingClass({ ...editingClass, year: e.target.value })
                     : setNewClass(prev => ({ ...prev, year: e.target.value }))
                   }
-                  placeholder="Ex: 2025"
+                  placeholder="Ex: 2026"
+                  className="mt-1"
                 />
               </div>
+              <div className="sm:col-span-2">
+                <Label>Turno *</Label>
+                <div className="grid grid-cols-3 gap-2 mt-1">
+                  {['Matutino', 'Vespertino', 'Noturno'].map((option) => {
+                    const current = editingClass ? editingClass.shift : newClass.shift;
+                    const selected = current === option;
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        onClick={() => editingClass
+                          ? setEditingClass({ ...editingClass, shift: option })
+                          : setNewClass(prev => ({ ...prev, shift: option }))
+                        }
+                        className={`rounded-lg border px-3 py-2.5 text-sm font-medium transition ${
+                          selected
+                            ? 'bg-zinc-900 text-yellow-400 border-zinc-900'
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
+                        }`}
+                      >
+                        {option}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-            <div className="flex space-x-2 mt-6">
-              {editingClass ? (
-                <>
-                  <Button onClick={handleUpdateClass} disabled={loading}>
-                    <Save className="w-4 h-4 mr-2" />
-                    {loading ? 'Salvando...' : 'Salvar Alterações'}
-                  </Button>
-                  <Button variant="outline" onClick={() => setEditingClass(null)}>
-                    <X className="w-4 h-4 mr-2" />
-                    Cancelar
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <Button onClick={handleAddClass} disabled={loading}>
-                    <Plus className="w-4 h-4 mr-2" />
-                    {loading ? 'Criando...' : 'Criar Turma'}
-                  </Button>
-                  <Button variant="outline" onClick={() => setShowAddForm(false)}>
-                    <X className="w-4 h-4 mr-2" />
-                    Cancelar
-                  </Button>
-                </>
-              )}
+            <div className="flex justify-end gap-2 pt-4 border-t">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => { setShowAddForm(false); setEditingClass(null); }}
+              >
+                <X className="w-4 h-4 mr-2" />
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={loading}>
+                {editingClass ? <Save className="w-4 h-4 mr-2" /> : <Plus className="w-4 h-4 mr-2" />}
+                {loading ? 'Salvando...' : editingClass ? 'Salvar Alterações' : 'Criar Turma'}
+              </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {/* Classes List */}
       <Card className="seice-card">

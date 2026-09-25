@@ -45,7 +45,7 @@ export function QuestionBankPage() {
     grade: '',
     difficulty: '',
     questionType: 'multiple-choice' as 'multiple-choice' | 'essay',
-    type: 'Múltipla Escolha',
+    type: 'Objetiva',
     options: ['', '', '', ''],
     correctAnswer: 0,
     tags: '',
@@ -194,7 +194,7 @@ export function QuestionBankPage() {
         grade: newQuestion.grade,
         difficulty: newQuestion.difficulty,
         questionType: newQuestion.questionType,
-        type: newQuestion.questionType === 'essay' ? 'Dissertativa' : 'Múltipla Escolha',
+        type: newQuestion.questionType === 'essay' ? 'Dissertativa' : 'Objetiva',
         tags: newQuestion.tags.split(',').map(tag => tag.trim()).filter(Boolean),
         explanation: '',
         weight: newQuestion.weight || 1.0
@@ -237,7 +237,7 @@ export function QuestionBankPage() {
         grade: '',
         difficulty: '',
         questionType: 'multiple-choice',
-        type: 'Múltipla Escolha',
+        type: 'Objetiva',
         options: ['', '', '', ''],
         correctAnswer: 0,
         tags: '',
@@ -265,7 +265,7 @@ export function QuestionBankPage() {
       grade: question.grade || '',
       difficulty: question.difficulty || '',
       questionType: question.questionType === 'essay' ? 'essay' : 'multiple-choice',
-      type: question.type || 'Múltipla Escolha',
+      type: question.type || 'Objetiva',
       options: question.options && question.options.length > 0 ? [...question.options, '', '', '', ''].slice(0, 4) : ['', '', '', ''],
       correctAnswer: typeof question.correctAnswer === 'number' ? question.correctAnswer : 0,
       tags: Array.isArray(question.tags) ? question.tags.join(', ') : '',
@@ -282,7 +282,7 @@ export function QuestionBankPage() {
       grade: '',
       difficulty: '',
       questionType: 'multiple-choice',
-      type: 'Múltipla Escolha',
+      type: 'Objetiva',
       options: ['', '', '', ''],
       correctAnswer: 0,
       tags: '',
@@ -359,7 +359,7 @@ export function QuestionBankPage() {
             question: row['Questão'] || row['question'] || '',
             subject: row['Matéria'] || row['subject'] || '',
             difficulty: row['Dificuldade'] || row['difficulty'] || 'Médio',
-            type: 'Múltipla Escolha',
+            type: 'Objetiva',
             options: [
               row['Alternativa A'] || row['option_a'] || '',
               row['Alternativa B'] || row['option_b'] || '',
@@ -540,7 +540,7 @@ export function QuestionBankPage() {
                     <SelectValue placeholder="Selecione o tipo" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="multiple-choice">Múltipla Escolha</SelectItem>
+                    <SelectItem value="multiple-choice">Objetiva</SelectItem>
                     <SelectItem value="essay">Dissertativa</SelectItem>
                   </SelectContent>
                 </Select>
@@ -731,7 +731,7 @@ export function QuestionBankPage() {
                       {question.difficulty}
                     </Badge>
                     <Badge variant="outline" className="text-xs">
-                      {question.type}
+                      {question.questionType === 'essay' ? 'Dissertativa' : 'Objetiva'}
                     </Badge>
                     <Badge variant="outline" className="bg-teal-50 text-teal-700 text-xs">
                       Peso: {question.weight || 1.0}
