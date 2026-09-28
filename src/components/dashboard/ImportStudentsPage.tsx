@@ -39,41 +39,100 @@ type Student = {
 const stripAccents = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '');
 const normalizeHeaderCell = (h: unknown) => stripAccents(String(h ?? '')).toLowerCase().trim();
 
-// Converte linhas de uma planilha/CSV em alunos. Tenta reconhecer as colunas pelo nome do
-// cabeçalho (Nome, Email, Turma, Série, Matrícula, em qualquer ordem — cobre exportações de
-// outros sistemas, como "MATRÍCULA, ALUNO"); se não achar um cabeçalho reconhecível, cai no
-// formato fixo antigo (Nome, Email, Turma, Série, Matrícula, nessa ordem) para não quebrar
-// planilhas já usadas com o modelo do sistema.
+// Quando a planilha não tem cabeçalho reconhecível, tenta adivinhar qual coluna é o nome, o
+// email e a matrícula só olhando pro CONTEÚDO das linhas: email é o que tem "@"; matrícula é
+// a coluna que é só número; nome é a coluna de texto (não numérica, não email) com mais
+// palavras em média, já que nome completo costuma ter nome + sobrenome(s).
+function guessColumnsFromData(dataRows: any[][], colCount: number) {
+  const stats = Array.from({ length: colCount }, () => ({ total: 0, emailish: 0, numeric: 0, wordsSum: 0 }));
+
+  dataRows.slice(0, 30).forEach(row => {
+    for (let c = 0; c < colCount; c++) {
+      const v = String(row?.[c] ?? '').trim();
+      if (!v) continue;
+      const s = stats[c];
+      s.total++;
+      if (v.includes('@')) s.emailish++;
+      if (/^\d+$/.test(v)) s.numeric++;
+      s.wordsSum += v.split(/\s+/).filter(Boolean).length;
+    }
+  });
+
+  let cEmail = -1;
+  stats.forEach((s, i) => {
+    if (cEmail === -1 && s.total > 0 && s.emailish / s.total > 0.5) cEmail = i;
+  });
+
+  let cName = -1;
+  let bestAvgWords = -1;
+  stats.forEach((s, i) => {
+    if (i === cEmail || s.total === 0) return;
+    if (s.numeric / s.total > 0.5) return; // coluna majoritariamente numérica não é nome
+    const avgWords = s.wordsSum / s.total;
+    if (avgWords > bestAvgWords) { bestAvgWords = avgWords; cName = i; }
+  });
+
+  let cRegistration = -1;
+  stats.forEach((s, i) => {
+    if (cRegistration === -1 && i !== cEmail && i !== cName && s.total > 0 && s.numeric / s.total > 0.5) {
+      cRegistration = i;
+    }
+  });
+
+  return { cName, cEmail, cRegistration };
+}
+
+// Converte linhas de uma planilha/CSV em alunos. Tenta, nessa ordem: (1) reconhecer as
+// colunas pelo nome do cabeçalho (Nome, Email, Turma, Série, Matrícula, em qualquer ordem —
+// cobre exportações de outros sistemas, como "MATRÍCULA, ALUNO"); (2) se não achar cabeçalho
+// nenhum, adivinhar pelo conteúdo das células (guessColumnsFromData); (3) por último, assume o
+// modelo fixo antigo (Nome, Email, Turma, Série, Matrícula, nessa ordem). Assim, mesmo uma
+// planilha "de qualquer jeito" — sem os campos certos — tem uma chance boa de ser importada.
 function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Omit<Student, 'id' | 'status' | 'createdAt'>[] {
   if (rows.length === 0) return [];
 
+  const colCount = Math.max(...rows.map(r => r?.length || 0), 1);
   const header = rows[0].map(normalizeHeaderCell);
   const findCol = (...names: string[]) => header.findIndex(h => names.some(n => h.includes(n)));
 
-  const cName = findCol('nome', 'aluno', 'estudante');
-  const cEmail = findCol('email', 'e-mail');
-  const cClass = findCol('turma', 'classe');
-  const cGrade = findCol('serie', 'ano');
-  const cRegistration = findCol('matricula', 'registro', 'ra');
+  let cName = findCol('nome', 'aluno', 'estudante');
+  let cEmail = findCol('email', 'e-mail');
+  let cClass = findCol('turma', 'classe');
+  let cGrade = findCol('serie', 'ano');
+  let cRegistration = findCol('matricula', 'registro', 'ra');
 
-  const useHeader = cName >= 0;
   const dataRows = rows.slice(1);
+
+  if (cName < 0) {
+    // Nenhum cabeçalho reconhecido: tenta adivinhar pelo conteúdo dos dados
+    const guessed = guessColumnsFromData(dataRows, colCount);
+    if (guessed.cName >= 0) {
+      cName = guessed.cName;
+      cEmail = guessed.cEmail;
+      cRegistration = guessed.cRegistration;
+      cClass = -1;
+      cGrade = -1;
+    } else {
+      // Último recurso: modelo fixo antigo (Nome, Email, Turma, Série, Matrícula)
+      cName = 0; cEmail = 1; cClass = 2; cGrade = 3; cRegistration = 4;
+    }
+  }
+
+  const cell = (row: any[], idx: number) => (idx >= 0 ? String(row?.[idx] ?? '').trim() : '');
   const students: Omit<Student, 'id' | 'status' | 'createdAt'>[] = [];
 
   for (const row of dataRows) {
     if (!row || row.length === 0) continue;
 
-    const name = useHeader
-      ? String(row[cName] ?? '').trim()
-      : String(row[0] ?? '').trim();
+    const name = cell(row, cName);
     if (!name) continue;
 
     students.push({
       name,
-      email: String((useHeader ? row[cEmail] : row[1]) ?? '').trim(),
-      class: String((useHeader ? row[cClass] : row[2]) ?? '').trim() || sheetNameAsClassFallback,
-      grade: String((useHeader ? row[cGrade] : row[3]) ?? '').trim(),
-      registration: String((useHeader ? row[cRegistration] : row[4]) ?? '').trim()
+      email: cell(row, cEmail),
+      class: cell(row, cClass) || sheetNameAsClassFallback,
+      grade: cell(row, cGrade),
+      registration: cell(row, cRegistration)
     });
   }
 
