@@ -38,3 +38,5 @@ coverage/
 # ===== Outros =====
 *.bak
 *.tmp
+.vercel
+.env*
