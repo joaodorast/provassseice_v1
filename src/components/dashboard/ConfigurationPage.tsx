@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -33,13 +33,100 @@ import {
   Plus,
   Trash2,
   Edit,
-  GraduationCap
+  GraduationCap,
+  Lightbulb
 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { User, Exam, Submission } from '../../App';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+import { readStudentsFromFile, isStudentSpreadsheet, ensureClassesExist, stripAccents, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
+import { ActionResultDialog, ActionResult } from './ActionResultDialog';
+
+// Abas ainda sem efeito real no sistema (as opções são salvas mas nada as usa).
+// Ficam escondidas até serem implementadas; mude para true para exibi-las.
+const SHOW_UNFINISHED_SETTINGS = false;
+
+const DEFAULT_SYSTEM_SETTINGS = {
+  defaultTimeLimit: 60,
+  allowReviewAnswers: true,
+  shuffleQuestions: false,
+  showCorrectAnswers: true,
+  requireRegistration: true,
+  enableNotifications: true,
+  autoSaveInterval: 30,
+  language: 'pt-BR',
+  timezone: 'America/Sao_Paulo'
+};
+
+const DEFAULT_NOTIFICATIONS = {
+  emailOnSubmission: true,
+  emailOnNewStudent: false,
+  emailWeeklyReport: true,
+  pushNotifications: true,
+  smsNotifications: false
+};
+
+const DEFAULT_SECURITY = {
+  twoFactorAuth: false,
+  sessionTimeout: 120,
+  passwordExpiry: 90,
+  loginAttempts: 5
+};
+
+// Itens da planilha gerada por "Exportar Configurações" → onde cada um é gravado ao importar
+const SETTINGS_IMPORT_MAP: Record<string, { group: 'profile' | 'system' | 'notifications' | 'security'; key: string; kind: 'text' | 'number' | 'bool' }> = {
+  'perfil|nome': { group: 'profile', key: 'name', kind: 'text' },
+  'perfil|instituicao': { group: 'profile', key: 'institution', kind: 'text' },
+  'perfil|cargo': { group: 'profile', key: 'position', kind: 'text' },
+  'sistema|tempo limite padrao (min)': { group: 'system', key: 'defaultTimeLimit', kind: 'number' },
+  'sistema|permitir revisar respostas': { group: 'system', key: 'allowReviewAnswers', kind: 'bool' },
+  'sistema|embaralhar questoes': { group: 'system', key: 'shuffleQuestions', kind: 'bool' },
+  'sistema|mostrar respostas corretas': { group: 'system', key: 'showCorrectAnswers', kind: 'bool' },
+  'sistema|idioma': { group: 'system', key: 'language', kind: 'text' },
+  'sistema|fuso horario': { group: 'system', key: 'timezone', kind: 'text' },
+  'notificacoes|email em nova submissao': { group: 'notifications', key: 'emailOnSubmission', kind: 'bool' },
+  'notificacoes|email em novo aluno': { group: 'notifications', key: 'emailOnNewStudent', kind: 'bool' },
+  'notificacoes|relatorio semanal por email': { group: 'notifications', key: 'emailWeeklyReport', kind: 'bool' },
+  'seguranca|autenticacao de dois fatores': { group: 'security', key: 'twoFactorAuth', kind: 'bool' },
+  'seguranca|tempo de sessao (min)': { group: 'security', key: 'sessionTimeout', kind: 'number' },
+};
+
+const normalizeKey = (text: unknown) => stripAccents(String(text ?? '')).toLowerCase().trim();
+
+// Converte uma questão de um JSON externo para o formato do banco de questões.
+// Aceita nomes em português ou inglês e alternativas como texto ou objeto { text }.
+function toQuestionData(raw: any) {
+  const text = String(raw?.question ?? raw?.questao ?? raw?.enunciado ?? raw?.text ?? '').trim();
+  const rawOptions = raw?.options ?? raw?.alternativas ?? raw?.alternatives ?? [];
+  const options: string[] = (Array.isArray(rawOptions) ? rawOptions : [])
+    .map((o: any) => String(typeof o === 'object' && o !== null ? o.text ?? o.texto ?? '' : o ?? '').trim())
+    .filter(Boolean);
+  const type = raw?.type ?? raw?.tipo ?? (options.length > 0 ? 'Objetiva' : 'Discursiva');
+
+  // Resposta correta como índice (0, 1...) ou letra ("A", "b")
+  let correctAnswer = raw?.correctAnswer ?? raw?.correct_answer ?? raw?.resposta ?? raw?.gabarito ?? 0;
+  if (typeof correctAnswer === 'string' && /^[a-z]$/i.test(correctAnswer.trim())) {
+    correctAnswer = correctAnswer.trim().toUpperCase().charCodeAt(0) - 65;
+  }
+  correctAnswer = Number(correctAnswer) || 0;
+
+  const tags = raw?.tags;
+  return {
+    ...raw,
+    id: undefined,
+    question: text,
+    subject: String(raw?.subject ?? raw?.materia ?? raw?.disciplina ?? 'Geral').trim() || 'Geral',
+    difficulty: raw?.difficulty ?? raw?.dificuldade ?? 'Médio',
+    type,
+    options,
+    correctAnswer,
+    tags: Array.isArray(tags) ? tags : typeof tags === 'string' ? tags.split(',').map((t: string) => t.trim()).filter(Boolean) : [],
+    weight: Number(raw?.weight ?? raw?.peso) || 1
+  };
+}
 
 type ConfigurationPageProps = {
   user: User;
@@ -70,34 +157,13 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
   });
 
   // System Settings
-  const [systemSettings, setSystemSettings] = useState({
-    defaultTimeLimit: 60,
-    allowReviewAnswers: true,
-    shuffleQuestions: false,
-    showCorrectAnswers: true,
-    requireRegistration: true,
-    enableNotifications: true,
-    autoSaveInterval: 30,
-    language: 'pt-BR',
-    timezone: 'America/Sao_Paulo'
-  });
+  const [systemSettings, setSystemSettings] = useState(DEFAULT_SYSTEM_SETTINGS);
 
   // Notification Settings
-  const [notifications, setNotifications] = useState({
-    emailOnSubmission: true,
-    emailOnNewStudent: false,
-    emailWeeklyReport: true,
-    pushNotifications: true,
-    smsNotifications: false
-  });
+  const [notifications, setNotifications] = useState(DEFAULT_NOTIFICATIONS);
 
   // Security Settings
-  const [security, setSecurity] = useState({
-    twoFactorAuth: false,
-    sessionTimeout: 120,
-    passwordExpiry: 90,
-    loginAttempts: 5
-  });
+  const [security, setSecurity] = useState(DEFAULT_SECURITY);
 
   // Subjects and Series Management
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -106,6 +172,14 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
   const [newSeries, setNewSeries] = useState('');
   const [editingSubject, setEditingSubject] = useState<{ index: number; value: string } | null>(null);
   const [editingSeries, setEditingSeries] = useState<{ index: number; value: string } | null>(null);
+
+  // Importação de dados (aba Dados) e resultado mostrado no modal
+  const [importing, setImporting] = useState<'students' | 'questions' | 'settings' | null>(null);
+  const [actionResult, setActionResult] = useState<ActionResult | null>(null);
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const studentsFileRef = useRef<HTMLInputElement>(null);
+  const questionsFileRef = useRef<HTMLInputElement>(null);
+  const settingsFileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     loadUserData();
@@ -467,7 +541,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
         { categoria: 'Notificações', chave: 'Relatório Semanal por Email', valor: notifications.emailWeeklyReport ? 'Sim' : 'Não' },
         { categoria: 'Segurança', chave: 'Autenticação de Dois Fatores', valor: security.twoFactorAuth ? 'Sim' : 'Não' },
         { categoria: 'Segurança', chave: 'Tempo de Sessão (min)', valor: String(security.sessionTimeout) },
-        { categoria: 'Séries Cadastradas', chave: '—', valor: series.join(', ') || 'Nenhuma' },
+        { categoria: 'Cursos Cadastrados', chave: '—', valor: series.join(', ') || 'Nenhuma' },
         { categoria: 'Matérias Cadastradas', chave: '—', valor: subjects.join(', ') || 'Nenhuma' },
       ];
 
@@ -491,13 +565,250 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
     }
   };
 
-  const handleImportData = () => {
-    toast.success('Dados importados com sucesso!');
+  // Grava um grupo de configurações (system / notifications / security) no servidor
+  const saveSettingsGroup = async (type: 'system' | 'notifications' | 'security', settings: any) => {
+    const token = localStorage.getItem('access_token');
+    const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/user/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ type, settings })
+    });
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({}));
+      throw new Error(result.error || 'Erro ao salvar configurações');
+    }
   };
 
-  const handleResetSettings = () => {
-    if (window.confirm('Tem certeza que deseja restaurar as configurações padrão?')) {
-      toast.success('Configurações restauradas para o padrão!');
+  const handleImportStudents = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    if (!isStudentSpreadsheet(file)) {
+      setActionResult({ type: 'error', title: 'Arquivo não suportado', message: 'Selecione um arquivo CSV ou Excel (.xlsx, .xls).' });
+      return;
+    }
+
+    setImporting('students');
+    try {
+      const students = await readStudentsFromFile(file);
+      if (students.length === 0) {
+        setActionResult({
+          type: 'error',
+          title: 'Nenhum aluno importado',
+          message: 'Nenhum aluno válido encontrado no arquivo. Confira se há uma coluna com o nome do aluno.'
+        });
+        return;
+      }
+
+      const summary = await saveImportedStudents(students);
+      setActionResult(describeStudentImport(summary));
+    } catch (error: any) {
+      console.error('Error importing students:', error);
+      setActionResult({ type: 'error', title: 'Falha na importação', message: 'Erro ao processar arquivo: ' + (error?.message || 'Erro desconhecido') });
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const handleImportQuestions = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setImporting('questions');
+    try {
+      let parsed: any;
+      try {
+        parsed = JSON.parse(await file.text());
+      } catch {
+        setActionResult({ type: 'error', title: 'Arquivo inválido', message: 'O arquivo não é um JSON válido.' });
+        return;
+      }
+
+      // Aceita uma lista de questões, { questions: [...] } ou simulados com as questões dentro
+      const list: any[] = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.questions)
+          ? parsed.questions
+          : Array.isArray(parsed?.exams)
+            ? parsed.exams.flatMap((e: any) => e?.questions || [])
+            : [];
+
+      const questions = list.map(toQuestionData);
+      const valid = questions.filter(q => q.question && (q.type !== 'Objetiva' || q.options.length >= 2));
+      const invalidCount = questions.length - valid.length;
+
+      if (valid.length === 0) {
+        setActionResult({
+          type: 'error',
+          title: 'Nenhuma questão importada',
+          message: 'Nenhuma questão válida encontrada. Cada questão precisa de enunciado ("question") e, se for objetiva, de pelo menos 2 alternativas ("options").'
+        });
+        return;
+      }
+
+      let successCount = 0;
+      for (const q of valid) {
+        try {
+          const response = await apiService.createQuestion(q);
+          if (response?.success === false) throw new Error(response.error);
+          successCount++;
+        } catch (error) {
+          console.error('Error importing question:', error);
+        }
+      }
+      const failedCount = invalidCount + (valid.length - successCount);
+
+      setActionResult({
+        type: successCount > 0 ? 'success' : 'error',
+        title: successCount > 0 ? 'Importação concluída' : 'Falha na importação',
+        message: successCount > 0
+          ? `${successCount} ${successCount === 1 ? 'questão importada' : 'questões importadas'} para o Banco de Questões.`
+          : 'Nenhuma questão pôde ser salva. Tente novamente.',
+        details: failedCount > 0 ? [`${failedCount} ${failedCount === 1 ? 'questão ignorada' : 'questões ignoradas'} por erro ou formato inválido`] : undefined
+      });
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  // Importa a planilha gerada por "Exportar Configurações" (ou um JSON com os mesmos grupos)
+  const handleImportSettings = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    setImporting('settings');
+    try {
+      const imported = {
+        profile: {} as Record<string, any>,
+        system: {} as Record<string, any>,
+        notifications: {} as Record<string, any>,
+        security: {} as Record<string, any>
+      };
+      let importedCourses: string[] = [];
+      let importedSubjects: string[] = [];
+
+      if (/\.json$/i.test(file.name)) {
+        const parsed = JSON.parse(await file.text());
+        Object.assign(imported.profile, parsed?.profile || {});
+        Object.assign(imported.system, parsed?.system || {});
+        Object.assign(imported.notifications, parsed?.notifications || {});
+        Object.assign(imported.security, parsed?.security || {});
+        importedCourses = Array.isArray(parsed?.series) ? parsed.series : [];
+        importedSubjects = Array.isArray(parsed?.subjects) ? parsed.subjects : [];
+      } else {
+        const XLSX = await import('xlsx');
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+        const rows = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { header: 1, defval: '' }) as any[][];
+        const splitList = (v: string) => (normalizeKey(v) === 'nenhuma' ? [] : v.split(',').map(x => x.trim()).filter(Boolean));
+
+        for (const row of rows) {
+          // A planilha tem título e cabeçalho antes dos dados: só as linhas "Categoria | Item | Valor" contam
+          const cells = row.map(c => String(c ?? '').trim()).filter(Boolean);
+          if (cells.length < 2) continue;
+          const [category, item, value = ''] = cells.length === 2 ? [cells[0], '', cells[1]] : cells;
+          const cat = normalizeKey(category);
+
+          if (cat === 'cursos cadastrados') { importedCourses = splitList(value); continue; }
+          if (cat === 'materias cadastradas') { importedSubjects = splitList(value); continue; }
+
+          const target = SETTINGS_IMPORT_MAP[`${cat}|${normalizeKey(item)}`];
+          if (!target) continue;
+          imported[target.group][target.key] =
+            target.kind === 'bool' ? normalizeKey(value) === 'sim'
+              : target.kind === 'number' ? Number(value) || 0
+                : value;
+        }
+      }
+
+      const applied: string[] = [];
+      const token = localStorage.getItem('access_token');
+
+      if (Object.keys(imported.profile).length > 0) {
+        // O email é o login: nunca é trocado pela importação
+        const newProfile = { ...profileData, ...imported.profile, email: profileData.email };
+        const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/user/profile`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify(newProfile)
+        });
+        if (!response.ok) throw new Error('Erro ao salvar o perfil');
+        setProfileData(newProfile);
+        applied.push('Perfil (nome, instituição e cargo)');
+      }
+
+      const groups = [
+        { type: 'system' as const, current: systemSettings, set: setSystemSettings, label: 'Preferências do sistema' },
+        { type: 'notifications' as const, current: notifications, set: setNotifications, label: 'Notificações' },
+        { type: 'security' as const, current: security, set: setSecurity, label: 'Segurança' }
+      ];
+      for (const g of groups) {
+        if (Object.keys(imported[g.type]).length === 0) continue;
+        const merged = { ...g.current, ...imported[g.type] };
+        await saveSettingsGroup(g.type, merged);
+        g.set(merged as any);
+        applied.push(g.label);
+      }
+
+      // Cursos e matérias: só acrescenta os que ainda não existem (não apaga nada)
+      const newCourses = importedCourses.filter(c => !series.includes(c));
+      const newSubjects = importedSubjects.filter(m => !subjects.includes(m));
+      if (newCourses.length > 0 || newSubjects.length > 0) {
+        const updatedSeries = [...series, ...newCourses];
+        const updatedSubjects = [...subjects, ...newSubjects];
+        const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${publicAnonKey}` },
+          body: JSON.stringify({ subjects: updatedSubjects, series: updatedSeries })
+        });
+        if (!response.ok) throw new Error('Erro ao salvar cursos e matérias');
+        setSeries(updatedSeries);
+        setSubjects(updatedSubjects);
+        if (newCourses.length > 0) applied.push(`${newCourses.length} curso(s) novo(s)`);
+        if (newSubjects.length > 0) applied.push(`${newSubjects.length} matéria(s) nova(s)`);
+      }
+
+      if (applied.length === 0) {
+        setActionResult({
+          type: 'error',
+          title: 'Nada para importar',
+          message: 'O arquivo não tem configurações reconhecidas. Use a planilha gerada por "Exportar Configurações".'
+        });
+        return;
+      }
+
+      setActionResult({ type: 'success', title: 'Configurações importadas', message: 'Itens atualizados:', details: applied });
+    } catch (error: any) {
+      console.error('Error importing settings:', error);
+      setActionResult({ type: 'error', title: 'Falha na importação', message: error?.message || 'Não foi possível ler o arquivo de configurações.' });
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  // Volta sistema, notificações e segurança ao padrão (perfil, cursos e matérias não mudam)
+  const handleResetSettings = async () => {
+    setShowResetDialog(false);
+    setLoading(true);
+    try {
+      await saveSettingsGroup('system', DEFAULT_SYSTEM_SETTINGS);
+      await saveSettingsGroup('notifications', DEFAULT_NOTIFICATIONS);
+      await saveSettingsGroup('security', DEFAULT_SECURITY);
+      setSystemSettings(DEFAULT_SYSTEM_SETTINGS);
+      setNotifications(DEFAULT_NOTIFICATIONS);
+      setSecurity(DEFAULT_SECURITY);
+      setActionResult({
+        type: 'success',
+        title: 'Configurações restauradas',
+        message: 'As preferências voltaram ao padrão. Seu perfil, cursos e matérias não foram alterados.'
+      });
+    } catch (error: any) {
+      console.error('Error resetting settings:', error);
+      setActionResult({ type: 'error', title: 'Falha ao restaurar', message: error?.message || 'Tente novamente.' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -563,7 +874,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
   };
 
   const handleDeleteSubject = async (index: number) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta matéria?')) {
+    if (!(await confirmAction({ title: 'Excluir matéria?', itemName: subjects[index] }))) {
       return;
     }
 
@@ -597,12 +908,12 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
 
   const handleAddSeries = async () => {
     if (!newSeries.trim()) {
-      toast.error('Digite o nome da série');
+      toast.error('Digite o nome do curso');
       return;
     }
     
     if (series.includes(newSeries.trim())) {
-      toast.error('Esta série já existe');
+      toast.error('Este curso já existe');
       return;
     }
 
@@ -622,21 +933,21 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
       const result = await response.json();
       
       if (!response.ok) {
-        toast.error(result.error || 'Erro ao adicionar série');
+        toast.error(result.error || 'Erro ao adicionar curso');
         return;
       }
       
       setSeries(updatedSeries);
       setNewSeries('');
-      toast.success('Série adicionada com sucesso!');
+      toast.success('Curso adicionado com sucesso!');
     } catch (error) {
       console.error('Error adding series:', error);
-      toast.error('Erro ao adicionar série');
+      toast.error('Erro ao adicionar curso');
     }
   };
 
   const handleDeleteSeries = async (index: number) => {
-    if (!window.confirm('Tem certeza que deseja excluir esta série?')) {
+    if (!(await confirmAction({ title: 'Excluir curso?', itemName: series[index] }))) {
       return;
     }
 
@@ -656,15 +967,15 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
       const result = await response.json();
       
       if (!response.ok) {
-        toast.error(result.error || 'Erro ao excluir série');
+        toast.error(result.error || 'Erro ao excluir curso');
         return;
       }
       
       setSeries(updatedSeries);
-      toast.success('Série excluída com sucesso!');
+      toast.success('Curso excluído com sucesso!');
     } catch (error) {
       console.error('Error deleting series:', error);
-      toast.error('Erro ao excluir série');
+      toast.error('Erro ao excluir curso');
     }
   };
 
@@ -679,7 +990,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
           </p>
         </div>
         <div className="flex space-x-2">
-          <Button variant="outline" onClick={handleResetSettings}>
+          <Button variant="outline" onClick={() => setShowResetDialog(true)} disabled={loading}>
             <RotateCcw className="w-4 h-4 mr-2" />
             Restaurar Padrão
           </Button>
@@ -687,27 +998,33 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
-        <TabsList className="grid w-full grid-cols-6">
+        <TabsList className={`grid w-full ${SHOW_UNFINISHED_SETTINGS ? 'grid-cols-6' : 'grid-cols-3'}`}>
           <TabsTrigger value="profile" className="flex items-center space-x-2">
             <UserIcon className="w-4 h-4" />
             <span>Perfil</span>
           </TabsTrigger>
-          <TabsTrigger value="system" className="flex items-center space-x-2">
-            <Settings className="w-4 h-4" />
-            <span>Sistema</span>
-          </TabsTrigger>
+          {SHOW_UNFINISHED_SETTINGS && (
+            <TabsTrigger value="system" className="flex items-center space-x-2">
+              <Settings className="w-4 h-4" />
+              <span>Sistema</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="academic" className="flex items-center space-x-2">
             <GraduationCap className="w-4 h-4" />
             <span>Acadêmico</span>
           </TabsTrigger>
-          <TabsTrigger value="notifications" className="flex items-center space-x-2">
-            <Bell className="w-4 h-4" />
-            <span>Notificações</span>
-          </TabsTrigger>
-          <TabsTrigger value="security" className="flex items-center space-x-2">
-            <Shield className="w-4 h-4" />
-            <span>Segurança</span>
-          </TabsTrigger>
+          {SHOW_UNFINISHED_SETTINGS && (
+            <TabsTrigger value="notifications" className="flex items-center space-x-2">
+              <Bell className="w-4 h-4" />
+              <span>Notificações</span>
+            </TabsTrigger>
+          )}
+          {SHOW_UNFINISHED_SETTINGS && (
+            <TabsTrigger value="security" className="flex items-center space-x-2">
+              <Shield className="w-4 h-4" />
+              <span>Segurança</span>
+            </TabsTrigger>
+          )}
           <TabsTrigger value="data" className="flex items-center space-x-2">
             <Database className="w-4 h-4" />
             <span>Dados</span>
@@ -810,19 +1127,25 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                       placeholder="Conte um pouco sobre você..."
                     />
                   </div>
-                  <Button onClick={handleSaveProfile} disabled={loading || loadingProfile}>
-                    {loading ? (
-                      <>
-                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        Salvando...
-                      </>
-                    ) : (
-                      <>
-                        <Save className="w-4 h-4 mr-2" />
-                        Salvar Perfil
-                      </>
-                    )}
-                  </Button>
+                  <div className="flex flex-wrap gap-2">
+                    <Button onClick={handleSaveProfile} disabled={loading || loadingProfile}>
+                      {loading ? (
+                        <>
+                          <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                          Salvando...
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-4 h-4 mr-2" />
+                          Salvar Perfil
+                        </>
+                      )}
+                    </Button>
+                    <Button variant="outline" onClick={() => setShowPasswordDialog(true)}>
+                      <Key className="w-4 h-4 mr-2" />
+                      Alterar Senha
+                    </Button>
+                  </div>
                 </>
               )}
             </CardContent>
@@ -830,176 +1153,178 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
         </TabsContent>
 
         {/* System Settings */}
-        <TabsContent value="system" className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <BookOpen className="w-5 h-5 mr-2" />
-                  Configurações de Prova
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="defaultTimeLimit">Tempo Limite Padrão (minutos)</Label>
-                  <Input
-                    id="defaultTimeLimit"
-                    type="number"
-                    value={systemSettings.defaultTimeLimit}
-                    onChange={(e) => setSystemSettings(prev => ({ 
-                      ...prev, defaultTimeLimit: parseInt(e.target.value) || 60 
-                    }))}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="autoSaveInterval">Intervalo de Auto-salvamento (segundos)</Label>
-                  <Input
-                    id="autoSaveInterval"
-                    type="number"
-                    value={systemSettings.autoSaveInterval}
-                    onChange={(e) => setSystemSettings(prev => ({ 
-                      ...prev, autoSaveInterval: parseInt(e.target.value) || 30 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Permitir revisão de respostas</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Alunos podem revisar suas respostas antes de finalizar
-                    </p>
+        {SHOW_UNFINISHED_SETTINGS && (
+          <TabsContent value="system" className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <BookOpen className="w-5 h-5 mr-2" />
+                    Configurações de Prova
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="defaultTimeLimit">Tempo Limite Padrão (minutos)</Label>
+                    <Input
+                      id="defaultTimeLimit"
+                      type="number"
+                      value={systemSettings.defaultTimeLimit}
+                      onChange={(e) => setSystemSettings(prev => ({ 
+                        ...prev, defaultTimeLimit: parseInt(e.target.value) || 60 
+                      }))}
+                    />
                   </div>
-                  <Switch
-                    checked={systemSettings.allowReviewAnswers}
-                    onCheckedChange={(checked) => setSystemSettings(prev => ({ 
-                      ...prev, allowReviewAnswers: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Embaralhar questões</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Ordem das questões será aleatória para cada aluno
-                    </p>
+  
+                  <div className="space-y-2">
+                    <Label htmlFor="autoSaveInterval">Intervalo de Auto-salvamento (segundos)</Label>
+                    <Input
+                      id="autoSaveInterval"
+                      type="number"
+                      value={systemSettings.autoSaveInterval}
+                      onChange={(e) => setSystemSettings(prev => ({ 
+                        ...prev, autoSaveInterval: parseInt(e.target.value) || 30 
+                      }))}
+                    />
                   </div>
-                  <Switch
-                    checked={systemSettings.shuffleQuestions}
-                    onCheckedChange={(checked) => setSystemSettings(prev => ({ 
-                      ...prev, shuffleQuestions: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Mostrar respostas corretas</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Exibir gabarito após finalizar a prova
-                    </p>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Permitir revisão de respostas</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Alunos podem revisar suas respostas antes de finalizar
+                      </p>
+                    </div>
+                    <Switch
+                      checked={systemSettings.allowReviewAnswers}
+                      onCheckedChange={(checked) => setSystemSettings(prev => ({ 
+                        ...prev, allowReviewAnswers: checked 
+                      }))}
+                    />
                   </div>
-                  <Switch
-                    checked={systemSettings.showCorrectAnswers}
-                    onCheckedChange={(checked) => setSystemSettings(prev => ({ 
-                      ...prev, showCorrectAnswers: checked 
-                    }))}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Globe className="w-5 h-5 mr-2" />
-                  Configurações Gerais
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="language">Idioma</Label>
-                  <Select value={systemSettings.language} onValueChange={(value) => 
-                    setSystemSettings(prev => ({ ...prev, language: value }))
-                  }>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
-                      <SelectItem value="en-US">English (US)</SelectItem>
-                      <SelectItem value="es-ES">Español</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="timezone">Fuso Horário</Label>
-                  <Select value={systemSettings.timezone} onValueChange={(value) => 
-                    setSystemSettings(prev => ({ ...prev, timezone: value }))
-                  }>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="America/Sao_Paulo">São Paulo (GMT-3)</SelectItem>
-                      <SelectItem value="America/New_York">Nova York (GMT-5)</SelectItem>
-                      <SelectItem value="Europe/London">Londres (GMT+0)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Exigir cadastro</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Alunos devem se cadastrar para fazer provas
-                    </p>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Embaralhar questões</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Ordem das questões será aleatória para cada aluno
+                      </p>
+                    </div>
+                    <Switch
+                      checked={systemSettings.shuffleQuestions}
+                      onCheckedChange={(checked) => setSystemSettings(prev => ({ 
+                        ...prev, shuffleQuestions: checked 
+                      }))}
+                    />
                   </div>
-                  <Switch
-                    checked={systemSettings.requireRegistration}
-                    onCheckedChange={(checked) => setSystemSettings(prev => ({ 
-                      ...prev, requireRegistration: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Habilitar notificações</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber notificações do sistema
-                    </p>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Mostrar respostas corretas</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Exibir gabarito após finalizar a prova
+                      </p>
+                    </div>
+                    <Switch
+                      checked={systemSettings.showCorrectAnswers}
+                      onCheckedChange={(checked) => setSystemSettings(prev => ({ 
+                        ...prev, showCorrectAnswers: checked 
+                      }))}
+                    />
                   </div>
-                  <Switch
-                    checked={systemSettings.enableNotifications}
-                    onCheckedChange={(checked) => setSystemSettings(prev => ({ 
-                      ...prev, enableNotifications: checked 
-                    }))}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <div className="flex justify-end">
-            <Button onClick={handleSaveSystemSettings} disabled={loading}>
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Salvando...
-                </>
-              ) : (
-                <>
-                  <Save className="w-4 h-4 mr-2" />
-                  Salvar Configurações
-                </>
-              )}
-            </Button>
-          </div>
-        </TabsContent>
+                </CardContent>
+              </Card>
+  
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center">
+                    <Globe className="w-5 h-5 mr-2" />
+                    Configurações Gerais
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="language">Idioma</Label>
+                    <Select value={systemSettings.language} onValueChange={(value) => 
+                      setSystemSettings(prev => ({ ...prev, language: value }))
+                    }>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="pt-BR">Português (Brasil)</SelectItem>
+                        <SelectItem value="en-US">English (US)</SelectItem>
+                        <SelectItem value="es-ES">Español</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+  
+                  <div className="space-y-2">
+                    <Label htmlFor="timezone">Fuso Horário</Label>
+                    <Select value={systemSettings.timezone} onValueChange={(value) => 
+                      setSystemSettings(prev => ({ ...prev, timezone: value }))
+                    }>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="America/Sao_Paulo">São Paulo (GMT-3)</SelectItem>
+                        <SelectItem value="America/New_York">Nova York (GMT-5)</SelectItem>
+                        <SelectItem value="Europe/London">Londres (GMT+0)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Exigir cadastro</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Alunos devem se cadastrar para fazer provas
+                      </p>
+                    </div>
+                    <Switch
+                      checked={systemSettings.requireRegistration}
+                      onCheckedChange={(checked) => setSystemSettings(prev => ({ 
+                        ...prev, requireRegistration: checked 
+                      }))}
+                    />
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Habilitar notificações</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber notificações do sistema
+                      </p>
+                    </div>
+                    <Switch
+                      checked={systemSettings.enableNotifications}
+                      onCheckedChange={(checked) => setSystemSettings(prev => ({ 
+                        ...prev, enableNotifications: checked 
+                      }))}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+  
+            <div className="flex justify-end">
+              <Button onClick={handleSaveSystemSettings} disabled={loading}>
+                {loading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Salvar Configurações
+                  </>
+                )}
+              </Button>
+            </div>
+          </TabsContent>
+        )}
 
         {/* Academic Settings - Subjects and Series */}
         <TabsContent value="academic" className="space-y-6">
@@ -1072,7 +1397,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                 <Card className="border-zinc-200 bg-zinc-50">
                   <CardContent className="p-3">
                     <p className="text-xs text-zinc-900">
-                      💡 Dica: As matérias cadastradas aqui aparecerão automaticamente no Banco de Questões e nos Simulados.
+                      <Lightbulb className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Dica: As matérias cadastradas aqui aparecerão automaticamente no Banco de Questões e nos Simulados.
                     </p>
                   </CardContent>
                 </Card>
@@ -1084,17 +1409,17 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
               <CardHeader>
                 <CardTitle className="flex items-center">
                   <GraduationCap className="w-5 h-5 mr-2" />
-                  Gerenciar Séries
+                  Gerenciar Cursos
                 </CardTitle>
                 <CardDescription>
-                  Adicione e gerencie as séries/anos escolares disponíveis
+                  Adicione e gerencie os cursos disponíveis
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Add Series Form */}
                 <div className="flex space-x-2">
                   <Input
-                    placeholder="Nome da série (ex: 1º Ano, 6º Ano)"
+                    placeholder="Nome do curso (ex: 1º Ano, 6º Ano)"
                     value={newSeries}
                     onChange={(e) => setNewSeries(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && handleAddSeries()}
@@ -1108,17 +1433,17 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                 {/* Series List */}
                 <div className="space-y-2">
                   <Label className="text-sm text-muted-foreground">
-                    Séries Cadastradas ({series.length})
+                    Cursos Cadastrados ({series.length})
                   </Label>
                   <div className="border rounded-lg divide-y max-h-96 overflow-y-auto">
                     {series.length === 0 ? (
                       <div className="p-8 text-center">
                         <GraduationCap className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                         <p className="text-sm text-muted-foreground">
-                          Nenhuma série cadastrada ainda.
+                          Nenhum curso cadastrado ainda.
                         </p>
                         <p className="text-xs text-muted-foreground mt-1">
-                          Adicione séries para usar no banco de questões.
+                          Adicione cursos para usar no banco de questões.
                         </p>
                       </div>
                     ) : (
@@ -1147,7 +1472,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                 <Card className="border-green-200 bg-green-50">
                   <CardContent className="p-3">
                     <p className="text-xs text-green-800">
-                      💡 Dica: As séries cadastradas aqui aparecerão automaticamente no Banco de Questões e nos Simulados.
+                      <Lightbulb className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Dica: Os cursos cadastrados aqui aparecerão automaticamente no Banco de Questões e nos Simulados.
                     </p>
                   </CardContent>
                 </Card>
@@ -1157,192 +1482,97 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
         </TabsContent>
 
         {/* Notifications Settings */}
-        <TabsContent value="notifications" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Bell className="w-5 h-5 mr-2" />
-                Preferências de Notificação
-              </CardTitle>
-              <CardDescription>
-                Configure como e quando você deseja receber notificações
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Email ao receber submissão</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber email quando um aluno finalizar uma prova
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.emailOnSubmission}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ 
-                      ...prev, emailOnSubmission: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Email para novos alunos</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber email quando um novo aluno se cadastrar
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.emailOnNewStudent}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ 
-                      ...prev, emailOnNewStudent: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Relatório semanal por email</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber resumo semanal de atividades por email
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.emailWeeklyReport}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ 
-                      ...prev, emailWeeklyReport: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Notificações push</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber notificações push no navegador
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.pushNotifications}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ 
-                      ...prev, pushNotifications: checked 
-                    }))}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Notificações SMS</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Receber notificações importantes via SMS
-                    </p>
-                  </div>
-                  <Switch
-                    checked={notifications.smsNotifications}
-                    onCheckedChange={(checked) => setNotifications(prev => ({ 
-                      ...prev, smsNotifications: checked 
-                    }))}
-                  />
-                </div>
-              </div>
-
-              <Button onClick={handleSaveNotifications} disabled={loading}>
-                {loading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Salvando...
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-4 h-4 mr-2" />
-                    Salvar Notificações
-                  </>
-                )}
-              </Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        {/* Security Settings */}
-        <TabsContent value="security" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center">
-                <Shield className="w-5 h-5 mr-2" />
-                Configurações de Segurança
-              </CardTitle>
-              <CardDescription>
-                Configure as opções de segurança da sua conta
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="space-y-0.5">
-                    <Label>Autenticação de dois fatores</Label>
-                    <p className="text-sm text-muted-foreground">
-                      Adicionar camada extra de segurança com 2FA
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
+        {SHOW_UNFINISHED_SETTINGS && (
+          <TabsContent value="notifications" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Bell className="w-5 h-5 mr-2" />
+                  Preferências de Notificação
+                </CardTitle>
+                <CardDescription>
+                  Configure como e quando você deseja receber notificações
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Email ao receber submissão</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber email quando um aluno finalizar uma prova
+                      </p>
+                    </div>
                     <Switch
-                      checked={security.twoFactorAuth}
-                      onCheckedChange={(checked) => setSecurity(prev => ({ 
-                        ...prev, twoFactorAuth: checked 
+                      checked={notifications.emailOnSubmission}
+                      onCheckedChange={(checked) => setNotifications(prev => ({ 
+                        ...prev, emailOnSubmission: checked 
                       }))}
                     />
-                    {security.twoFactorAuth && <Badge variant="default">Ativo</Badge>}
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Email para novos alunos</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber email quando um novo aluno se cadastrar
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notifications.emailOnNewStudent}
+                      onCheckedChange={(checked) => setNotifications(prev => ({ 
+                        ...prev, emailOnNewStudent: checked 
+                      }))}
+                    />
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Relatório semanal por email</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber resumo semanal de atividades por email
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notifications.emailWeeklyReport}
+                      onCheckedChange={(checked) => setNotifications(prev => ({ 
+                        ...prev, emailWeeklyReport: checked 
+                      }))}
+                    />
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Notificações push</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber notificações push no navegador
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notifications.pushNotifications}
+                      onCheckedChange={(checked) => setNotifications(prev => ({ 
+                        ...prev, pushNotifications: checked 
+                      }))}
+                    />
+                  </div>
+  
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Notificações SMS</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Receber notificações importantes via SMS
+                      </p>
+                    </div>
+                    <Switch
+                      checked={notifications.smsNotifications}
+                      onCheckedChange={(checked) => setNotifications(prev => ({ 
+                        ...prev, smsNotifications: checked 
+                      }))}
+                    />
                   </div>
                 </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="sessionTimeout">Timeout da sessão (minutos)</Label>
-                  <Input
-                    id="sessionTimeout"
-                    type="number"
-                    value={security.sessionTimeout}
-                    onChange={(e) => setSecurity(prev => ({ 
-                      ...prev, sessionTimeout: parseInt(e.target.value) || 120 
-                    }))}
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Tempo antes da sessão expirar automaticamente
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="passwordExpiry">Expiração da senha (dias)</Label>
-                  <Input
-                    id="passwordExpiry"
-                    type="number"
-                    value={security.passwordExpiry}
-                    onChange={(e) => setSecurity(prev => ({ 
-                      ...prev, passwordExpiry: parseInt(e.target.value) || 90 
-                    }))}
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Quantos dias até ser necessário trocar a senha
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="loginAttempts">Tentativas de login</Label>
-                  <Input
-                    id="loginAttempts"
-                    type="number"
-                    value={security.loginAttempts}
-                    onChange={(e) => setSecurity(prev => ({ 
-                      ...prev, loginAttempts: parseInt(e.target.value) || 5 
-                    }))}
-                  />
-                  <p className="text-sm text-muted-foreground">
-                    Número máximo de tentativas antes de bloquear
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex space-x-2">
-                <Button onClick={handleSaveSecurity} disabled={loading}>
+  
+                <Button onClick={handleSaveNotifications} disabled={loading}>
                   {loading ? (
                     <>
                       <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -1351,18 +1581,117 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                   ) : (
                     <>
                       <Save className="w-4 h-4 mr-2" />
-                      Salvar Segurança
+                      Salvar Notificações
                     </>
                   )}
                 </Button>
-                <Button variant="outline" onClick={() => setShowPasswordDialog(true)}>
-                  <Key className="w-4 h-4 mr-2" />
-                  Alterar Senha
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {/* Security Settings */}
+        {SHOW_UNFINISHED_SETTINGS && (
+          <TabsContent value="security" className="space-y-6">
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Shield className="w-5 h-5 mr-2" />
+                  Configurações de Segurança
+                </CardTitle>
+                <CardDescription>
+                  Configure as opções de segurança da sua conta
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-6">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="space-y-0.5">
+                      <Label>Autenticação de dois fatores</Label>
+                      <p className="text-sm text-muted-foreground">
+                        Adicionar camada extra de segurança com 2FA
+                      </p>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <Switch
+                        checked={security.twoFactorAuth}
+                        onCheckedChange={(checked) => setSecurity(prev => ({ 
+                          ...prev, twoFactorAuth: checked 
+                        }))}
+                      />
+                      {security.twoFactorAuth && <Badge variant="default">Ativo</Badge>}
+                    </div>
+                  </div>
+  
+                  <div className="space-y-2">
+                    <Label htmlFor="sessionTimeout">Timeout da sessão (minutos)</Label>
+                    <Input
+                      id="sessionTimeout"
+                      type="number"
+                      value={security.sessionTimeout}
+                      onChange={(e) => setSecurity(prev => ({ 
+                        ...prev, sessionTimeout: parseInt(e.target.value) || 120 
+                      }))}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Tempo antes da sessão expirar automaticamente
+                    </p>
+                  </div>
+  
+                  <div className="space-y-2">
+                    <Label htmlFor="passwordExpiry">Expiração da senha (dias)</Label>
+                    <Input
+                      id="passwordExpiry"
+                      type="number"
+                      value={security.passwordExpiry}
+                      onChange={(e) => setSecurity(prev => ({ 
+                        ...prev, passwordExpiry: parseInt(e.target.value) || 90 
+                      }))}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Quantos dias até ser necessário trocar a senha
+                    </p>
+                  </div>
+  
+                  <div className="space-y-2">
+                    <Label htmlFor="loginAttempts">Tentativas de login</Label>
+                    <Input
+                      id="loginAttempts"
+                      type="number"
+                      value={security.loginAttempts}
+                      onChange={(e) => setSecurity(prev => ({ 
+                        ...prev, loginAttempts: parseInt(e.target.value) || 5 
+                      }))}
+                    />
+                    <p className="text-sm text-muted-foreground">
+                      Número máximo de tentativas antes de bloquear
+                    </p>
+                  </div>
+                </div>
+  
+                <div className="flex space-x-2">
+                  <Button onClick={handleSaveSecurity} disabled={loading}>
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Salvando...
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4 mr-2" />
+                        Salvar Segurança
+                      </>
+                    )}
+                  </Button>
+                  <Button variant="outline" onClick={() => setShowPasswordDialog(true)}>
+                    <Key className="w-4 h-4 mr-2" />
+                    Alterar Senha
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
 
         {/* Data Management */}
         <TabsContent value="data" className="space-y-6">
@@ -1378,18 +1707,25 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <Button className="w-full" onClick={handleImportData}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Importar Alunos (CSV)
+                <Button className="w-full" onClick={() => studentsFileRef.current?.click()} disabled={!!importing}>
+                  {importing === 'students' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                  {importing === 'students' ? 'Importando alunos...' : 'Importar Alunos (CSV ou Excel)'}
                 </Button>
-                <Button className="w-full" variant="outline" onClick={handleImportData}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Importar Questões (JSON)
+                <Button className="w-full" variant="outline" onClick={() => questionsFileRef.current?.click()} disabled={!!importing}>
+                  {importing === 'questions' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                  {importing === 'questions' ? 'Importando questões...' : 'Importar Questões (JSON)'}
                 </Button>
-                <Button className="w-full" variant="outline" onClick={handleImportData}>
-                  <Upload className="w-4 h-4 mr-2" />
-                  Importar Configurações
+                <Button className="w-full" variant="outline" onClick={() => settingsFileRef.current?.click()} disabled={!!importing}>
+                  {importing === 'settings' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                  {importing === 'settings' ? 'Importando configurações...' : 'Importar Configurações'}
                 </Button>
+                <p className="text-xs text-muted-foreground">
+                  Configurações: use a planilha gerada em "Exportar Configurações". Cursos e matérias do arquivo são
+                  acrescentados, nunca apagados.
+                </p>
+                <input ref={studentsFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportStudents} />
+                <input ref={questionsFileRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportQuestions} />
+                <input ref={settingsFileRef} type="file" accept=".xlsx,.xls,.json" className="hidden" onChange={handleImportSettings} />
               </CardContent>
             </Card>
 
@@ -1521,6 +1857,26 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <Dialog open={showResetDialog} onOpenChange={setShowResetDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Restaurar configurações padrão?</DialogTitle>
+            <DialogDescription>
+              As preferências do sistema, de notificações e de segurança voltam ao padrão.
+              Seu perfil, cursos, matérias, alunos e simulados não são alterados.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowResetDialog(false)}>Cancelar</Button>
+            <Button onClick={handleResetSettings}>
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Restaurar Padrão
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <ActionResultDialog result={actionResult} onClose={() => setActionResult(null)} />
     </div>
   );
 }

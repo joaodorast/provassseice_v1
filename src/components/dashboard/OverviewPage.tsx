@@ -14,7 +14,7 @@ import {
   Activity
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../../utils/toast';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 
 type OverviewPageProps = {

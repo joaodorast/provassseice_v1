@@ -120,7 +120,7 @@ export function ExcelExportDialog({
       case 'questions':
         return 'Exportação completa do banco de questões com formatação otimizada para análise e revisão.';
       case 'series':
-        return 'Relatório detalhado das séries cadastradas no sistema com informações organizadas.';
+        return 'Relatório detalhado dos cursos cadastrados no sistema com informações organizadas.';
       case 'examResults':
         return 'Análise completa dos resultados dos simulados com métricas de desempenho dos alunos.';
       case 'subjectPerformance':

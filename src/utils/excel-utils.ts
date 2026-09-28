@@ -303,7 +303,7 @@ export const ExcelTemplates = {
     columns: [
       { header: 'ID', key: 'id', width: 10, type: 'text' },
       { header: 'Matéria', key: 'subject', width: 15, type: 'text' },
-      { header: 'Série', key: 'series', width: 12, type: 'text' },
+      { header: 'Curso', key: 'series', width: 12, type: 'text' },
       { header: 'Questão', key: 'question', width: 45, type: 'text' },
       { header: 'Alternativa Correta', key: 'correctAnswer', width: 18, type: 'text' },
       { header: 'Dificuldade', key: 'difficulty', width: 12, type: 'text' },
@@ -322,8 +322,8 @@ export const ExcelTemplates = {
   }),
 
   series: (series: any[]): ExcelExportOptions => ({
-    title: 'Séries Cadastradas',
-    subtitle: 'Relatório de todas as séries do sistema',
+    title: 'Cursos Cadastrados',
+    subtitle: 'Relatório de todos os cursos do sistema',
     columns: [
       { header: 'ID', key: 'id', width: 10, type: 'text' },
       { header: 'Nome', key: 'name', width: 25, type: 'text' },
@@ -384,7 +384,7 @@ export const ExcelTemplates = {
       { header: 'Nome', key: 'name', width: 28, type: 'text' },
       { header: 'Email', key: 'email', width: 30, type: 'text' },
       { header: 'Turma', key: 'class', width: 15, type: 'text' },
-      { header: 'Série', key: 'grade', width: 15, type: 'text' },
+      { header: 'Curso', key: 'grade', width: 15, type: 'text' },
       { header: 'Matrícula', key: 'registration', width: 16, type: 'text' },
       { header: 'Status', key: 'status', width: 12, type: 'text' },
     ],

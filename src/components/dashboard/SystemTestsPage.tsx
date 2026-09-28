@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '../ui
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
 import { Progress } from '../ui/progress';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../../utils/toast';
 import { 
   CheckCircle2, 
   XCircle, 
@@ -14,7 +14,14 @@ import {
   FileText,
   ClipboardCheck,
   BarChart3,
-  AlertCircle
+  AlertCircle,
+  Link2,
+  Check,
+  X,
+  AlertTriangle,
+  Wrench,
+  Lightbulb,
+  CheckCircle
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
@@ -32,7 +39,7 @@ export function SystemTestsPage() {
     { name: 'Criar Questão de Teste', status: 'pending' },
     { name: 'Listar Questões', status: 'pending' },
     { name: 'Criar Aluno de Teste', status: 'pending' },
-    { name: 'Criar Série/Turma', status: 'pending' },
+    { name: 'Criar Curso/Turma', status: 'pending' },
     { name: 'Criar Simulado', status: 'pending' },
     { name: 'Duplicar Simulado', status: 'pending' },
     { name: 'Upload de Imagem', status: 'pending' },
@@ -59,20 +66,20 @@ export function SystemTestsPage() {
     try {
       await testFn();
       const duration = Date.now() - startTime;
-      console.log(`%c✓ PASSOU - ${duration}ms`, 'color: #10b981; font-weight: bold;');
+      console.log(`%cPASSOU - ${duration}ms`, 'color: #10b981; font-weight: bold;');
       updateTest(index, { 
         status: 'success', 
-        message: `✓ Passou (${duration}ms)`,
+        message: `Passou (${duration}ms)`,
         duration 
       });
     } catch (error: any) {
       const duration = Date.now() - startTime;
-      console.error(`%c✗ FALHOU - ${duration}ms`, 'color: #ef4444; font-weight: bold;');
+      console.error(`%cFALHOU - ${duration}ms`, 'color: #ef4444; font-weight: bold;');
       console.error('Erro:', error.message);
       console.error('Stack:', error.stack);
       updateTest(index, { 
         status: 'error', 
-        message: `✗ Falhou: ${error.message}`,
+        message: `Falhou: ${error.message}`,
         duration 
       });
       throw error;
@@ -82,15 +89,15 @@ export function SystemTestsPage() {
   const runAllTests = async () => {
     setIsRunning(true);
     console.clear();
-    console.log('%c🧪 INICIANDO TESTES DO SISTEMA SEICE', 'color: #3b82f6; font-size: 16px; font-weight: bold; padding: 10px;');
+    console.log('%cINICIANDO TESTES DO SISTEMA SEICE', 'color: #3b82f6; font-size: 16px; font-weight: bold; padding: 10px;');
     console.log('═'.repeat(50));
     
     // Verificar autenticação
     const token = localStorage.getItem('access_token');
-    console.log('Token de autenticação:', token ? '✓ Presente' : '✗ Ausente');
+    console.log('Token de autenticação:', token ? 'Presente' : 'Ausente');
     
     if (!token) {
-      console.warn('⚠️ AVISO: Alguns testes podem falhar sem autenticação');
+      console.warn('AVISO: Alguns testes podem falhar sem autenticação');
     }
     
     toast.info('Iniciando testes do sistema...');
@@ -128,7 +135,7 @@ export function SystemTestsPage() {
           );
         }
         
-        console.log('✓ Backend está respondendo corretamente');
+        console.log('Backend está respondendo corretamente');
       });
 
       // Test 2: Create Question
@@ -189,20 +196,20 @@ export function SystemTestsPage() {
       await runTest(4, async () => {
         const timestamp = Date.now();
         const serie = {
-          name: `Série Teste ${timestamp}`,
+          name: `Curso Teste ${timestamp}`,
           code: `TEST-${timestamp}`, // IMPORTANTE: código é obrigatório
-          description: 'Série criada automaticamente para testes'
+          description: 'Curso criado automaticamente para testes'
         };
         
         const result = await apiService.createSerie(serie);
         if (!result.success) {
-          throw new Error('Falha ao criar série: ' + (result.error || 'Erro desconhecido'));
+          throw new Error('Falha ao criar curso: ' + (result.error || 'Erro desconhecido'));
         }
         
         // A API retorna { success: true, data: serie }, não { success: true, serie: ... }
         const serieId = result.data?.id;
         if (!serieId) {
-          throw new Error('ID da série não retornado pela API');
+          throw new Error('ID do curso não retornado pela API');
         }
         
         const turma = {
@@ -216,7 +223,7 @@ export function SystemTestsPage() {
           throw new Error('Falha ao criar turma: ' + (turmaResult.error || 'Erro desconhecido'));
         }
         
-        console.log('✓ Série e turma criadas com sucesso');
+        console.log('Curso e turma criados com sucesso');
       });
 
       // Test 6: Create Exam
@@ -246,7 +253,7 @@ export function SystemTestsPage() {
         if (!result.success) throw new Error('Falha ao criar simulado: ' + (result.error || 'Erro desconhecido'));
         createdExamId = result.exam.id;
         setTestData(prev => ({ ...prev, examId: result.exam.id }));
-        console.log('✓ Simulado criado com ID:', createdExamId);
+        console.log('Simulado criado com ID:', createdExamId);
       });
 
       // Test 7: Duplicate Exam
@@ -260,7 +267,7 @@ export function SystemTestsPage() {
         if (!result.success) {
           throw new Error('Falha ao duplicar simulado: ' + (result.error || 'Erro desconhecido'));
         }
-        console.log('✓ Simulado duplicado com sucesso');
+        console.log('Simulado duplicado com sucesso');
       });
 
       // Test 8: Upload Image (simulate)
@@ -321,11 +328,11 @@ export function SystemTestsPage() {
       });
 
       console.log('\n' + '═'.repeat(50));
-      console.log('%c✓ TODOS OS TESTES PASSARAM!', 'color: #10b981; font-size: 16px; font-weight: bold; padding: 10px;');
+      console.log('%cTODOS OS TESTES PASSARAM!', 'color: #10b981; font-size: 16px; font-weight: bold; padding: 10px;');
       console.log(`Total: ${tests.length} testes | Tempo: ${totalDuration}ms`);
       console.log('═'.repeat(50));
       
-      toast.success('✓ Todos os testes passaram!', {
+      toast.success('Todos os testes passaram!', {
         description: 'Sistema funcionando corretamente'
       });
       
@@ -334,13 +341,13 @@ export function SystemTestsPage() {
       const failedCount = tests.filter(t => t.status === 'error').length;
       
       console.log('\n' + '═'.repeat(50));
-      console.log('%c✗ ALGUNS TESTES FALHARAM', 'color: #ef4444; font-size: 16px; font-weight: bold; padding: 10px;');
+      console.log('%cALGUNS TESTES FALHARAM', 'color: #ef4444; font-size: 16px; font-weight: bold; padding: 10px;');
       console.log(`Passaram: ${passedCount} | Falharam: ${failedCount} | Total: ${tests.length}`);
       console.log('═'.repeat(50));
-      console.log('\n📋 Para mais detalhes, veja os erros acima em vermelho.');
-      console.log('💡 Dica: Verifique os pré-requisitos na página de testes.');
+      console.log('\nPara mais detalhes, veja os erros acima em vermelho.');
+      console.log('Dica: Verifique os pré-requisitos na página de testes.');
       
-      toast.error('✗ Alguns testes falharam', {
+      toast.error('Alguns testes falharam', {
         description: `${passedCount}/${tests.length} testes passaram. Veja detalhes abaixo.`
       });
     } finally {
@@ -412,12 +419,12 @@ export function SystemTestsPage() {
           <div className="flex items-start space-x-3">
             <Database className="w-5 h-5 text-teal-600 mt-0.5 flex-shrink-0" />
             <div className="flex-1">
-              <h3 className="font-semibold text-teal-900 mb-2">🔗 Informações de Conexão</h3>
+              <h3 className="font-semibold text-teal-900 mb-2"><Link2 className="w-4 h-4 inline-block align-text-bottom mr-1" />Informações de Conexão</h3>
               <div className="text-sm text-teal-800 space-y-1 bg-teal-100 p-3 rounded font-mono">
                 <p><strong>Project ID:</strong> {projectId}</p>
                 <p><strong>Backend URL:</strong> https://{projectId}.supabase.co/functions/v1/make-server-83358821</p>
                 <p><strong>Health Check:</strong> /health</p>
-                <p><strong>Token:</strong> {localStorage.getItem('access_token') ? '✓ Presente' : '✗ Ausente'}</p>
+                <p><strong>Token:</strong> {localStorage.getItem('access_token') ? <><Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Presente</> : <><X className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Ausente</>}</p>
               </div>
               <div className="flex gap-2 mt-3">
                 <button
@@ -446,19 +453,19 @@ export function SystemTestsPage() {
                       const isOk = data.success === true || data.status === 'ok';
                       
                       if (isOk) {
-                        console.log('%c✓ SUCESSO!', 'color: green; font-weight: bold;');
-                        toast.success('✓ Backend Online!', {
+                        console.log('%cSUCESSO!', 'color: green; font-weight: bold;');
+                        toast.success('Backend Online!', {
                           description: `Respondeu em ${duration}ms`
                         });
                       } else {
-                        console.error('%c✗ RESPOSTA INVÁLIDA', 'color: red; font-weight: bold;');
+                        console.error('%cRESPOSTA INVÁLIDA', 'color: red; font-weight: bold;');
                         toast.error('Resposta inválida do backend', {
                           description: JSON.stringify(data)
                         });
                       }
                     } catch (error) {
                       const duration = Date.now() - startTime;
-                      console.error('%c✗ ERRO NA CONEXÃO', 'color: red; font-weight: bold;');
+                      console.error('%cERRO NA CONEXÃO', 'color: red; font-weight: bold;');
                       console.error('Tipo:', error.name);
                       console.error('Mensagem:', error.message);
                       console.error('Tempo até erro:', duration + 'ms');
@@ -474,7 +481,7 @@ export function SystemTestsPage() {
                         suggestion = 'Timeout - servidor muito lento';
                       }
                       
-                      toast.error('✗ Falha na Conexão', {
+                      toast.error('Falha na Conexão', {
                         description: suggestion || errorMessage
                       });
                     }
@@ -508,7 +515,7 @@ export function SystemTestsPage() {
           <div className="flex items-start space-x-3">
             <AlertCircle className="w-5 h-5 text-green-600 mt-0.5 flex-shrink-0" />
             <div className="flex-1">
-              <h3 className="font-semibold text-green-900 mb-2">✅ Pré-requisitos para Testes Completos</h3>
+              <h3 className="font-semibold text-green-900 mb-2"><CheckCircle className="w-4 h-4 inline-block align-text-bottom mr-1" />Pré-requisitos para Testes Completos</h3>
               <ul className="text-sm text-green-800 space-y-1 ml-4">
                 <li>• <strong>Backend ativo:</strong> Servidor Supabase deve estar online</li>
                 <li>• <strong>Autenticado:</strong> Você deve estar logado no sistema</li>
@@ -626,7 +633,7 @@ export function SystemTestsPage() {
             <Button 
               onClick={() => {
                 console.clear();
-                console.log('%c🧪 CONSOLE DE TESTES LIMPO', 'color: #3b82f6; font-size: 14px; font-weight: bold;');
+                console.log('%cCONSOLE DE TESTES LIMPO', 'color: #3b82f6; font-size: 14px; font-weight: bold;');
                 console.log('Execute os testes e veja os logs detalhados aqui.');
                 toast.info('Console limpo! (Pressione F12 para ver)');
               }}
@@ -699,7 +706,7 @@ export function SystemTestsPage() {
           <p>2. <strong>Verificar Resultados:</strong> Veja o status de cada teste (verde = passou, vermelho = falhou).</p>
           <p>3. <strong>Resetar:</strong> Clique em "Resetar" para limpar os resultados e executar novamente.</p>
           <p className="mt-4 pt-4 border-t border-zinc-200">
-            <strong>⚠️ Atenção:</strong> Os testes criarão dados reais no sistema (questões, alunos, simulados de teste). 
+            <strong><AlertTriangle className="w-4 h-4 inline-block align-text-bottom mr-1" />Atenção:</strong> Os testes criarão dados reais no sistema (questões, alunos, simulados de teste). 
             Você pode deletá-los depois se desejar.
           </p>
         </CardContent>
@@ -708,11 +715,11 @@ export function SystemTestsPage() {
       {/* Troubleshooting */}
       <Card className="border-amber-200 bg-amber-50">
         <CardHeader>
-          <CardTitle className="text-amber-900">🔧 Resolução de Problemas</CardTitle>
+          <CardTitle className="text-amber-900 flex items-center gap-2"><Wrench className="w-5 h-5" />Resolução de Problemas</CardTitle>
         </CardHeader>
         <CardContent className="text-amber-800 space-y-3">
           <div>
-            <p className="font-semibold">❌ "Backend não está respondendo"</p>
+            <p className="font-semibold"><XCircle className="w-4 h-4 inline-block align-text-bottom mr-1" />"Backend não está respondendo"</p>
             <p className="text-sm ml-4">1. Clique em <strong>"Testar Conexão Direta"</strong> acima</p>
             <p className="text-sm ml-4">2. Abra o Console (F12) e veja o erro exato</p>
             <p className="text-sm ml-4">3. Verifique se a URL está correta no card roxo</p>
@@ -722,17 +729,17 @@ export function SystemTestsPage() {
             </p>
           </div>
           <div>
-            <p className="font-semibold">❌ "Não há questões suficientes"</p>
+            <p className="font-semibold"><XCircle className="w-4 h-4 inline-block align-text-bottom mr-1" />"Não há questões suficientes"</p>
             <p className="text-sm ml-4">→ Crie pelo menos 5 questões manualmente primeiro</p>
             <p className="text-sm ml-4">→ Vá em: Banco de Questões → Nova Questão</p>
           </div>
           <div>
-            <p className="font-semibold">❌ "Timeout" ou "Falha na conexão"</p>
+            <p className="font-semibold"><XCircle className="w-4 h-4 inline-block align-text-bottom mr-1" />"Timeout" ou "Falha na conexão"</p>
             <p className="text-sm ml-4">→ O servidor pode estar lento, tente novamente</p>
             <p className="text-sm ml-4">→ Verifique se você está logado corretamente</p>
           </div>
           <div className="pt-3 border-t border-amber-300">
-            <p className="font-semibold">💡 Dicas:</p>
+            <p className="font-semibold"><Lightbulb className="w-4 h-4 inline-block align-text-bottom mr-1" />Dicas:</p>
             <p className="text-sm ml-4">→ Abra o Console do navegador (F12) para ver logs detalhados</p>
             <p className="text-sm ml-4">→ Veja <strong>DEBUGGING.md</strong> para guia completo de troubleshooting</p>
             <p className="text-sm ml-4">→ Execute testes individuais via console (veja DEBUGGING.md)</p>

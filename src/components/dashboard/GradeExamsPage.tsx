@@ -15,9 +15,11 @@ import { Checkbox } from '../ui/checkbox';
 import { 
   CheckCircle, Clock, Search, Eye, Download, FileText, Target, TrendingUp, Award, XCircle, AlertCircle,
   Loader2, RefreshCw, GraduationCap, Star, Save, X, PieChart, Clipboard, Send, Image as ImageIcon, ZoomIn, UserX,
-  Camera, Scan, FileSpreadsheet, Trash2, Bot
+  Camera, Scan, FileSpreadsheet, Trash2, Bot,
+  Check
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 
@@ -148,7 +150,7 @@ export function GradeExamsPage() {
         console.log('=== GradePage: Loading exams ===');
         const examsRes = await apiService.getExams();
         examsList = (examsRes.exams || []).filter((e) => e && e.id && e.title);
-        console.log(`✓ Loaded ${examsList.length} exams for grading`);
+        console.log(`Loaded ${examsList.length} exams for grading`);
         setExams(examsList);
       } catch (error) {
         console.error('Error loading exams:', error);
@@ -161,7 +163,7 @@ export function GradeExamsPage() {
         console.log('=== GradePage: Loading students ===');
         const studentsRes = await apiService.getStudents();
         studentsList = (studentsRes.students || []).filter((s) => s && s.id);
-        console.log(`✓ Loaded ${studentsList.length} students`);
+        console.log(`Loaded ${studentsList.length} students`);
         setStudents(studentsList);
       } catch (error) {
         console.error('Error loading students:', error);
@@ -173,7 +175,7 @@ export function GradeExamsPage() {
         console.log('=== GradePage: Loading applications ===');
         const applicationsRes = await apiService.getApplications();
         applicationsList = (applicationsRes.applications || []).filter((a) => a && a.id);
-        console.log(`✓ Loaded ${applicationsList.length} applications`);
+        console.log(`Loaded ${applicationsList.length} applications`);
         setApplications(applicationsList);
       } catch (error) {
         console.error('Error loading applications:', error);
@@ -184,12 +186,12 @@ export function GradeExamsPage() {
         console.log('=== GradePage: Loading submissions ===');
         const submissionsRes = await apiService.getSubmissions();
         const realSubmissionsList = (submissionsRes.submissions || []).filter((s) => s && s.id);
-        console.log(`✓ Loaded ${realSubmissionsList.length} submissions from API`);
+        console.log(`Loaded ${realSubmissionsList.length} submissions from API`);
         
         const imageSubmissions = realSubmissionsList.filter(
           (s) => IMAGE_CORRECTION_TYPES.includes(s.correctionType)
         );
-        console.log(`✓ Found ${imageSubmissions.length} answer sheet submissions`);
+        console.log(`Found ${imageSubmissions.length} answer sheet submissions`);
         
         const transformedSubmissions = transformSubmissions(realSubmissionsList, examsList);
         const notSubmittedEntries = [];
@@ -214,10 +216,10 @@ export function GradeExamsPage() {
         
         const allSubmissions = [...transformedSubmissions, ...notSubmittedEntries];
         setSubmissions(allSubmissions);
-        console.log(`✓ Total submissions: ${allSubmissions.length}`);
+        console.log(`Total submissions: ${allSubmissions.length}`);
         
         if (imageSubmissions.length > 0) {
-          toast.success(`✅ ${imageSubmissions.length} correção(ões) de cartão resposta carregadas!`);
+          toast.success(`${imageSubmissions.length} correção(ões) de cartão resposta carregadas!`);
         }
       } catch (error) {
         console.error('Error loading submissions:', error);
@@ -373,7 +375,7 @@ export function GradeExamsPage() {
         });
       }
 
-      toast.success('✅ Planilha exportada com sucesso!');
+      toast.success('Planilha exportada com sucesso!');
     } catch (error) {
       console.error('Erro ao exportar planilha:', error);
       toast.error('Erro ao exportar planilha. Tente novamente.');
@@ -546,7 +548,7 @@ export function GradeExamsPage() {
           );
           if (response.success && response.image) {
             setAnswerSheetImages(prev => [...prev, response.image]);
-            toast.success('✅ Imagem do cartão resposta enviada com sucesso!');
+            toast.success('Imagem do cartão resposta enviada com sucesso!');
           } else throw new Error(response.error || 'Failed to upload image');
         } catch (error) {
           console.error('Error uploading answer sheet:', error);
@@ -572,7 +574,7 @@ export function GradeExamsPage() {
       toast.info('Este cartão veio da página Enviar Imagens; para excluir, use aquela página.');
       return;
     }
-    if (!window.confirm('Tem certeza que deseja excluir esta imagem?')) return;
+    if (!(await confirmAction({ title: 'Excluir imagem?' }))) return;
     try {
       const response = await apiService.deleteAnswerSheet(imageId);
       if (response.success) {
@@ -603,7 +605,7 @@ export function GradeExamsPage() {
           { ...sub, reviewNotes, feedback, gradingStatus: 'reviewed' } : sub
         ));
         setSelectedSubmission(null);
-        toast.success('✅ Revisão salva com sucesso!');
+        toast.success('Revisão salva com sucesso!');
       } else throw new Error('Failed to save review');
     } catch (error) {
       console.error('Error saving review:', error);
@@ -630,28 +632,28 @@ export function GradeExamsPage() {
   };
 
   const handleDeleteSubmission = async (submissionId, studentName) => {
-    if (!window.confirm(`Tem certeza que deseja excluir a submissão de ${studentName}?\n\nEsta ação não pode ser desfeita.`)) {
+    if (!(await confirmAction({ title: 'Excluir submissão?', itemName: studentName }))) {
       return;
     }
 
     try {
       setDeletingSubmission(submissionId);
-      console.log('🗑️ Deleting submission:', submissionId);
+      console.log('Deleting submission:', submissionId);
       
       const response = await apiService.deleteSubmission(submissionId);
       
       if (response && response.success) {
-        console.log('✅ Submission deleted successfully');
+        console.log('Submission deleted successfully');
         
         // Remover da lista local
         setSubmissions(prev => prev.filter(sub => sub.id !== submissionId));
         
-        toast.success(`✅ Submissão de ${studentName} excluída com sucesso!`);
+        toast.success(`Submissão de ${studentName} excluída com sucesso!`);
       } else {
         throw new Error(response?.error || 'Falha ao excluir submissão');
       }
     } catch (error) {
-      console.error('❌ Error deleting submission:', error);
+      console.error('Error deleting submission:', error);
       toast.error('Erro ao excluir submissão: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setDeletingSubmission(null);
@@ -672,11 +674,10 @@ export function GradeExamsPage() {
       return;
     }
 
-    if (!window.confirm(
-      `Tem certeza que deseja excluir ${realSubmissions.length} submissão(ões)?\n\n` +
-      `Alunos:\n${realSubmissions.map(s => `• ${s.studentName}`).join('\n')}\n\n` +
-      `Esta ação não pode ser desfeita.`
-    )) {
+    if (!(await confirmAction({
+      title: realSubmissions.length === 1 ? 'Excluir 1 submissão?' : `Excluir ${realSubmissions.length} submissões?`,
+      itemName: realSubmissions.map(s => s.studentName).join(', ')
+    }))) {
       return;
     }
 
@@ -701,11 +702,11 @@ export function GradeExamsPage() {
       }
 
       if (successCount > 0) {
-        toast.success(`✅ ${successCount} submissão(ões) excluída(s) com sucesso!`);
+        toast.success(`${successCount} submissão(ões) excluída(s) com sucesso!`);
       }
       
       if (errorCount > 0) {
-        toast.error(`❌ Erro ao excluir ${errorCount} submissão(ões)`);
+        toast.error(`Erro ao excluir ${errorCount} submissão(ões)`);
       }
 
       setSelectedSubmissions([]);
@@ -759,7 +760,7 @@ export function GradeExamsPage() {
           </p>
           <div className="flex gap-2 mt-2">
             <Badge variant="outline" className="text-green-600 border-green-300">
-              ✓ {submissions.length} submissões totais
+              <Check className="w-3 h-3 mr-1" />{submissions.length} submissões totais
             </Badge>
             {stats.imageCorrections > 0 && (
               <Badge variant="outline" className="text-teal-600 border-teal-300">

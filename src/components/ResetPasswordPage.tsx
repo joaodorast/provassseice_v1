@@ -3,7 +3,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../utils/toast';
 import seiceLogo from '../assets/seice-logo.png';
 import { supabase } from '../utils/supabase-client';
 

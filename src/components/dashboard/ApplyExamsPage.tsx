@@ -33,7 +33,8 @@ import {
   Activity,
   Plus
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 
 type ApplicationMethod = 'online' | 'print' | 'hybrid';
@@ -147,7 +148,7 @@ export function ApplyExamsPage() {
           };
         });
         
-        console.log(`✓ ApplyExamsPage: Loaded ${examsList.length} valid exams`);
+        console.log(`ApplyExamsPage: Loaded ${examsList.length} valid exams`);
         setExams(examsList);
         
       } catch (error) {
@@ -173,7 +174,7 @@ export function ApplyExamsPage() {
         console.log('ApplyExamsPage: Raw applications response:', applicationsRes);
         
         const applicationsList = applicationsRes.applications || [];
-        console.log(`✓ ApplyExamsPage: Loaded ${applicationsList.length} applications`);
+        console.log(`ApplyExamsPage: Loaded ${applicationsList.length} applications`);
         setApplications(applicationsList);
       } catch (error) {
         console.error('ApplyExamsPage: Error loading applications:', error);
@@ -267,11 +268,11 @@ export function ApplyExamsPage() {
       
       if (applicationMethod === 'online') {
         await navigator.clipboard.writeText(link!);
-        toast.success('✅ Simulado aplicado! Link copiado para área de transferência.');
+        toast.success('Simulado aplicado! Link copiado para área de transferência.');
       } else if (applicationMethod === 'print') {
-        toast.success('✅ Simulado preparado para impressão!');
+        toast.success('Simulado preparado para impressão!');
       } else {
-        toast.success('✅ Aplicação híbrida configurada com sucesso!');
+        toast.success('Aplicação híbrida configurada com sucesso!');
       }
 
       // Reset form
@@ -1138,7 +1139,12 @@ export function ApplyExamsPage() {
                           variant="outline"
                           size="sm"
                           onClick={async () => {
-                            if (confirm('Tem certeza que deseja cancelar esta aplicação?')) {
+                            if (await confirmAction({
+                              title: 'Cancelar aplicação?',
+                              description: 'A prova deixa de ficar disponível para os alunos.',
+                              confirmLabel: 'Sim, cancelar aplicação',
+                              tone: 'warning'
+                            })) {
                               try {
                                 await apiService.updateApplication(app.id, { status: 'cancelled' });
                                 toast.success('Aplicação cancelada');

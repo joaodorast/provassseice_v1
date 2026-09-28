@@ -141,7 +141,7 @@ export function EvaluationPage() {
             <div class="exam-info">
               <div>
                 <p><strong>Disciplinas:</strong> ${exam.subjects ? exam.subjects.join(', ') : 'Multidisciplinar'}</p>
-                <p><strong>Série:</strong> ${exam.grade}</p>
+                <p><strong>Curso:</strong> ${exam.grade}</p>
                 <p><strong>Questões:</strong> ${exam.questions}</p>
                 <p><strong>Tempo:</strong> ${exam.timeLimit} minutos</p>
                 <p><strong>ID da Avaliação:</strong> ${exam.id}</p>

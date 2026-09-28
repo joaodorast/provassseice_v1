@@ -8,9 +8,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { 
   Upload, Image as ImageIcon, FileText, CheckCircle, XCircle, Clock, Trash2, Camera,
   Scan, FileCheck, AlertCircle, User, Loader2, Users, AlertTriangle, Download, FileSpreadsheet,
-  Zap, Eye, RefreshCw
+  Zap, Eye, RefreshCw,
+  Bot,
+  Check
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 import { readAnswerSheet } from '../../utils/omr';
@@ -87,7 +90,7 @@ export function SendImagesPage() {
       if (exam && exam.selectedClass) {
         const filteredStudents = students.filter(s => (s.class || s.className) === exam.selectedClass);
         setAvailableStudents(filteredStudents);
-        console.log(`✓ Filtered ${filteredStudents.length} students from class: ${exam.selectedClass}`);
+        console.log(`Filtered ${filteredStudents.length} students from class: ${exam.selectedClass}`);
       } else {
         setAvailableStudents(students);
       }
@@ -113,7 +116,7 @@ export function SendImagesPage() {
         const hasSections = exam.sections && Array.isArray(exam.sections) && exam.sections.length > 0;
         
         if (!hasQuestions && !hasSections) {
-          console.warn(`⚠️ Simulado "${exam.title}" sem questões ou seções - será ignorado`);
+          console.warn(`Simulado "${exam.title}" sem questões ou seções - será ignorado`);
           return false;
         }
         
@@ -125,7 +128,7 @@ export function SendImagesPage() {
               sectionName: section.name
             }))
           );
-          console.log(`✓ Criado array flat de ${exam.questions.length} questões para "${exam.title}"`);
+          console.log(`Criado array flat de ${exam.questions.length} questões para "${exam.title}"`);
         }
         
         return true;
@@ -133,8 +136,8 @@ export function SendImagesPage() {
       
       const allStudents = (studentsResponse.students || []).filter((s) => s && s.id && s.name);
       
-      console.log(`✓ SendImagesPage: Loaded ${allExams.length} exams válidos`);
-      console.log(`✓ SendImagesPage: Loaded ${allStudents.length} students`);
+      console.log(`SendImagesPage: Loaded ${allExams.length} exams válidos`);
+      console.log(`SendImagesPage: Loaded ${allStudents.length} students`);
       
       setExams(allExams);
       setStudents(allStudents);
@@ -155,21 +158,21 @@ export function SendImagesPage() {
 
   const reloadOnlyImages = async () => {
     try {
-      console.log('🔄 Recarregando apenas imagens...');
+      console.log('Recarregando apenas imagens...');
       const imagesResponse = await apiService.getImages();
       const newImages = imagesResponse.images || [];
-      console.log(`✓ ${newImages.length} imagens carregadas da API:`, newImages);
+      console.log(`${newImages.length} imagens carregadas da API:`, newImages);
       setImages(newImages);
       
       if (newImages.length > 0) {
-        console.log('✅ Imagens atualizadas no estado:', newImages.map(img => ({
+        console.log('Imagens atualizadas no estado:', newImages.map(img => ({
           id: img.id,
           filename: img.filename,
           status: img.status
         })));
       }
     } catch (error) {
-      console.error('❌ Erro ao recarregar imagens:', error);
+      console.error('Erro ao recarregar imagens:', error);
       toast.error('Erro ao carregar imagens');
     }
   };
@@ -491,8 +494,13 @@ export function SendImagesPage() {
     setReviewHasChanges(false);
   };
 
-  const closeReview = () => {
-    if (reviewHasChanges && !confirm('Há alterações não salvas nesta correção. Fechar mesmo assim?')) {
+  const closeReview = async () => {
+    if (reviewHasChanges && !(await confirmAction({
+      title: 'Fechar sem salvar?',
+      description: 'Há alterações não salvas nesta correção.',
+      confirmLabel: 'Fechar mesmo assim',
+      tone: 'warning'
+    }))) {
       return;
     }
     setReviewSubmission(null);
@@ -583,7 +591,7 @@ export function SendImagesPage() {
     setAutoProcessingProgress(0);
 
     try {
-      toast.info('🤖 Detectando respostas marcadas com IA...', { duration: 3000 });
+      toast.info('Detectando respostas marcadas com IA...', { duration: 3000 });
       setAutoProcessingProgress(30);
 
       const submissionData = await runAiCorrectionForImage(image, correctionType);
@@ -591,7 +599,7 @@ export function SendImagesPage() {
       setAutoProcessingProgress(100);
 
       toast.success(
-        `✅ ${submissionData.studentName}: ${submissionData.percentage}% (${submissionData.score}/${submissionData.totalQuestions} acertos)`,
+        `${submissionData.studentName}: ${submissionData.percentage}% (${submissionData.score}/${submissionData.totalQuestions} acertos)`,
         { duration: 5000 }
       );
 
@@ -600,7 +608,7 @@ export function SendImagesPage() {
 
       await reloadOnlyImages();
     } catch (error) {
-      console.error('❌ Erro na correção automática individual:', error);
+      console.error('Erro na correção automática individual:', error);
       toast.error('Erro durante a correção automática: ' + friendlyErrorMessage(error));
     } finally {
       setIsAutoProcessing(false);
@@ -751,7 +759,7 @@ export function SendImagesPage() {
         const submissionData = await runAiCorrectionForImage(imageForStudent, 'auto-image-batch');
         results.push(submissionData);
       } catch (error) {
-        console.error(`❌ Erro ao corrigir ${student.name}:`, error);
+        console.error(`Erro ao corrigir ${student.name}:`, error);
         errors.push({ imageId: image.id, filename: image.filename, studentName: student.name, error: friendlyErrorMessage(error) });
       }
     }
@@ -762,10 +770,10 @@ export function SendImagesPage() {
     setShowBatchAiAssignDialog(false);
 
     if (errors.length > 0) {
-      toast.error(`⚠️ ${errors.length} cartão(ões) não puderam ser corrigidos. Veja os detalhes.`, { duration: 6000 });
+      toast.error(`${errors.length} cartão(ões) não puderam ser corrigidos. Veja os detalhes.`, { duration: 6000 });
     }
     if (results.length > 0) {
-      toast.success(`✅ ${results.length} aluno(s) corrigido(s) com sucesso!`, { duration: 5000 });
+      toast.success(`${results.length} aluno(s) corrigido(s) com sucesso!`, { duration: 5000 });
       setSelectedImage(batchAiQueue[0]);
       setShowAutoResults(true);
     }
@@ -854,7 +862,7 @@ export function SendImagesPage() {
                   totalQuestions: targetExam.questions.length
                 };
 
-                console.log('📤 Uploading batch image:', imageData.filename);
+                console.log('Uploading batch image:', imageData.filename);
                 const response = await apiService.uploadImage(imageData);
                 
                 if (response && !response.error) {
@@ -881,7 +889,7 @@ export function SendImagesPage() {
           });
         }
 
-        toast.success(`✅ ${files.length} arquivo(s) enviado(s)! ${identifiedCount} de ${files.length} identificado(s) automaticamente pelo QR Code.`);
+        toast.success(`${files.length} arquivo(s) enviado(s)! ${identifiedCount} de ${files.length} identificado(s) automaticamente pelo QR Code.`);
         if (identifiedCount < files.length) {
           toast.info('Cartões sem QR Code legível: escolha o aluno na hora de corrigir.', { duration: 6000 });
         }
@@ -926,7 +934,7 @@ export function SendImagesPage() {
                   totalQuestions: selectedExamData.questions.length
                 };
 
-                console.log('📤 Uploading image:', imageData.filename);
+                console.log('Uploading image:', imageData.filename);
                 const response = await apiService.uploadImage(imageData);
                 
                 if (response && !response.error) {
@@ -953,7 +961,7 @@ export function SendImagesPage() {
           });
         }
 
-        toast.success(`✅ ${files.length} arquivo(s) enviado(s) com sucesso!`);
+        toast.success(`${files.length} arquivo(s) enviado(s) com sucesso!`);
         setSelectedStudent('');
         await reloadOnlyImages();
       }
@@ -977,8 +985,8 @@ export function SendImagesPage() {
       return;
     }
 
-    console.log('📋 Processing image for exam:', examData.title);
-    console.log('📝 Total questions:', examData.questions.length);
+    console.log('Processing image for exam:', examData.title);
+    console.log('Total questions:', examData.questions.length);
 
     if (image.isBatch) {
       const batchStudentsList = availableStudents.map(student => ({
@@ -997,7 +1005,7 @@ export function SendImagesPage() {
       setCompletedCorrections([]);
       setShowBatchProcessing(true);
       
-      toast.success(`🎯 ${batchStudentsList.length} alunos carregados para correção em lote!`);
+      toast.success(`${batchStudentsList.length} alunos carregados para correção em lote!`);
     } else {
       setManualAnswers(new Array(examData.questions.length).fill(-1));
       setSelectedImage(image);
@@ -1054,7 +1062,7 @@ export function SendImagesPage() {
     setIsProcessing(true);
 
     try {
-      console.log(`🔄 Processing correction for student: ${currentStudent.studentName}`);
+      console.log(`Processing correction for student: ${currentStudent.studentName}`);
       
       let correctCount = 0;
       const results = examData.questions.map((question, index) => {
@@ -1118,11 +1126,11 @@ export function SendImagesPage() {
         }))
       };
 
-      console.log('📤 Creating submission via API:', submissionData);
+      console.log('Creating submission via API:', submissionData);
       const submissionResponse = await apiService.createSubmission(submissionData);
       
       if (submissionResponse && !submissionResponse.error) {
-        console.log(`✅ Submission created for ${currentStudent.studentName}`);
+        console.log(`Submission created for ${currentStudent.studentName}`);
         
         setCompletedCorrections(prev => [
           ...prev,
@@ -1130,12 +1138,12 @@ export function SendImagesPage() {
         ]);
         
         toast.success(
-          `✅ ${currentStudent.studentName}: ${score}% (${correctCount}/${examData.questions.length})`,
+          `${currentStudent.studentName}: ${score}% (${correctCount}/${examData.questions.length})`,
           { duration: 3000 }
         );
 
         if (currentBatchIndex === batchImages.length - 1) {
-          console.log('✅ Lote finalizado - todas as correções completas');
+          console.log('Lote finalizado - todas as correções completas');
 
           await apiService.updateImageStatus(selectedImage.id, {
             status: 'Processada',
@@ -1144,7 +1152,7 @@ export function SendImagesPage() {
           });
 
           toast.success(
-            `🎉 Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nAgora você pode exportar os resultados!`,
+            `Correção em lote finalizada! ${batchImages.length} alunos corrigidos.\n\nAgora você pode exportar os resultados!`,
             { duration: 5000 }
           );
         } else {
@@ -1155,7 +1163,7 @@ export function SendImagesPage() {
         throw new Error(submissionResponse.error || 'Falha ao criar submissão');
       }
     } catch (error) {
-      console.error('❌ Error processing correction:', error);
+      console.error('Error processing correction:', error);
       toast.error('Erro ao processar: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setIsProcessing(false);
@@ -1180,7 +1188,7 @@ export function SendImagesPage() {
     setIsProcessing(true);
 
     try {
-      console.log('🔄 Starting manual correction process...');
+      console.log('Starting manual correction process...');
       
       let correctCount = 0;
       const results = examData.questions.map((question, index) => {
@@ -1199,7 +1207,7 @@ export function SendImagesPage() {
 
       const score = Math.round((correctCount / examData.questions.length) * 100);
 
-      console.log(`📊 Score calculated: ${correctCount}/${examData.questions.length} (${score}%)`);
+      console.log(`Score calculated: ${correctCount}/${examData.questions.length} (${score}%)`);
 
       const subjectPerformances = {};
       examData.questions.forEach((question, index) => {
@@ -1246,11 +1254,11 @@ export function SendImagesPage() {
         }))
       };
 
-      console.log('📤 Creating submission via API:', submissionData);
+      console.log('Creating submission via API:', submissionData);
       const submissionResponse = await apiService.createSubmission(submissionData);
       
       if (submissionResponse && !submissionResponse.error) {
-        console.log('✅ Submission created successfully');
+        console.log('Submission created successfully');
 
         await apiService.updateImageStatus(selectedImage.id, {
           status: 'Processada',
@@ -1259,7 +1267,7 @@ export function SendImagesPage() {
         });
 
         toast.success(
-          `✅ Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
+          `Correção concluída!\n\nNota: ${score}% (${correctCount}/${examData.questions.length} acertos)`,
           { duration: 6000 }
         );
 
@@ -1270,7 +1278,7 @@ export function SendImagesPage() {
         throw new Error(submissionResponse.error || 'Falha ao criar submissão');
       }
     } catch (error) {
-      console.error('❌ Error processing correction:', error);
+      console.error('Error processing correction:', error);
       toast.error('Erro ao processar correção: ' + (error.message || 'Erro desconhecido'));
     } finally {
       setIsProcessing(false);
@@ -1278,7 +1286,7 @@ export function SendImagesPage() {
   };
 
   const handleDeleteImage = async (imageId) => {
-    if (!confirm('Tem certeza que deseja excluir esta imagem?')) {
+    if (!(await confirmAction({ title: 'Excluir imagem?' }))) {
       return;
     }
 
@@ -1376,7 +1384,7 @@ export function SendImagesPage() {
         });
       }
 
-      toast.success('✅ Planilha exportada com sucesso!');
+      toast.success('Planilha exportada com sucesso!');
     } catch (error) {
       console.error('Erro ao exportar planilha:', error);
       toast.error('Erro ao exportar planilha. Tente novamente.');
@@ -1789,10 +1797,15 @@ export function SendImagesPage() {
 
                       <Button
                         size="sm"
-                        onClick={() => {
+                        onClick={async () => {
                           if (
                             image.status === 'Processada' &&
-                            !confirm('Este cartão já foi corrigido. Corrigir de novo cria uma nova correção para o aluno. Continuar?')
+                            !(await confirmAction({
+                              title: 'Corrigir de novo?',
+                              description: 'Este cartão já foi corrigido. Corrigir de novo cria uma nova correção para o aluno.',
+                              confirmLabel: 'Sim, corrigir',
+                              tone: 'warning'
+                            }))
                           ) {
                             return;
                           }
@@ -1873,7 +1886,7 @@ export function SendImagesPage() {
             <Card className="border-zinc-200 bg-zinc-50">
               <CardContent className="p-4">
                 <p className="text-sm text-zinc-900 text-center">
-                  🤖 IA detectando respostas marcadas nos cartões...
+                  <Bot className="w-4 h-4 inline-block align-text-bottom mr-1" />IA detectando respostas marcadas nos cartões...
                 </p>
               </CardContent>
             </Card>
@@ -2140,7 +2153,7 @@ export function SendImagesPage() {
                           })}
                         </div>
                         <p className="text-xs text-green-600 mt-1">
-                          ✓ Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
+                          <Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
                         </p>
                       </div>
                     </CardContent>
@@ -2233,7 +2246,7 @@ export function SendImagesPage() {
                 <Card className="border-green-200 bg-green-50">
                   <CardContent className="p-4">
                     <p className="text-sm font-medium text-green-900 mb-2">
-                      ✅ Correções Completadas: {completedCorrections.length}
+                      <CheckCircle className="w-4 h-4 inline-block align-text-bottom mr-1" />Correções Completadas: {completedCorrections.length}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {completedCorrections.map((corr, idx) => (
@@ -2295,7 +2308,7 @@ export function SendImagesPage() {
                           })}
                         </div>
                         <p className="text-xs text-green-600 mt-1">
-                          ✓ Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
+                          <Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />Gabarito: {String.fromCharCode(65 + question.correctAnswer)}
                         </p>
                       </div>
                     </CardContent>

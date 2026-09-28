@@ -2,14 +2,14 @@
       <ExcelExportDialog
         open={showExportDialog}
         onOpenChange={setShowExportDialog}
-        title="Séries Cadastradas - Sistema SEICE"
+        title="Cursos Cadastrados - Sistema SEICE"
         data={processedSeries}
         columns={[
           { header: 'ID', key: 'id', width: 10, type: 'text' },
           { header: 'Nome', key: 'name', width: 25, type: 'text' },
           { header: 'Código', key: 'code', width: 12, type: 'text' },
           { header: 'Nível de Ensino', key: 'levelLabel', width: 30, type: 'text' },
-          { header: 'Ano/Série', key: 'gradeLabel', width: 15, type: 'text' },
+          { header: 'Ano/Curso', key: 'gradeLabel', width: 15, type: 'text' },
           { header: 'Ano Letivo', key: 'academicYear', width: 12, type: 'text' },
           { header: 'Descrição', key: 'description', width: 40, type: 'text' },
           { header: 'Alunos Matriculados', key: 'studentCount', width: 15, type: 'number' },

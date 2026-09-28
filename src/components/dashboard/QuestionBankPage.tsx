@@ -22,14 +22,23 @@ import {
   Sparkles
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { ExcelExportDialog } from '../ExcelExportDialog';
+import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 import { ExcelTemplates, quickExport, importFromExcel } from '../../utils/excel-utils';
 
-export function QuestionBankPage() {
+type QuestionBankPageProps = {
+  // Card de confirmação exibido ao chegar aqui vindo de outra tela (ex.: após salvar um simulado)
+  arrivalResult?: ActionResult | null;
+  onArrivalResultClose?: () => void;
+};
+
+export function QuestionBankPage({ arrivalResult = null, onArrivalResultClose }: QuestionBankPageProps = {}) {
   const [selectedSubject, setSelectedSubject] = useState('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
+  const [showAllQuestions, setShowAllQuestions] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [questions, setQuestions] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -122,7 +131,7 @@ export function QuestionBankPage() {
         return true;
       });
       
-      console.log(`✓ Loaded ${questionsList.length} valid questions successfully (filtered from ${response.questions.length} total)`);
+      console.log(`Loaded ${questionsList.length} valid questions successfully (filtered from ${response.questions.length} total)`);
       
       if (questionsList.length > 0) {
         console.log('Sample questions loaded:', questionsList.slice(0, 2).map(q => ({
@@ -146,6 +155,9 @@ export function QuestionBankPage() {
   };
 
   const difficulties = ['Fácil', 'Médio', 'Difícil'];
+
+  // Só lista as questões depois que algum filtro for aplicado (ou "Mostrar todas")
+  const hasActiveFilter = showAllQuestions || searchTerm.trim() !== '' || selectedSubject !== 'all' || selectedDifficulty !== 'all';
 
   const filteredQuestions = questions.filter(q => {
     // Additional safety check
@@ -175,7 +187,7 @@ export function QuestionBankPage() {
 
   const handleCreateQuestion = async () => {
     if (!newQuestion.question || !newQuestion.subject || !newQuestion.difficulty || !newQuestion.grade) {
-      toast.error('Preencha todos os campos obrigatórios (questão, matéria, série e dificuldade)');
+      toast.error('Preencha todos os campos obrigatórios (questão, matéria, curso e dificuldade)');
       return;
     }
 
@@ -292,7 +304,7 @@ export function QuestionBankPage() {
   };
 
   const handleDeleteQuestion = async (id: string) => {
-    if (!confirm('Tem certeza que deseja excluir esta questão?')) {
+    if (!(await confirmAction({ title: 'Excluir questão?' }))) {
       return;
     }
     
@@ -406,6 +418,12 @@ export function QuestionBankPage() {
 
   return (
     <div className="space-y-4 lg:space-y-6">
+      <ActionResultDialog
+        result={arrivalResult}
+        onClose={() => onArrivalResultClose?.()}
+        autoCloseMs={3000}
+      />
+
       {/* Header */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between space-y-4 lg:space-y-0">
         <div className="flex items-center gap-3">
@@ -445,7 +463,7 @@ export function QuestionBankPage() {
               variant="outline"
               size="sm"
               onClick={handleQuickExport}
-              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 text-xs lg:text-sm"
+              className="text-xs lg:text-sm"
               disabled={filteredQuestions.length === 0}
             >
               <Download className="w-4 h-4 mr-1 lg:mr-2" />
@@ -456,7 +474,6 @@ export function QuestionBankPage() {
               variant="outline"
               size="sm"
               onClick={handleExportQuestions}
-              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50"
               disabled={filteredQuestions.length === 0}
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -567,15 +584,15 @@ export function QuestionBankPage() {
               </div>
               
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">Série/Ano</label>
+                <label className="block text-sm font-medium text-slate-700 mb-2">Curso</label>
                 <Select value={newQuestion.grade} onValueChange={(value) => setNewQuestion(prev => ({ ...prev, grade: value }))}>
                   <SelectTrigger className="text-sm">
-                    <SelectValue placeholder="Selecione a série" />
+                    <SelectValue placeholder="Selecione o curso" />
                   </SelectTrigger>
                   <SelectContent>
                     {series.length === 0 ? (
                       <div className="p-4 text-center text-sm text-slate-500">
-                        Nenhuma série cadastrada. Configure em Configurações → Acadêmico.
+                        Nenhum curso cadastrado. Configure em Configurações → Acadêmico.
                       </div>
                     ) : (
                       series.map(s => (
@@ -699,9 +716,9 @@ export function QuestionBankPage() {
       <div className="space-y-4">
         <div className="flex items-center justify-between">
           <h2 className="font-display font-bold text-slate-900 tracking-tight">
-            Questões <span className="text-amber-600">({filteredQuestions.length})</span>
+            Questões <span className="text-amber-600">({hasActiveFilter ? filteredQuestions.length : questions.length})</span>
           </h2>
-          {filteredQuestions.length > 0 && (
+          {hasActiveFilter && filteredQuestions.length > 0 && (
             <div className="flex items-center space-x-2 text-sm text-slate-500">
               <span>Total: {questions.length} questões</span>
               <span>•</span>
@@ -710,7 +727,24 @@ export function QuestionBankPage() {
           )}
         </div>
 
-        {filteredQuestions.map(question => {
+        {!hasActiveFilter && questions.length > 0 && (
+          <Card className="seice-card">
+            <CardContent className="p-12 text-center">
+              <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center mx-auto mb-4">
+                <Filter className="w-8 h-8 text-zinc-400" />
+              </div>
+              <h3 className="font-display font-bold text-slate-800 mb-2">Use os filtros para ver as questões</h3>
+              <p className="text-slate-500 mb-4">
+                Busque por texto ou selecione uma matéria/dificuldade acima.
+              </p>
+              <Button variant="outline" onClick={() => setShowAllQuestions(true)}>
+                Mostrar todas ({questions.length})
+              </Button>
+            </CardContent>
+          </Card>
+        )}
+
+        {hasActiveFilter && filteredQuestions.map(question => {
           const accentColor = question.difficulty === 'Fácil' ? 'bg-green-500' : question.difficulty === 'Difícil' ? 'bg-red-500' : 'bg-amber-500';
           return (
           <Card key={question.id} className="seice-glow-card relative overflow-hidden border-slate-200 hover:-translate-y-0.5 transition-all duration-200">
@@ -800,7 +834,7 @@ export function QuestionBankPage() {
           );
         })}
 
-        {filteredQuestions.length === 0 && (
+        {(questions.length === 0 || (hasActiveFilter && filteredQuestions.length === 0)) && (
           <Card className="seice-card">
             <CardContent className="p-12 text-center">
               <div className="w-16 h-16 rounded-2xl bg-zinc-100 flex items-center justify-center mx-auto mb-4">
@@ -901,7 +935,7 @@ export function QuestionBankPage() {
         columns={[
           { header: 'ID', key: 'id', width: 10, type: 'text' },
           { header: 'Matéria', key: 'subject', width: 15, type: 'text' },
-          { header: 'Série', key: 'grade', width: 12, type: 'text' },
+          { header: 'Curso', key: 'grade', width: 12, type: 'text' },
           { header: 'Dificuldade', key: 'difficulty', width: 12, type: 'text' },
           { header: 'Questão', key: 'question', width: 50, type: 'text' },
           { header: 'Tipo', key: 'type', width: 15, type: 'text' },

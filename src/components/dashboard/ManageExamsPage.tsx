@@ -3,7 +3,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
@@ -23,9 +22,16 @@ import {
   QrCode,
   Save,
   X,
-  AlertCircle
+  AlertCircle,
+  Layers,
+  CheckCircle2,
+  Sparkles,
+  Check,
+  EyeOff,
+  RotateCcw
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
+import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 
 type ManageExamsPageProps = {
   onCreateExam?: () => void;
@@ -53,6 +59,24 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
   // Estado para visualização do simulado
   const [viewDialogOpen, setViewDialogOpen] = useState(false);
   const [viewingExam, setViewingExam] = useState<any>(null);
+
+  // Estado para o modal de matérias
+  const [subjectsDialogOpen, setSubjectsDialogOpen] = useState(false);
+  const [subjectsExam, setSubjectsExam] = useState<any>(null);
+
+  // Estado para confirmação de exclusão
+  const [deletingExam, setDeletingExam] = useState<any>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Modal central de resultado das ações
+  const [actionResult, setActionResult] = useState<ActionResult | null>(null);
+
+  // Simulados já realizados podem ser ocultados da lista (sem apagar nada) e reativados depois
+  const [showHidden, setShowHidden] = useState(false);
+  const [hidingExamId, setHidingExamId] = useState<string | null>(null);
+
+  // Destaque temporário do card recém-duplicado
+  const [highlightedExamId, setHighlightedExamId] = useState<string | null>(null);
 
   // Estado para edição de turma
   const [editClassDialogOpen, setEditClassDialogOpen] = useState(false);
@@ -100,7 +124,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       console.log('ManageExamsPage: Classes extracted from students:', classesList);
       
       // Carregar questões completas para cada exame
-      console.log('🔄 Carregando questões completas para cada simulado...');
+      console.log('Carregando questões completas para cada simulado...');
       const examsWithQuestions = await Promise.all(
         examsList.map(async (exam) => {
           try {
@@ -108,7 +132,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
             const fullExam = fullExamResponse?.exam || exam;
             const questionsCount = fullExam.questions?.length || 0;
             
-            console.log(`  📋 ${exam.title}: ${questionsCount} questões`);
+            console.log(`  ${exam.title}: ${questionsCount} questões`);
             
             return {
               ...exam,
@@ -116,13 +140,13 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               questionCount: questionsCount
             };
           } catch (error) {
-            console.error(`  ❌ Erro ao carregar questões do exame ${exam.id}:`, error);
+            console.error(`  Erro ao carregar questões do exame ${exam.id}:`, error);
             return exam;
           }
         })
       );
       
-      console.log(`✓ ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students, ${classesList.length} classes`);
+      console.log(`ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students, ${classesList.length} classes`);
       
       setExams(examsWithQuestions);
       setSubmissions(submissionsList);
@@ -165,9 +189,31 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
     };
   };
 
+  // Agrupa as questões do simulado por matéria (quantidade e pontos)
+  const getExamSubjectBreakdown = (exam: any) => {
+    const fallbackSubject = exam.subject || 'Geral';
+    const breakdown = new Map<string, { subject: string; questions: number; points: number }>();
+
+    (exam.questions || []).forEach((q: any) => {
+      const subject = q.subject || fallbackSubject;
+      const entry = breakdown.get(subject) || { subject, questions: 0, points: 0 };
+      entry.questions += 1;
+      entry.points += Number(q.points ?? q.weight ?? 1) || 0;
+      breakdown.set(subject, entry);
+    });
+
+    // Simulados sem questões ainda: mostra as matérias declaradas
+    if (breakdown.size === 0) {
+      const declared = Array.isArray(exam.subjects) && exam.subjects.length > 0 ? exam.subjects : [fallbackSubject];
+      declared.forEach((subject: string) => breakdown.set(subject, { subject, questions: 0, points: 0 }));
+    }
+
+    return Array.from(breakdown.values());
+  };
+
   // Função para abrir o diálogo de edição de título
   const handleEditClick = (exam: any) => {
-    console.log('📝 Abrindo edição do exame:', exam);
+    console.log('Abrindo edição do exame:', exam);
     setEditingExam(exam);
     setEditTitle(exam.title || '');
     setEditDescription(exam.description || '');
@@ -186,7 +232,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       setSaveLoading(true);
       setSaveError('');
       
-      console.log('💾 Salvando alterações via API:', {
+      console.log('Salvando alterações via API:', {
         examId: editingExam.id,
         title: editTitle,
         description: editDescription
@@ -197,7 +243,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         description: editDescription
       });
 
-      console.log('✓ Resposta da API:', response);
+      console.log('Resposta da API:', response);
 
       if (response.success) {
         showToast('Simulado atualizado com sucesso!', 'success');
@@ -207,7 +253,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         throw new Error(response.error || 'Erro ao atualizar simulado');
       }
     } catch (error) {
-      console.error('❌ Erro ao salvar alterações:', error);
+      console.error('Erro ao salvar alterações:', error);
       setSaveError(error.message || 'Erro ao salvar alterações. Tente novamente.');
       showToast('Erro ao atualizar simulado', 'error');
     } finally {
@@ -217,7 +263,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
 
   // Função para abrir o diálogo de edição de turma
   const handleEditClassClick = (exam: any) => {
-    console.log('🏫 Abrindo edição de turma do exame:', exam);
+    console.log('Abrindo edição de turma do exame:', exam);
     setEditingClassExam(exam);
     setSelectedClass(exam.selectedClass || '');
     setSaveClassError('');
@@ -235,7 +281,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       setSaveClassLoading(true);
       setSaveClassError('');
       
-      console.log('🏫 Atualizando turma do simulado via API:', {
+      console.log('Atualizando turma do simulado via API:', {
         examId: editingClassExam.id,
         selectedClass: selectedClass
       });
@@ -244,7 +290,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         selectedClass: selectedClass
       });
 
-      console.log('✓ Resposta da API:', response);
+      console.log('Resposta da API:', response);
 
       if (response.success) {
         showToast('Turma atualizada com sucesso!', 'success');
@@ -254,7 +300,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         throw new Error(response.error || 'Erro ao atualizar turma');
       }
     } catch (error) {
-      console.error('❌ Erro ao salvar turma:', error);
+      console.error('Erro ao salvar turma:', error);
       setSaveClassError(error.message || 'Erro ao salvar turma. Tente novamente.');
       showToast('Erro ao atualizar turma', 'error');
     } finally {
@@ -268,8 +314,17 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       const response = await apiService.duplicateExam(exam.id);
       
       if (response.success) {
-        showToast('Simulado duplicado com sucesso!', 'success');
+        const newExam = response.exam;
+        // A cópia ainda não teve cartões gerados
+        if (newExam?.id && (exam.answerSheetsGeneratedAt || exam.hidden)) {
+          await apiService.updateExam(newExam.id, { answerSheetsGeneratedAt: null, hidden: false, hiddenAt: null });
+        }
+        showToast('Simulado duplicado!', 'success', newExam?.title || `${exam.title} (Cópia)`);
         await loadData();
+        if (newExam?.id) {
+          setHighlightedExamId(newExam.id);
+          setTimeout(() => setHighlightedExamId(null), 3000);
+        }
       } else {
         throw new Error(response.error || 'Failed to duplicate exam');
       }
@@ -281,24 +336,62 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
     }
   };
 
-  const handleDeleteExam = async (examId: string) => {
-    if (window.confirm('Tem certeza que deseja excluir este simulado? Esta ação não pode ser desfeita.')) {
-      try {
-        setLoading(true);
-        const response = await apiService.deleteExam(examId);
-        
-        if (response.success) {
-          showToast('Simulado excluído com sucesso!', 'success');
-          await loadData();
-        } else {
-          throw new Error(response.error || 'Failed to delete exam');
-        }
-      } catch (error) {
-        console.error('Error deleting exam:', error);
-        showToast('Erro ao excluir simulado', 'error');
-      } finally {
-        setLoading(false);
+  // Oculta (hidden = true) ou reativa (hidden = false) um simulado. Os dados, cartões e
+  // correções continuam intactos; só some da lista principal.
+  const setExamHidden = async (exam: any, hidden: boolean) => {
+    const patch = { hidden, hiddenAt: hidden ? new Date().toISOString() : null };
+    try {
+      setHidingExamId(exam.id);
+      const response = await apiService.updateExam(exam.id, patch);
+      if (!response?.success) throw new Error(response?.error || 'Failed to update exam');
+      setExams(prev => prev.map(e => (e.id === exam.id ? { ...e, ...patch } : e)));
+
+      if (hidden) {
+        setActionResult({
+          type: 'success',
+          title: 'Simulado ocultado',
+          message: `"${exam.title}" saiu da lista. Para trazê-lo de volta, use "Mostrar ocultos".`,
+          actions: [
+            {
+              label: 'Desfazer',
+              variant: 'outline',
+              icon: <RotateCcw className="w-4 h-4 mr-2" />,
+              onClick: () => { setActionResult(null); setExamHidden(exam, false); }
+            },
+            { label: 'OK', onClick: () => setActionResult(null) }
+          ]
+        });
+      } else {
+        showToast('Simulado reativado!', 'success', `"${exam.title}" voltou para a lista.`);
+        setHighlightedExamId(exam.id);
+        setTimeout(() => setHighlightedExamId(null), 3000);
       }
+    } catch (error) {
+      console.error('Error toggling exam visibility:', error);
+      showToast(hidden ? 'Erro ao ocultar simulado' : 'Erro ao reativar simulado', 'error');
+    } finally {
+      setHidingExamId(null);
+    }
+  };
+
+  const handleDeleteExam = async () => {
+    if (!deletingExam) return;
+    try {
+      setDeleteLoading(true);
+      const response = await apiService.deleteExam(deletingExam.id);
+      
+      if (response.success) {
+        showToast('Simulado excluído!', 'success', deletingExam.title);
+        setDeletingExam(null);
+        await loadData();
+      } else {
+        throw new Error(response.error || 'Failed to delete exam');
+      }
+    } catch (error) {
+      console.error('Error deleting exam:', error);
+      showToast('Erro ao excluir simulado', 'error');
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -309,7 +402,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       const examId = exam.id || '';
       const selectedClass = exam.selectedClass;
       
-      console.log('📊 Gerando cartões para simulado:', {
+      console.log('Gerando cartões para simulado:', {
         examId,
         examTitle,
         selectedClass,
@@ -334,7 +427,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         return;
       }
 
-      console.log('📄 Gerando cartões resposta automáticos:', {
+      console.log('Gerando cartões resposta automáticos:', {
         examId,
         examTitle,
         selectedClass,
@@ -456,7 +549,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               </div>
               
               <div class="instructions">
-                <h3>📋 INSTRUÇÕES DE PREENCHIMENTO</h3>
+                <h3>INSTRUÇÕES DE PREENCHIMENTO</h3>
                 <ul>
                   <li>Preencha completamente o círculo da resposta escolhida</li>
                   <li>Use caneta azul ou preta</li>
@@ -728,14 +821,24 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       
       printWindow.document.close();
       
-      showToast(`✓ ${classStudents.length} cartões resposta gerados para a turma ${selectedClass}!`, 'success');
+      showToast('Cartões resposta gerados!', 'success', `${classStudents.length} cartões para a turma ${selectedClass}.`);
+
+      // Marca o simulado como aplicado
+      const generatedAt = new Date().toISOString();
+      setExams(prev => prev.map(e => e.id === exam.id ? { ...e, answerSheetsGeneratedAt: generatedAt } : e));
+      apiService.updateExam(exam.id, { answerSheetsGeneratedAt: generatedAt })
+        .catch(err => console.error('Erro ao marcar simulado como aplicado:', err));
     } catch (error) {
       console.error('Error generating answer sheets:', error);
       showToast('Erro ao gerar cartões resposta', 'error');
     }
   };
 
+  const hiddenCount = exams.filter(exam => exam.hidden).length;
+
   const filteredExams = exams.filter(exam => {
+    if (!!exam.hidden !== showHidden) return false;
+
     const matchesSearch = exam.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          (exam.description && exam.description.toLowerCase().includes(searchTerm.toLowerCase()));
     
@@ -763,8 +866,8 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
 
   const totalQuestions = exams.reduce((total, exam) => total + (exam.questions?.length || 0), 0);
 
-  const showToast = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    console.log(`[${type.toUpperCase()}] ${message}`);
+  const showToast = (title: string, type: 'success' | 'error', message?: string) => {
+    setActionResult({ type, title, message });
   };
 
   if (loading && exams.length === 0) {
@@ -882,196 +985,251 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                 <SelectItem value="avaliacao">Avaliações</SelectItem>
               </SelectContent>
             </Select>
+            {(hiddenCount > 0 || showHidden) && (
+              <Button
+                variant="outline"
+                onClick={() => setShowHidden(v => !v)}
+                className={`w-full md:w-auto flex-shrink-0 ${showHidden ? 'border-zinc-800 text-zinc-900' : ''}`}
+              >
+                {showHidden ? <Eye className="w-4 h-4 mr-2" /> : <EyeOff className="w-4 h-4 mr-2" />}
+                {showHidden ? 'Voltar aos simulados ativos' : `Mostrar ocultos (${hiddenCount})`}
+              </Button>
+            )}
           </div>
 
-          <div className="border rounded-lg overflow-hidden overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-slate-50">
-                  <TableHead className="font-semibold">Título</TableHead>
-                  <TableHead className="font-semibold">Turma</TableHead>
-                  <TableHead className="font-semibold">Matérias</TableHead>
-                  <TableHead className="font-semibold">Questões</TableHead>
-                  <TableHead className="font-semibold">Tipo</TableHead>
-                  <TableHead className="font-semibold">Aplicações</TableHead>
-                  <TableHead className="font-semibold">Média</TableHead>
-                  <TableHead className="font-semibold">Data</TableHead>
-                  <TableHead className="text-right font-semibold">Ações</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredExams.map((exam) => {
-                  const stats = getExamStats(exam.id);
-                  const examSubjects = exam.subjects && Array.isArray(exam.subjects) 
-                    ? exam.subjects 
-                    : exam.subject 
-                      ? [exam.subject] 
-                      : ['Geral'];
-                  const classStudentsCount = students.filter(s => s.class === exam.selectedClass).length;
-                  
-                  return (
-                    <TableRow key={exam.id} className="hover:bg-slate-50">
-                      <TableCell>
-                        <div>
-                          <div className="font-medium text-slate-800">{exam.title}</div>
-                          {exam.description && (
-                            <div className="text-sm text-slate-500">
-                              {exam.description.substring(0, 60)}
-                              {exam.description.length > 60 ? '...' : ''}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        {exam.selectedClass ? (
-                          <div className="flex items-center gap-2">
-                            <div>
-                              <Badge variant="outline" className="text-xs">
-                                {exam.selectedClass}
-                              </Badge>
-                              <p className="text-xs text-slate-500 mt-1">
-                                {classStudentsCount} aluno{classStudentsCount !== 1 ? 's' : ''}
-                              </p>
-                            </div>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleEditClassClick(exam)}
-                              className="h-6 w-6 p-0 text-zinc-800 hover:text-zinc-900 hover:bg-zinc-50"
-                              title="Alterar turma"
-                            >
-                              <Edit className="w-3 h-3" />
-                            </Button>
+          {showHidden && hiddenCount > 0 && (
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              <EyeOff className="w-4 h-4 flex-shrink-0" />
+              Estes simulados estão ocultos. Clique em <strong className="mx-1">Reativar</strong> para devolvê-los à lista principal.
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+            {filteredExams.map((exam) => {
+              const stats = getExamStats(exam.id);
+              const classStudentsCount = students.filter(s => s.class === exam.selectedClass).length;
+              const subjectCount = getExamSubjectBreakdown(exam).length;
+              const isApplied = !!exam.answerSheetsGeneratedAt || stats.submissions > 0;
+              const actionClass = 'flex-col h-auto py-2 gap-1 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm hover:bg-white';
+
+              return (
+                <div
+                  key={exam.id}
+                  className={`flex flex-col rounded-xl border bg-white shadow-sm hover:shadow-md transition-all duration-500 ${
+                    exam.hidden ? 'opacity-75 hover:opacity-100 border-dashed ' : ''
+                  }${
+                    highlightedExamId === exam.id
+                      ? 'border-green-400 ring-4 ring-green-100'
+                      : 'border-slate-200 hover:border-slate-300'
+                  }`}
+                >
+                  {/* Cabeçalho */}
+                  <div className="p-4 pb-3 flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="font-semibold text-slate-800 leading-snug">{exam.title}</h3>
+                        {isApplied && (
+                          <Badge
+                            className="bg-green-100 text-green-700 hover:bg-green-100 gap-1"
+                            title={exam.answerSheetsGeneratedAt ? `Cartões gerados em ${formatDate(exam.answerSheetsGeneratedAt)}` : 'Já possui aplicações'}
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            Aplicado
+                          </Badge>
+                        )}
+                        {exam.hidden && (
+                          <Badge variant="outline" className="gap-1 text-slate-500">
+                            <EyeOff className="w-3 h-3" />
+                            Oculto
+                          </Badge>
+                        )}
+                        {highlightedExamId === exam.id && (
+                          <Badge className="bg-green-600 text-white hover:bg-green-600">Novo</Badge>
+                        )}
+                      </div>
+                      {exam.description && (
+                        <p className="text-sm text-slate-500 mt-1 line-clamp-2">{exam.description}</p>
+                      )}
+                      <p className="text-xs text-slate-400 mt-2">Criado em {formatDate(exam.createdAt)}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => { setSubjectsExam(exam); setSubjectsDialogOpen(true); }}
+                      className="flex-shrink-0 gap-1.5"
+                      title="Ver matérias, questões e pontos"
+                    >
+                      <Layers className="w-4 h-4" />
+                      <span className="text-xs">{subjectCount} matéria{subjectCount !== 1 ? 's' : ''}</span>
+                    </Button>
+                  </div>
+
+                  {/* Turma */}
+                  <div className="px-4 pb-3">
+                    {exam.selectedClass ? (
+                      <div className="flex items-center justify-between gap-2 rounded-lg bg-slate-50 px-3 py-2">
+                        <div className="min-w-0 flex items-center gap-2">
+                          <Users className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                          <div className="min-w-0">
+                            <p className="text-sm text-slate-700 truncate" title={exam.selectedClass}>
+                              {exam.selectedClass}
+                            </p>
+                            <p className="text-xs text-slate-500">
+                              {classStudentsCount} aluno{classStudentsCount !== 1 ? 's' : ''}
+                            </p>
                           </div>
-                        ) : (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleEditClassClick(exam)}
-                            className="text-xs"
-                          >
-                            Atribuir turma
-                          </Button>
-                        )}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {examSubjects.slice(0, 2).map((subject, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
-                              {subject}
-                            </Badge>
-                          ))}
-                          {examSubjects.length > 2 && (
-                            <Badge variant="outline" className="text-xs">
-                              +{examSubjects.length - 2}
-                            </Badge>
-                          )}
                         </div>
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-medium">{exam.questions?.length || 0}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={
-                          exam.type === 'simulado' 
-                            ? 'bg-zinc-100 text-zinc-900' 
-                            : 'bg-teal-100 text-teal-800'
-                        }>
-                          {exam.type === 'simulado' ? 'Simulado' : 'Avaliação'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <span className="font-medium">{stats.submissions}</span>
-                      </TableCell>
-                      <TableCell>
-                        {stats.submissions > 0 ? (
-                          <span className={`font-medium ${
-                            stats.avgScore >= 70 ? 'text-green-600' :
-                            stats.avgScore >= 50 ? 'text-yellow-600' :
-                            'text-red-600'
-                          }`}>
-                            {stats.avgScore}%
-                          </span>
-                        ) : (
-                          <span className="text-slate-400">-</span>
-                        )}
-                      </TableCell>
-                      <TableCell className="text-sm text-slate-600">
-                        {formatDate(exam.createdAt)}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end space-x-1">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            title="Editar Simulado"
-                            onClick={() => onEditExam ? onEditExam(exam) : handleEditClick(exam)}
-                            className="text-zinc-800 hover:text-zinc-900 hover:bg-zinc-50"
-                          >
-                            <Edit className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            title="Visualizar"
-                            onClick={() => { setViewingExam(exam); setViewDialogOpen(true); }}
-                          >
-                            <Eye className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            title={exam.selectedClass ? `Gerar ${classStudentsCount} cartões para ${exam.selectedClass}` : 'Cartão Resposta'}
-                            onClick={() => handleDownloadAnswerSheet(exam)}
-                            className="text-green-600 hover:text-green-700 hover:bg-green-50"
-                            disabled={!exam.selectedClass || classStudentsCount === 0}
-                          >
-                            <QrCode className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            title="Duplicar"
-                            onClick={() => handleDuplicateExam(exam)}
-                            disabled={loading}
-                          >
-                            <Copy className="w-4 h-4" />
-                          </Button>
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            title="Excluir"
-                            onClick={() => handleDeleteExam(exam.id)}
-                            disabled={loading}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleEditClassClick(exam)}
+                          className="h-7 w-7 p-0 flex-shrink-0 text-zinc-800 hover:bg-zinc-100"
+                          title="Alterar turma"
+                        >
+                          <Edit className="w-3.5 h-3.5" />
+                        </Button>
+                      </div>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleEditClassClick(exam)}
+                        className="w-full border-dashed text-slate-600"
+                      >
+                        <Users className="w-4 h-4 mr-2" />
+                        Atribuir turma
+                      </Button>
+                    )}
+                  </div>
+
+                  {/* Estatísticas */}
+                  <div className="px-4 pb-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-lg border border-slate-100 px-3 py-2">
+                      <p className="text-xs text-slate-500">Aplicações</p>
+                      <p className="text-xl font-semibold text-slate-800">{stats.submissions}</p>
+                    </div>
+                    <div className="rounded-lg border border-slate-100 px-3 py-2">
+                      <p className="text-xs text-slate-500">Média</p>
+                      {stats.submissions > 0 ? (
+                        <p className={`text-xl font-semibold ${
+                          stats.avgScore >= 70 ? 'text-green-600' :
+                          stats.avgScore >= 50 ? 'text-yellow-600' :
+                          'text-red-600'
+                        }`}>
+                          {stats.avgScore}%
+                        </p>
+                      ) : (
+                        <p className="text-xl font-semibold text-slate-300">-</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Ações */}
+                  <div className="mt-auto border-t border-slate-100 bg-slate-50/60 rounded-b-xl p-3 space-y-2">
+                    {exam.hidden && (
+                      <Button
+                        onClick={() => setExamHidden(exam, false)}
+                        disabled={hidingExamId === exam.id}
+                        className="w-full bg-zinc-800 hover:bg-zinc-900 text-white transition-all duration-150 hover:shadow-md"
+                      >
+                        <RotateCcw className="w-4 h-4 mr-2" />
+                        {hidingExamId === exam.id ? 'Reativando...' : 'Reativar simulado'}
+                      </Button>
+                    )}
+                    <Button
+                      onClick={() => handleDownloadAnswerSheet(exam)}
+                      disabled={!exam.selectedClass || classStudentsCount === 0}
+                      className="w-full bg-green-600 hover:bg-green-700 text-white transition-all duration-150 hover:shadow-md"
+                      title={exam.selectedClass ? `Gerar ${classStudentsCount} cartões para ${exam.selectedClass}` : 'Atribua uma turma para gerar os cartões'}
+                    >
+                      <QrCode className="w-4 h-4 mr-2" />
+                      {isApplied && exam.selectedClass && classStudentsCount > 0
+                        ? `Gerar cartões novamente (${classStudentsCount})`
+                        : exam.selectedClass && classStudentsCount > 0
+                          ? `Gerar cartões resposta (${classStudentsCount})`
+                          : 'Gerar cartões resposta'}
+                    </Button>
+                    <div className={`grid gap-2 ${isApplied && !exam.hidden ? 'grid-cols-5' : 'grid-cols-4'}`}>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onEditExam ? onEditExam(exam) : handleEditClick(exam)}
+                        className={actionClass}
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span className="text-xs">Editar</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => { setViewingExam(exam); setViewDialogOpen(true); }}
+                        className={actionClass}
+                      >
+                        <Eye className="w-4 h-4" />
+                        <span className="text-xs">Visualizar</span>
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleDuplicateExam(exam)}
+                        disabled={loading}
+                        className={actionClass}
+                      >
+                        <Copy className="w-4 h-4" />
+                        <span className="text-xs">Duplicar</span>
+                      </Button>
+                      {isApplied && !exam.hidden && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setExamHidden(exam, true)}
+                          disabled={hidingExamId === exam.id}
+                          className={actionClass}
+                          title="Tirar da lista sem apagar. Dá para reativar depois em &quot;Mostrar ocultos&quot;."
+                        >
+                          <EyeOff className="w-4 h-4" />
+                          <span className="text-xs">Ocultar</span>
+                        </Button>
+                      )}
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setDeletingExam(exam)}
+                        disabled={loading}
+                        className="flex-col h-auto py-2 gap-1 text-red-600 border-red-200 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm hover:text-red-700 hover:bg-red-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        <span className="text-xs">Excluir</span>
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
 
           {filteredExams.length === 0 && (
             <div className="text-center py-12">
               <BookOpen className="w-16 h-16 mx-auto text-slate-300 mb-4" />
               <h3 className="font-semibold text-slate-800 mb-2">
-                {searchTerm || filterSubject !== 'all' || filterType !== 'all'
+                {showHidden
+                  ? 'Nenhum simulado oculto'
+                  : hiddenCount > 0 && exams.length === hiddenCount
+                  ? 'Todos os simulados estão ocultos'
+                  : searchTerm || filterSubject !== 'all' || filterType !== 'all'
                   ? 'Nenhum simulado encontrado'
                   : 'Nenhum simulado criado ainda'
                 }
               </h3>
               <p className="text-slate-600 mb-6">
-                {searchTerm || filterSubject !== 'all' || filterType !== 'all'
+                {showHidden || (hiddenCount > 0 && exams.length === hiddenCount)
+                  ? 'Use "Mostrar ocultos" para ver e reativar simulados ocultos'
+                  : searchTerm || filterSubject !== 'all' || filterType !== 'all'
                   ? 'Tente ajustar os filtros de busca'
                   : 'Comece criando seu primeiro simulado com questões do banco de questões'
                 }
               </p>
-              {!searchTerm && filterSubject === 'all' && filterType === 'all' && onCreateExam && (
+              {!showHidden && exams.length === 0 && !searchTerm && filterSubject === 'all' && filterType === 'all' && onCreateExam && (
                 <Button onClick={onCreateExam} className="bg-zinc-800 hover:bg-zinc-900">
                   <Plus className="w-4 h-4 mr-2" />
                   Criar Primeiro Simulado
@@ -1088,7 +1246,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
             <div className="flex items-start space-x-3">
               <QrCode className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
               <div>
-                <p className="font-medium text-zinc-900">✨ Cartões Resposta Automatizados</p>
+                <p className="font-medium text-zinc-900"><Sparkles className="w-4 h-4 inline-block align-text-bottom mr-1" />Cartões Resposta Automatizados</p>
                 <p className="text-sm text-zinc-900 mt-1">
                   Clique no ícone <strong>QR Code</strong> para gerar automaticamente todos os cartões resposta 
                   da turma selecionada. Os cartões virão pré-preenchidos com <strong>nome do aluno, matrícula e turma</strong>.
@@ -1100,9 +1258,117 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         </Card>
       )}
 
+      <ActionResultDialog result={actionResult} onClose={() => setActionResult(null)} />
+
+      {/* Dialog de Confirmação de Exclusão */}
+      <Dialog open={!!deletingExam} onOpenChange={(open) => { if (!open && !deleteLoading) setDeletingExam(null); }}>
+        <DialogContent className="sm:max-w-[420px] text-center">
+          {deletingExam && (() => {
+            const deleteStats = getExamStats(deletingExam.id);
+            const questionsCount = deletingExam.questions?.length || 0;
+            return (
+              <div className="flex flex-col items-center gap-4 pt-2">
+                <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center ring-8 ring-red-50">
+                  <Trash2 className="w-8 h-8 text-red-600" />
+                </div>
+
+                <div className="space-y-1">
+                  <DialogTitle className="text-xl text-slate-900">Excluir simulado?</DialogTitle>
+                  <DialogDescription className="text-slate-500">
+                    Esta ação não pode ser desfeita.
+                  </DialogDescription>
+                </div>
+
+                <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left">
+                  <p className="font-medium text-slate-800 break-words">{deletingExam.title}</p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {questionsCount} quest{questionsCount !== 1 ? 'ões' : 'ão'}
+                    {deletingExam.selectedClass ? ` · ${deletingExam.selectedClass}` : ''}
+                  </p>
+                </div>
+
+                {deleteStats.submissions > 0 && (
+                  <div className="w-full flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <span>
+                      Este simulado já tem <strong>{deleteStats.submissions}</strong> aplicaç{deleteStats.submissions !== 1 ? 'ões' : 'ão'} registrada{deleteStats.submissions !== 1 ? 's' : ''}.
+                    </span>
+                  </div>
+                )}
+
+                <div className="w-full grid grid-cols-2 gap-2 pt-1">
+                  <Button
+                    variant="outline"
+                    onClick={() => setDeletingExam(null)}
+                    disabled={deleteLoading}
+                    autoFocus
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleDeleteExam}
+                    disabled={deleteLoading}
+                    className="bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    {deleteLoading ? 'Excluindo...' : 'Sim, excluir'}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Matérias do Simulado */}
+      <Dialog open={subjectsDialogOpen} onOpenChange={setSubjectsDialogOpen}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Layers className="w-5 h-5 text-zinc-800" />
+              Matérias
+            </DialogTitle>
+            {subjectsExam && <DialogDescription>{subjectsExam.title}</DialogDescription>}
+          </DialogHeader>
+
+          {subjectsExam && (() => {
+            const breakdown = getExamSubjectBreakdown(subjectsExam);
+            const totalQuestionsCount = breakdown.reduce((sum, s) => sum + s.questions, 0);
+            const totalPoints = breakdown.reduce((sum, s) => sum + s.points, 0);
+            return (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-x-6 bg-slate-50 px-4 py-2 text-xs font-semibold text-slate-600">
+                  <span>Matéria</span>
+                  <span className="text-right">Questões</span>
+                  <span className="text-right">Pontos</span>
+                </div>
+                {breakdown.map((s) => (
+                  <div key={s.subject} className="grid grid-cols-[1fr_auto_auto] gap-x-6 px-4 py-2.5 text-sm border-t">
+                    <span className="text-slate-800">{s.subject}</span>
+                    <span className="text-right tabular-nums">{s.questions}</span>
+                    <span className="text-right tabular-nums">{Number(s.points.toFixed(2))}</span>
+                  </div>
+                ))}
+                <div className="grid grid-cols-[1fr_auto_auto] gap-x-6 px-4 py-2.5 text-sm border-t bg-slate-50 font-semibold">
+                  <span>Total</span>
+                  <span className="text-right tabular-nums">{totalQuestionsCount}</span>
+                  <span className="text-right tabular-nums">{Number(totalPoints.toFixed(2))}</span>
+                </div>
+              </div>
+            );
+          })()}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSubjectsDialogOpen(false)}>
+              Fechar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog de Visualização do Simulado */}
       <Dialog open={viewDialogOpen} onOpenChange={setViewDialogOpen}>
-        <DialogContent className="sm:max-w-[700px] max-h-[85vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[960px] max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Eye className="w-5 h-5 text-zinc-800" />
@@ -1320,7 +1586,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               {selectedClass && (
                 <div className="mt-2 p-2 bg-zinc-50 border border-zinc-200 rounded text-xs text-zinc-900">
                   <p className="font-medium">
-                    ✓ {students.filter(s => s.class === selectedClass).length} alunos nesta turma
+                    <Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />{students.filter(s => s.class === selectedClass).length} alunos nesta turma
                   </p>
                 </div>
               )}

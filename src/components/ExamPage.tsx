@@ -7,8 +7,8 @@ import { Progress } from './ui/progress';
 import { Textarea } from './ui/textarea';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from './ui/alert-dialog';
 import { Badge } from './ui/badge';
-import { ArrowLeft, Clock, Send, AlertTriangle, Printer, FileText } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { ArrowLeft, Clock, Send, AlertTriangle, Printer, FileText, CheckCircle, Circle } from 'lucide-react';
+import { toast } from '../utils/toast';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { Exam } from '../App';
 
@@ -342,9 +342,11 @@ export function ExamPage({ exam, onBack, onComplete }: ExamPageProps) {
                   </Button>
                   
                   <div className="text-center text-xs lg:text-sm text-muted-foreground sm:order-2">
-                    {exam.questions[currentQuestion].questionType === 'essay' 
-                      ? (essayAnswers[currentQuestion]?.trim() ? '✅ Respondida' : '⚪ Não respondida')
-                      : (answers[currentQuestion] !== -1 ? '✅ Respondida' : '⚪ Não respondida')
+                    {(exam.questions[currentQuestion].questionType === 'essay'
+                      ? !!essayAnswers[currentQuestion]?.trim()
+                      : answers[currentQuestion] !== -1)
+                      ? <span className="inline-flex items-center gap-1"><CheckCircle className="w-4 h-4 text-green-600" />Respondida</span>
+                      : <span className="inline-flex items-center gap-1"><Circle className="w-4 h-4" />Não respondida</span>
                     }
                   </div>
                   

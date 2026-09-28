@@ -22,10 +22,19 @@ import {
   Database,
   CheckCircle2,
   Loader2,
-  Upload
+  Upload,
+  Clock,
+  GraduationCap,
+  Users,
+  ListChecks,
+  PenLine,
+  Shuffle
 } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
+import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 import { apiService } from '../../utils/api';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
 interface Question {
   id: string;
@@ -53,8 +62,62 @@ interface SimuladoData {
   grade: string;
   timeLimit: number;
   selectedClass: string;
+  optionsCount: number;
+  questionMode: QuestionMode;
   sections: Section[];
 }
+
+// Tipo de questões do simulado, definido na criação: só objetivas, só dissertativas ou mistas
+type QuestionMode = 'objective' | 'essay' | 'mixed';
+
+const QUESTION_MODE_CHOICES: { value: QuestionMode; label: string; hint: string }[] = [
+  { value: 'objective', label: 'Objetiva', hint: 'Alternativas (cartão resposta)' },
+  { value: 'essay', label: 'Dissertativa', hint: 'Resposta em texto livre' },
+  { value: 'mixed', label: 'Mista', hint: 'Objetivas e dissertativas' }
+];
+
+// Tipo que toda questão nova recebe em cada modo (na mista, começa como objetiva)
+const defaultTypeForMode = (mode: QuestionMode): Question['type'] => (mode === 'essay' ? 'essay' : 'multiple-choice');
+
+// A questão é permitida no modo do simulado?
+const questionFitsMode = (type: Question['type'], mode: QuestionMode) =>
+  mode === 'mixed' || (mode === 'essay' ? type === 'essay' : type !== 'essay');
+
+interface ClassOption {
+  name: string;
+  grade: string;
+}
+
+// Quantidade de alternativas por questão objetiva que o simulado pode ter (A–C, A–D ou A–E)
+const OPTIONS_COUNT_CHOICES = [3, 4, 5];
+const DEFAULT_OPTIONS_COUNT = 5;
+
+// Pontuações rápidas por questão (abaixo de 0,5 só 0,25 e 0,3)
+const POINTS_PRESETS = [0.25, 0.3, 0.5, 1, 2];
+const MIN_POINTS = 0.25;
+
+const optionLetters = (count: number) => `A–${String.fromCharCode(64 + count)}`;
+
+// Ajusta as alternativas de uma questão para o limite do simulado (completa com vazias ou corta o excesso)
+function fitOptions(options: string[], count: number): string[] {
+  const list = Array.isArray(options) ? options.slice(0, count) : [];
+  while (list.length < count) list.push('');
+  return list;
+}
+
+// Alternativas preenchidas além do limite (seriam perdidas ao aplicar o limite)
+function hasFilledOptionsBeyond(options: string[], count: number): boolean {
+  return (options || []).slice(count).some(opt => (opt || '').trim());
+}
+
+// Pontuação digitada: abaixo de 0,5 encaixa em 0,25 ou 0,3 (o mais próximo); acima disso vale o valor digitado
+function normalizePoints(value: number): number {
+  if (!isFinite(value) || value <= 0) return MIN_POINTS;
+  if (value < 0.5) return value < 0.275 ? 0.25 : 0.3;
+  return Math.round(value * 100) / 100;
+}
+
+const formatPoints = (value: number | undefined) => (Number(value) || 0).toLocaleString('pt-BR', { maximumFractionDigits: 2 });
 
 // Normaliza uma questão vinda do backend (que pode ter sido criada fora deste
 // editor, ex. via IA/API direta) para o formato que o editor de simulado espera.
@@ -93,17 +156,45 @@ function buildSimuladoDataFromExam(exam: any): SimuladoData {
     }];
   }
 
+  const allQuestions = sections.flatMap(s => s.questions).filter(q => q.type === 'multiple-choice');
+  const savedCount = Number(exam.optionsCount || exam.settings?.optionsCount);
+  const inferredCount = allQuestions.length > 0
+    ? Math.max(...allQuestions.map(q => q.options.filter(o => (o || '').trim()).length))
+    : DEFAULT_OPTIONS_COUNT;
+  const optionsCount = OPTIONS_COUNT_CHOICES.includes(savedCount)
+    ? savedCount
+    : Math.min(5, Math.max(3, inferredCount || DEFAULT_OPTIONS_COUNT));
+
+  const everyQuestion = sections.flatMap(s => s.questions);
+  const hasEssay = everyQuestion.some(q => q.type === 'essay');
+  const hasObjective = everyQuestion.some(q => q.type !== 'essay');
+  const questionMode: QuestionMode = ['objective', 'essay', 'mixed'].includes(exam.questionMode)
+    ? exam.questionMode
+    : hasEssay && hasObjective ? 'mixed' : hasEssay ? 'essay' : 'objective';
+
   return {
     title: exam.title || '',
     description: exam.description || '',
     grade: exam.grade || '',
     timeLimit: exam.timeLimit || 120,
     selectedClass: exam.selectedClass || '',
+    optionsCount,
+    questionMode,
     sections
   };
 }
 
-export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void; examToEdit?: any }) {
+type CreateSimuladoPageProps = {
+  onBack: () => void;
+  examToEdit?: any;
+  onGoToQuestionBank?: (savedExam: { title: string; isNew: boolean }) => void;
+  onGoToManageExams?: () => void;
+};
+
+export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onGoToManageExams }: CreateSimuladoPageProps) {
+  // Id do simulado já salvo: permite salvar várias vezes sem sair da página (e sem duplicar)
+  const [savedExamId, setSavedExamId] = useState<string | null>(examToEdit?.id || null);
+  const [saveResult, setSaveResult] = useState<ActionResult | null>(null);
   const [simuladoData, setSimuladoData] = useState<SimuladoData>(() =>
     examToEdit
       ? buildSimuladoDataFromExam(examToEdit)
@@ -113,12 +204,16 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
           grade: '',
           timeLimit: 120,
           selectedClass: '',
+          optionsCount: DEFAULT_OPTIONS_COUNT,
+          questionMode: 'objective',
           sections: []
         }
   );
 
   const [bankQuestions, setBankQuestions] = useState<Question[]>([]);
-  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+  const [availableCourses, setAvailableCourses] = useState<string[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<ClassOption[]>([]);
+  const [loadingCourses, setLoadingCourses] = useState(true);
   const [loading, setLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   
@@ -155,25 +250,98 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
 
   useEffect(() => {
     loadBankQuestions();
-    loadClasses();
+    loadCoursesAndClasses();
   }, []);
 
-  const loadClasses = async () => {
+  // Cursos vêm de "Gerenciar Cursos"; turmas vêm de "Gerenciar Turmas" (cada turma pertence a um curso)
+  const loadCoursesAndClasses = async () => {
+    setLoadingCourses(true);
     try {
-      const [studentsResponse, classesResponse] = await Promise.all([
-        apiService.getStudents().catch(() => null),
+      const [coursesResponse, classesResponse] = await Promise.all([
+        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
+          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        }).then(r => (r.ok ? r.json() : null)).catch(() => null),
         apiService.getClasses().catch(() => null),
       ]);
-      const fromStudents = (studentsResponse?.students || []).map((s: any) => s.class);
-      const fromClasses = (classesResponse?.classes || []).map((c: any) => c.name);
-      const all = [...fromClasses, ...fromStudents].filter(Boolean).map((c: string) => String(c).trim());
-      const unique = Array.from(new Map(all.map(c => [c.toLowerCase(), c])).values());
-      setAvailableClasses(unique.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true })));
+
+      const courses: string[] = (coursesResponse?.series || [])
+        .filter(Boolean)
+        .map((c: string) => String(c).trim());
+      setAvailableCourses(
+        Array.from(new Set(courses)).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+      );
+
+      const classes: ClassOption[] = (classesResponse?.classes || [])
+        .filter((c: any) => c?.name)
+        .map((c: any) => ({ name: String(c.name).trim(), grade: String(c.grade || '').trim() }));
+      setAvailableClasses(classes.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true })));
     } catch (error) {
-      console.error('Error loading classes:', error);
+      console.error('Error loading courses/classes:', error);
+      setAvailableCourses([]);
       setAvailableClasses([]);
-      toast.error('Erro ao carregar turmas');
+      toast.error('Erro ao carregar cursos e turmas');
+    } finally {
+      setLoadingCourses(false);
     }
+  };
+
+  const sameText = (a: string, b: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
+
+  // Ao editar um simulado antigo, o curso/turma salvos podem não estar mais cadastrados: mantém na lista
+  const courseOptions = simuladoData.grade && !availableCourses.some(c => sameText(c, simuladoData.grade))
+    ? [simuladoData.grade, ...availableCourses]
+    : availableCourses;
+
+  const classesOfSelectedCourse = Array.from(new Set(
+    availableClasses.filter(c => sameText(c.grade, simuladoData.grade)).map(c => c.name)
+  ));
+  const classOptions = simuladoData.selectedClass && !classesOfSelectedCourse.some(c => sameText(c, simuladoData.selectedClass))
+    ? [simuladoData.selectedClass, ...classesOfSelectedCourse]
+    : classesOfSelectedCourse;
+
+  const handleCourseChange = (course: string) => {
+    setSimuladoData(prev => {
+      const stillValid = availableClasses.some(c => sameText(c.grade, course) && sameText(c.name, prev.selectedClass));
+      return { ...prev, grade: course, selectedClass: stillValid ? prev.selectedClass : '' };
+    });
+  };
+
+  const handleQuestionModeChange = (mode: QuestionMode) => {
+    if (mode === simuladoData.questionMode) return;
+    const conflicts = simuladoData.sections.flatMap(s => s.questions).filter(q => !questionFitsMode(q.type, mode));
+    if (conflicts.length > 0) {
+      const otherType = mode === 'essay' ? 'objetiva(s)' : 'dissertativa(s)';
+      toast.error(
+        `Este simulado já tem ${conflicts.length} questão(ões) ${otherType}. ` +
+        'Remova essas questões ou escolha "Mista".'
+      );
+      return;
+    }
+    setSimuladoData(prev => ({ ...prev, questionMode: mode }));
+  };
+
+  // Troca o limite de alternativas e ajusta as questões já criadas.Bloqueia se alguma questão
+  // teria o gabarito ou uma alternativa preenchida cortada.
+  const handleOptionsCountChange = (count: number) => {
+    if (count === simuladoData.optionsCount) return;
+    const conflicts = simuladoData.sections.flatMap(s => s.questions).filter(q =>
+      q.type === 'multiple-choice' && (q.correctAnswer >= count || hasFilledOptionsBeyond(q.options, count))
+    );
+    if (conflicts.length > 0) {
+      toast.error(
+        `${conflicts.length} questão(ões) já usam alternativas além de ${String.fromCharCode(64 + count)}. ` +
+        'Edite ou remova essas questões antes de reduzir o limite.'
+      );
+      return;
+    }
+    setSimuladoData(prev => ({
+      ...prev,
+      optionsCount: count,
+      sections: prev.sections.map(s => ({
+        ...s,
+        questions: s.questions.map(q => q.type === 'multiple-choice' ? { ...q, options: fitOptions(q.options, count) } : q)
+      }))
+    }));
   };
 
   const loadBankQuestions = async () => {
@@ -297,8 +465,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     setEditingSection(null);
   };
 
-  const handleDeleteSection = (sectionId: string) => {
-    if (confirm('Deseja realmente excluir esta seção e todas as suas questões?')) {
+  const handleDeleteSection = async (sectionId: string) => {
+    if (await confirmAction({ title: 'Excluir seção?', warning: 'Todas as questões desta seção também serão excluídas.' })) {
       setSimuladoData(prev => ({
         ...prev,
         sections: prev.sections.filter(s => s.id !== sectionId)
@@ -313,8 +481,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       question: '',
       subject: '',
       difficulty: 'Médio',
-      type: 'multiple-choice',
-      options: ['', '', '', '', ''],
+      type: defaultTypeForMode(simuladoData.questionMode),
+      options: fitOptions([], simuladoData.optionsCount),
       correctAnswer: 0,
       tags: [],
       points: 1
@@ -332,8 +500,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       subject: question.subject,
       difficulty: question.difficulty,
       type: question.type,
-      options: [...question.options],
-      correctAnswer: question.correctAnswer,
+      options: fitOptions(question.options, simuladoData.optionsCount),
+      correctAnswer: Math.min(question.correctAnswer, simuladoData.optionsCount - 1),
       tags: [...question.tags],
       points: question.points
     });
@@ -348,9 +516,14 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     }
     
     if (newQuestion.type === 'multiple-choice') {
-      const filledOptions = newQuestion.options.filter(opt => opt.trim());
+      const limited = fitOptions(newQuestion.options, simuladoData.optionsCount);
+      const filledOptions = limited.filter(opt => opt.trim());
       if (filledOptions.length < 2) {
         toast.error('Preencha pelo menos 2 alternativas');
+        return;
+      }
+      if (!limited[newQuestion.correctAnswer]?.trim()) {
+        toast.error('A alternativa marcada como correta está vazia');
         return;
       }
     }
@@ -361,10 +534,12 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       subject: newQuestion.subject,
       difficulty: newQuestion.difficulty,
       type: newQuestion.type,
-      options: newQuestion.options,
-      correctAnswer: newQuestion.correctAnswer,
+      options: newQuestion.type === 'multiple-choice'
+        ? fitOptions(newQuestion.options, simuladoData.optionsCount)
+        : newQuestion.options,
+      correctAnswer: Math.min(newQuestion.correctAnswer, simuladoData.optionsCount - 1),
       tags: newQuestion.tags,
-      points: newQuestion.points,
+      points: normalizePoints(newQuestion.points),
       fromBank: false
     };
 
@@ -427,9 +602,17 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
   };
 
   const handleAddQuestionFromBank = (question: Question) => {
+    const limit = simuladoData.optionsCount;
+    if (question.type !== 'essay' && (question.correctAnswer >= limit || hasFilledOptionsBeyond(question.options, limit))) {
+      toast.error(`Esta questão tem alternativas além de ${String.fromCharCode(64 + limit)} e não cabe no limite deste simulado (${optionLetters(limit)}).`);
+      return;
+    }
+
     const newQuestion: Question = {
       ...question,
+      options: question.type === 'essay' ? question.options : fitOptions(question.options, limit),
       id: `bank_${question.id}_${Date.now()}`,
+      points: Number(question.points) || Number((question as any).weight) || 1,
       fromBank: true
     };
 
@@ -449,8 +632,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     toast.success('Questão adicionada do banco!');
   };
 
-  const handleDeleteQuestion = (sectionId: string, questionId: string) => {
-    if (confirm('Deseja realmente excluir esta questão?')) {
+  const handleDeleteQuestion = async (sectionId: string, questionId: string) => {
+    if (await confirmAction({ title: 'Excluir questão?' })) {
       setSimuladoData(prev => ({
         ...prev,
         sections: prev.sections.map(section => {
@@ -522,8 +705,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
   };
 
   const getFilteredBankQuestions = () => {
-    let filtered = [...bankQuestions];
-    
+    let filtered = bankQuestions.filter(q => questionFitsMode(q.type, simuladoData.questionMode));
+
     if (searchTerm) {
       filtered = filtered.filter(q => 
         q.question.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -561,22 +744,40 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
         return;
       }
 
+      const limit = simuladoData.optionsCount;
+      const mode = simuladoData.questionMode;
+      let skipped = 0;
+      let wrongType = 0;
       const importedSections: Section[] = result.sections.map((s, si) => ({
         id: `section_import_${Date.now()}_${si}`,
         name: s.name,
         description: s.description,
-        questions: s.questions.map((q, qi) => ({
-          id: `q_import_${Date.now()}_${si}_${qi}`,
-          question: q.question,
-          subject: q.subject || s.name,
-          difficulty: q.difficulty,
-          type: q.type,
-          options: q.options,
-          correctAnswer: q.correctAnswer,
-          tags: [],
-          points: q.points
-        }))
+        questions: s.questions
+          .filter(q => {
+            if (!questionFitsMode(q.type, mode)) { wrongType++; return false; }
+            const fits = q.type === 'essay'|| (q.correctAnswer < limit && !hasFilledOptionsBeyond(q.options, limit));
+            if (!fits) skipped++;
+            return fits;
+          })
+          .map((q, qi) => ({
+            id: `q_import_${Date.now()}_${si}_${qi}`,
+            question: q.question,
+            subject: q.subject || s.name,
+            difficulty: q.difficulty,
+            type: q.type,
+            options: q.type === 'essay' ? q.options : fitOptions(q.options, limit),
+            correctAnswer: q.correctAnswer,
+            tags: [],
+            points: q.points
+          }))
       }));
+
+      if (wrongType > 0) {
+        toast.warning(`${wrongType} questão(ões) ${mode === 'essay' ? 'objetiva(s)' : 'dissertativa(s)'} ignorada(s): este simulado é só de questões ${mode === 'essay' ? 'dissertativas' : 'objetivas'}.`);
+      }
+      if (skipped > 0) {
+        toast.warning(`${skipped} questão(ões) ignorada(s): têm alternativas além de ${String.fromCharCode(64 + limit)} (limite deste simulado: ${optionLetters(limit)}).`);
+      }
 
       setSimuladoData(prev => ({ ...prev, sections: [...prev.sections, ...importedSections] }));
 
@@ -593,7 +794,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
 
   const getTotalPoints = () => {
     return simuladoData.sections.reduce((sum, section) => 
-      sum + section.questions.reduce((qSum, q) => qSum + q.points, 0), 0
+      Math.round((sum + section.questions.reduce((qSum, q) => qSum + (Number(q.points) || 0), 0)) * 100) / 100, 0
     );
   };
 
@@ -616,7 +817,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     try {
       setLoading(true);
       
-      // 🔥 CORREÇÃO CRÍTICA: Criar array flat de questões E manter seções
+      // CORREÇÃO CRÍTICA: Criar array flat de questões E manter seções
       const allQuestions = simuladoData.sections.flatMap(section => 
         section.questions.map(q => ({
           ...q,
@@ -632,7 +833,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
         )
       ));
 
-      console.log('🚀 Criando simulado com estrutura corrigida:', {
+      console.log('Criando simulado com estrutura corrigida:', {
         totalQuestions: allQuestions.length,
         sections: simuladoData.sections.length,
         subjects: allSubjects
@@ -644,40 +845,77 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
         grade: simuladoData.grade,
         selectedClass: simuladoData.selectedClass,
         timeLimit: simuladoData.timeLimit,
+        optionsCount: simuladoData.optionsCount,
+        questionMode: simuladoData.questionMode,
         type: 'simulado',
-        // ✅ Array flat de questões para compatibilidade
+        // Array flat de questões para compatibilidade
         questions: allQuestions,
-        // ✅ Seções preservadas para estrutura
+        // Seções preservadas para estrutura
         sections: simuladoData.sections.map(section => ({
           id: section.id,
           name: section.name,
           description: section.description,
           questions: section.questions
         })),
-        // ✅ Metadados consolidados
+        // Metadados consolidados
         subjects: allSubjects,
         settings: {
           totalQuestions: allQuestions.length,
           totalSections: simuladoData.sections.length,
-          totalPoints: getTotalPoints()
+          totalPoints: getTotalPoints(),
+          optionsCount: simuladoData.optionsCount
         }
       };
 
-      console.log('📤 Enviando dados do simulado:', examData);
+      console.log('Enviando dados do simulado:', examData);
 
-      const response = examToEdit
-        ? await apiService.updateExam(examToEdit.id, examData)
+      const isNew = !savedExamId;
+      const response = savedExamId
+        ? await apiService.updateExam(savedExamId, examData)
         : await apiService.createExam(examData);
 
       if (response && !response.error) {
-        toast.success(examToEdit ? 'Simulado atualizado com sucesso!' : 'Simulado criado com sucesso!');
-        onBack();
+        if (isNew && response.exam?.id) setSavedExamId(response.exam.id);
+
+        const savedTitle = simuladoData.title;
+        const pending = getQuestionsNotInBank().length;
+        setSaveResult({
+          type: 'success',
+          title: isNew ? 'Simulado criado!' : 'Alterações salvas!',
+          message: `"${savedTitle}" foi salvo com ${allQuestions.length} questão(ões).`,
+          details: pending > 0
+            ? [`${pending} questão(ões) ainda não estão no Banco de Questões.`]
+            : undefined,
+          actions: [
+            {
+              label: 'Voltar para Gerenciar Simulados',
+              icon: <ArrowLeft className="w-4 h-4 mr-2" />,
+              onClick: () => {
+                setSaveResult(null);
+                (onGoToManageExams || onBack)();
+              }
+            },
+            ...(onGoToQuestionBank ? [{
+              label: 'Ir para o Banco de Questões',
+              variant: 'outline' as const,
+              icon: <Database className="w-4 h-4 mr-2" />,
+              onClick: () => {
+                setSaveResult(null);
+                onGoToQuestionBank({ title: savedTitle, isNew });
+              }
+            }] : [])
+          ]
+        });
       } else {
-        throw new Error(response.error || (examToEdit ? 'Falha ao atualizar simulado' : 'Falha ao criar simulado'));
+        throw new Error(response.error || (savedExamId ? 'Falha ao atualizar simulado' : 'Falha ao criar simulado'));
       }
     } catch (error: any) {
-      console.error('❌ Error saving simulado:', error);
-      toast.error((examToEdit ? 'Erro ao atualizar simulado: ' : 'Erro ao criar simulado: ') + (error.message || 'Erro desconhecido'));
+      console.error('Error saving simulado:', error);
+      setSaveResult({
+        type: 'error',
+        title: savedExamId ? 'Erro ao salvar alterações' : 'Erro ao criar simulado',
+        message: error.message || 'Erro desconhecido'
+      });
     } finally {
       setLoading(false);
     }
@@ -688,6 +926,8 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
 
   return (
     <div className="space-y-6">
+      <ActionResultDialog result={saveResult} onClose={() => setSaveResult(null)} />
+
       <div className="flex items-center justify-between">
         <div className="flex items-center space-x-4">
           <Button variant="ghost" onClick={onBack}>
@@ -707,7 +947,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
           className="bg-zinc-800 hover:bg-zinc-900"
         >
           <Save className="w-4 h-4 mr-2" />
-          {loading ? 'Salvando...' : examToEdit ? 'Salvar Alterações' : 'Salvar Simulado'}
+          {loading ? 'Salvando...' : savedExamId ? 'Salvar Alterações' : 'Salvar Simulado'}
         </Button>
       </div>
 
@@ -737,80 +977,202 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
       {currentStep === 1 && (
         <div className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle>Informações Básicas</CardTitle>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Informações Básicas</CardTitle>
+              <p className="text-sm text-slate-500">Campos com * são obrigatórios.</p>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Título do Simulado *
+            <CardContent className="space-y-6">
+              <div className="space-y-1.5">
+                <label htmlFor="simulado-title" className="block text-sm font-semibold text-slate-800">
+                  Título do simulado *
                 </label>
                 <Input
+                  id="simulado-title"
                   placeholder="Ex: Simulado Preparatório - 9º Ano"
                   value={simuladoData.title}
                   onChange={(e) => setSimuladoData(prev => ({ ...prev, title: e.target.value }))}
+                  className="h-11 bg-white border-slate-300 text-base"
                 />
               </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Descrição
+
+              <div className="space-y-1.5">
+                <label htmlFor="simulado-description" className="block text-sm font-semibold text-slate-800">
+                  Descrição <span className="font-normal text-slate-500">(opcional)</span>
                 </label>
                 <Textarea
+                  id="simulado-description"
                   placeholder="Descreva o simulado e seus objetivos..."
                   value={simuladoData.description}
                   onChange={(e) => setSimuladoData(prev => ({ ...prev, description: e.target.value }))}
                   rows={3}
+                  className="bg-white border-slate-300"
                 />
               </div>
-              
-              <div className="grid grid-cols-2 gap-4">
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 space-y-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Série/Ano *
-                  </label>
-                  <Input
-                    placeholder="Ex: 9º Ano"
-                    value={simuladoData.grade}
-                    onChange={(e) => setSimuladoData(prev => ({ ...prev, grade: e.target.value }))}
-                  />
+                  <p className="text-sm font-semibold text-slate-800">Para quem é o simulado</p>
+                  <p className="text-xs text-slate-500">Escolha o curso primeiro; depois aparecem só as turmas desse curso.</p>
                 </div>
-                
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Tempo Limite (minutos)
-                  </label>
-                  <Input
-                    type="number"
-                    value={simuladoData.timeLimit}
-                    onChange={(e) => setSimuladoData(prev => ({ ...prev, timeLimit: parseInt(e.target.value) || 120 }))}
-                  />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                      <GraduationCap className="w-4 h-4 text-slate-500" />
+                      1. Curso *
+                    </label>
+                    <Select value={simuladoData.grade} onValueChange={handleCourseChange} disabled={loadingCourses}>
+                      <SelectTrigger className="h-11 bg-white border-slate-300">
+                        <SelectValue placeholder={loadingCourses ? 'Carregando cursos...' : 'Selecione o curso'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {courseOptions.length === 0 ? (
+                          <SelectItem value="none" disabled>Nenhum curso cadastrado</SelectItem>
+                        ) : (
+                          courseOptions.map(course => (
+                            <SelectItem key={course} value={course}>{course}</SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {!loadingCourses && availableCourses.length === 0 && (
+                      <p className="text-xs text-amber-700">Cadastre cursos em “Gerenciar Cursos”.</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                      <Users className="w-4 h-4 text-slate-500" />
+                      2. Turma *
+                    </label>
+                    <Select
+                      value={simuladoData.selectedClass}
+                      onValueChange={(value) => setSimuladoData(prev => ({ ...prev, selectedClass: value }))}
+                      disabled={!simuladoData.grade || loadingCourses}
+                    >
+                      <SelectTrigger className="h-11 bg-white border-slate-300">
+                        <SelectValue placeholder={simuladoData.grade ? 'Selecione a turma' : 'Escolha o curso primeiro'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {classOptions.length === 0 ? (
+                          <SelectItem value="none" disabled>Nenhuma turma neste curso</SelectItem>
+                        ) : (
+                          classOptions.map(className => (
+                            <SelectItem key={className} value={className}>{className}</SelectItem>
+                          ))
+                        )}
+                      </SelectContent>
+                    </Select>
+                    {simuladoData.grade && !loadingCourses && classesOfSelectedCourse.length === 0 && (
+                      <p className="text-xs text-amber-700">
+                        Nenhuma turma vinculada a “{simuladoData.grade}”. Cadastre em “Gerenciar Turmas”.
+                      </p>
+                    )}
+                  </div>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Turma *
+              <div className="space-y-1.5">
+                <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                  <PenLine className="w-4 h-4 text-slate-500" />
+                  Tipo de questões *
                 </label>
-                <Select 
-                  value={simuladoData.selectedClass} 
-                  onValueChange={(value) => setSimuladoData(prev => ({ ...prev, selectedClass: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecione a turma" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableClasses.length === 0 ? (
-                      <SelectItem value="none" disabled>Nenhuma turma cadastrada</SelectItem>
-                    ) : (
-                      availableClasses.map(className => (
-                        <SelectItem key={className} value={className}>
-                          {className}
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2" role="radiogroup">
+                  {QUESTION_MODE_CHOICES.map(choice => {
+                    const active = simuladoData.questionMode === choice.value;
+                    const Icon = choice.value === 'objective' ? ListChecks : choice.value === 'essay' ? PenLine : Shuffle;
+                    return (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        onClick={() => handleQuestionModeChange(choice.value)}
+                        className={`flex items-center gap-3 rounded-md border px-3 py-2.5 text-left transition-colors ${
+                          active
+                            ? 'bg-zinc-800 text-white border-zinc-800'
+                            : 'bg-white text-slate-700 border-slate-300 hover:border-zinc-500'
+                        }`}
+                      >
+                        <Icon className={`w-5 h-5 flex-shrink-0 ${active ? 'text-white' : 'text-slate-500'}`} />
+                        <span>
+                          <span className="block text-sm font-semibold">{choice.label}</span>
+                          <span className={`block text-xs ${active ? 'text-zinc-300' : 'text-slate-500'}`}>{choice.hint}</span>
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label htmlFor="simulado-time"className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                    <Clock className="w-4 h-4 text-slate-500" />
+                    Tempo limite
+                  </label>
+                  <div className="relative">
+                    <Input
+                      id="simulado-time"
+                      type="number"
+                      min={1}
+                      value={simuladoData.timeLimit}
+                      onChange={(e) => setSimuladoData(prev => ({ ...prev, timeLimit: parseInt(e.target.value) || 120 }))}
+                      className="h-11 bg-white border-slate-300 pr-20"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500 pointer-events-none">
+                      minutos
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[60, 90, 120, 180].map(minutes => (
+                      <button
+                        key={minutes}
+                        type="button"
+                        onClick={() => setSimuladoData(prev => ({ ...prev, timeLimit: minutes }))}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                          simuladoData.timeLimit === minutes
+                            ? 'bg-zinc-800 text-white border-zinc-800'
+                            : 'bg-white text-slate-700 border-slate-300 hover:border-zinc-500'
+                        }`}
+                      >
+                        {minutes} min
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {simuladoData.questionMode !== 'essay' && (
+                <div className="space-y-1.5">
+                  <label className="flex items-center gap-1.5 text-sm font-semibold text-slate-800">
+                    <ListChecks className="w-4 h-4 text-slate-500" />
+                    Alternativas por questão *
+                  </label>
+                  <div className="grid grid-cols-3 gap-2" role="radiogroup">
+                    {OPTIONS_COUNT_CHOICES.map(count => {
+                      const active = simuladoData.optionsCount === count;
+                      return (
+                        <button
+                          key={count}
+                          type="button"
+                          role="radio"
+                          aria-checked={active}
+                          onClick={() => handleOptionsCountChange(count)}
+                          className={`h-11 rounded-md border text-sm font-semibold transition-colors ${
+                            active
+                              ? 'bg-zinc-800 text-white border-zinc-800'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-zinc-500'
+                          }`}
+                        >
+                          {count} <span className={`font-normal ${active ? 'text-zinc-300' : 'text-slate-500'}`}>({optionLetters(count)})</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    Todas as questões objetivas terão exatamente {simuladoData.optionsCount} alternativas.
+                  </p>
+                </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -959,7 +1321,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                           {section.questions.length} questões
                         </Badge>
                         <Badge className="bg-green-100 text-green-800">
-                          {section.questions.reduce((sum, q) => sum + q.points, 0)} pts
+                          {formatPoints(section.questions.reduce((sum, q) => sum + (Number(q.points) || 0), 0))} pts
                         </Badge>
                         <Button
                           size="sm"
@@ -1014,7 +1376,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                                     Q{qIndex + 1}
                                   </Badge>
                                   <Badge className="bg-teal-100 text-teal-800">
-                                    {question.points}pt{question.points !== 1 && 's'}
+                                    {formatPoints(question.points)}pt{question.points !== 1 && 's'}
                                   </Badge>
                                   <Badge className={
                                     question.type === 'essay' 
@@ -1129,7 +1491,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                   <p className="text-sm text-slate-600 mt-1">Questões</p>
                 </div>
                 <div>
-                  <p className="text-3xl font-bold text-teal-600">{getTotalPoints()}</p>
+                  <p className="text-3xl font-bold text-teal-600">{formatPoints(getTotalPoints())}</p>
                   <p className="text-sm text-slate-600 mt-1">Pontos</p>
                 </div>
                 <div>
@@ -1154,7 +1516,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
           onClick={() => {
             if (currentStep === 1) {
               if (!simuladoData.title || !simuladoData.grade || !simuladoData.selectedClass) {
-                toast.error('Preencha título, série e turma antes de prosseguir');
+                toast.error('Preencha título, curso e turma antes de prosseguir');
                 return;
               }
             }
@@ -1237,18 +1599,26 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Tipo de Questão *
                 </label>
-                <Select 
-                  value={newQuestion.type} 
-                  onValueChange={(value: 'multiple-choice' | 'essay') => setNewQuestion(prev => ({ ...prev, type: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="multiple-choice">Objetiva</SelectItem>
-                    <SelectItem value="essay">Dissertativa</SelectItem>
-                  </SelectContent>
-                </Select>
+                {simuladoData.questionMode === 'mixed' ? (
+                  <Select
+                    value={newQuestion.type}
+                    onValueChange={(value: 'multiple-choice' | 'essay') => setNewQuestion(prev => ({ ...prev, type: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="multiple-choice">Objetiva</SelectItem>
+                      <SelectItem value="essay">Dissertativa</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    {newQuestion.type === 'essay' ? <PenLine className="w-4 h-4 text-slate-500" /> : <ListChecks className="w-4 h-4 text-slate-500" />}
+                    {newQuestion.type === 'essay' ? 'Dissertativa' : 'Objetiva'}
+                    <span className="text-xs text-slate-500">(definido na criação do simulado)</span>
+                  </div>
+                )}
               </div>
 
               <div>
@@ -1300,18 +1670,35 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                   </label>
                   <Input
                     type="number"
-                    min="0.5"
-                    step="0.5"
+                    min={MIN_POINTS}
+                    step="any"
                     value={newQuestion.points}
-                    onChange={(e) => setNewQuestion(prev => ({ ...prev, points: parseFloat(e.target.value) || 1 }))}
+                    onChange={(e) => setNewQuestion(prev => ({ ...prev, points: parseFloat(e.target.value.replace(',', '.')) || 0 }))}
+                    onBlur={() => setNewQuestion(prev => ({ ...prev, points: normalizePoints(prev.points) }))}
                   />
+                  <div className="flex flex-wrap gap-1.5 mt-2">
+                    {POINTS_PRESETS.map(value => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setNewQuestion(prev => ({ ...prev, points: value }))}
+                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                          newQuestion.points === value
+                            ? 'bg-zinc-800 text-white border-zinc-800'
+                            : 'bg-white text-slate-700 border-slate-300 hover:border-zinc-500'
+                        }`}
+                      >
+                        {formatPoints(value)}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
               {newQuestion.type === 'multiple-choice' && (
                 <div>
                   <label className="block text-sm font-medium text-slate-700 mb-2">
-                    Alternativas * (mínimo 2, máximo 5)
+                    Alternativas * ({optionLetters(simuladoData.optionsCount)} — limite definido nas informações básicas)
                   </label>
                   <div className="space-y-3">
                     {newQuestion.options.map((option, idx) => (
@@ -1325,7 +1712,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                         />
                         <div className="flex-1">
                           <Input
-                            placeholder={`Alternativa ${String.fromCharCode(65 + idx)} ${idx >= 4 ? '(opcional)' : ''}`}
+                            placeholder={`Alternativa ${String.fromCharCode(65 + idx)}`}
                             value={option}
                             onChange={(e) => {
                               const newOptions = [...newQuestion.options];
@@ -1341,7 +1728,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                     ))}
                   </div>
                   <p className="text-xs text-slate-500 mt-2">
-                    Selecione o círculo à esquerda para marcar a resposta correta. A alternativa E é opcional.
+                    Selecione o círculo à esquerda para marcar a resposta correta.
                   </p>
                 </div>
               )}
@@ -1493,7 +1880,7 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                               {question.difficulty}
                             </Badge>
                             <Badge className="bg-teal-100 text-teal-800">
-                              {question.points} pt{question.points !== 1 && 's'}
+                              {formatPoints(question.points)} pt{question.points !== 1 && 's'}
                             </Badge>
                             {question.tags && question.tags.length > 0 && (
                               <Badge variant="outline" className="text-xs">

@@ -28,7 +28,8 @@ import {
   School,
   FileSpreadsheet
 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../../utils/toast';
+import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 import { ExcelExportDialog } from '../ExcelExportDialog';
 import { ExcelTemplates, quickExport, importFromExcel } from '../../utils/excel-utils';
@@ -95,11 +96,11 @@ export function SeriesPage() {
         if (response.success) {
           setSeries(response.data || []);
         } else {
-          toast.error(response.error || 'Erro ao carregar séries');
+          toast.error(response.error || 'Erro ao carregar cursos');
         }
       } catch (error) {
         console.error('Error loading series:', error);
-        toast.error('Erro ao carregar séries');
+        toast.error('Erro ao carregar cursos');
       }
     });
   };
@@ -138,16 +139,16 @@ export function SeriesPage() {
       }
 
       if (response.success) {
-        toast.success(editingSerie ? 'Série atualizada com sucesso!' : 'Série criada com sucesso!');
+        toast.success(editingSerie ? 'Curso atualizado com sucesso!' : 'Curso criado com sucesso!');
         setIsDialogOpen(false);
         resetForm();
         loadSeries();
       } else {
-        toast.error(response.error || 'Erro ao salvar série');
+        toast.error(response.error || 'Erro ao salvar curso');
       }
     } catch (error) {
       console.error('Error saving serie:', error);
-      toast.error('Erro ao salvar série');
+      toast.error('Erro ao salvar curso');
     } finally {
       setSavingId(null);
     }
@@ -169,7 +170,7 @@ export function SeriesPage() {
   };
 
   const handleDelete = async (serie: Serie) => {
-    if (!confirm(`Tem certeza que deseja excluir a série "${serie.name}"?`)) {
+    if (!(await confirmAction({ title: 'Excluir curso?', itemName: serie.name }))) {
       return;
     }
 
@@ -178,14 +179,14 @@ export function SeriesPage() {
       const response = await apiService.deleteSerie(serie.id);
       
       if (response.success) {
-        toast.success('Série excluída com sucesso!');
+        toast.success('Curso excluído com sucesso!');
         loadSeries();
       } else {
-        toast.error(response.error || 'Erro ao excluir série');
+        toast.error(response.error || 'Erro ao excluir curso');
       }
     } catch (error) {
       console.error('Error deleting serie:', error);
-      toast.error('Erro ao excluir série');
+      toast.error('Erro ao excluir curso');
     } finally {
       setSavingId(null);
     }
@@ -199,7 +200,7 @@ export function SeriesPage() {
       });
       
       if (response.success) {
-        toast.success(`Série ${!serie.isActive ? 'ativada' : 'desativada'} com sucesso!`);
+        toast.success(`Curso ${!serie.isActive ? 'ativado' : 'desativado'} com sucesso!`);
         loadSeries();
       } else {
         toast.error(response.error || 'Erro ao alterar status');
@@ -270,7 +271,7 @@ export function SeriesPage() {
             code: row['Código'] || row['code'] || '',
             description: row['Descrição'] || row['description'] || '',
             level: row['Nível'] || row['level'] || 'fundamental1',
-            grade: parseInt(row['Ano/Série'] || row['grade'] || '1'),
+            grade: parseInt(row['Ano/Curso'] || row['Ano/Série'] || row['grade'] || '1'),
             academicYear: row['Ano Letivo'] || row['academicYear'] || new Date().getFullYear().toString(),
             maxStudents: row['Máximo Alunos'] || row['maxStudents'] ? parseInt(row['Máximo Alunos'] || row['maxStudents']) : undefined,
             isActive: (row['Status'] || row['isActive']) !== 'Inativo'
@@ -296,10 +297,10 @@ export function SeriesPage() {
       await loadSeries();
       
       if (successCount > 0) {
-        toast.success(`${successCount} séries importadas com sucesso!`);
+        toast.success(`${successCount} cursos importados com sucesso!`);
       }
       if (errorCount > 0) {
-        toast.warning(`${errorCount} séries não puderam ser importadas devido a erros`);
+        toast.warning(`${errorCount} cursos não puderam ser importados devido a erros`);
       }
 
     } catch (error) {
@@ -325,9 +326,9 @@ export function SeriesPage() {
       {/* Header */}
       <div className="flex flex-col space-y-3 sm:flex-row sm:items-center sm:justify-between sm:space-y-0">
         <div className="space-y-1">
-          <h1 className="text-xl md:text-2xl">Gerenciar Séries</h1>
+          <h1 className="text-xl md:text-2xl">Gerenciar Cursos</h1>
           <p className="text-sm md:text-base text-muted-foreground">
-            Configure e gerencie as séries e anos letivos do sistema
+            Configure e gerencie os cursos do sistema
           </p>
         </div>
         
@@ -356,7 +357,7 @@ export function SeriesPage() {
             <Button 
               variant="outline" 
               onClick={handleQuickExport} 
-              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 h-10"
+              className="h-10"
               disabled={filteredSeries.length === 0}
             >
               <Download className="w-4 h-4 mr-2" />
@@ -365,7 +366,7 @@ export function SeriesPage() {
             <Button 
               variant="outline"
               onClick={handleExportSeries}
-              className="border-zinc-200 text-zinc-900 hover:bg-zinc-50 h-10"
+              className="h-10"
               disabled={filteredSeries.length === 0}
             >
               <FileSpreadsheet className="w-4 h-4" />
@@ -376,7 +377,7 @@ export function SeriesPage() {
             <DialogTrigger asChild>
               <Button onClick={() => handleCloseDialog()} className="h-10">
                 <Plus className="w-4 h-4 mr-2" />
-                Nova Série
+                Novo Curso
               </Button>
             </DialogTrigger>
             <DialogContent className="sm:max-w-md">
@@ -384,21 +385,21 @@ export function SeriesPage() {
                 <DialogHeader>
                   <DialogTitle className="flex items-center">
                     <GraduationCap className="w-5 h-5 mr-2" />
-                    {editingSerie ? 'Editar Série' : 'Nova Série'}
+                    {editingSerie ? 'Editar Curso' : 'Novo Curso'}
                   </DialogTitle>
                   <DialogDescription>
-                    {editingSerie ? 'Edite as informações da série' : 'Crie uma nova série para o sistema'}
+                    {editingSerie ? 'Edite as informações do curso' : 'Crie um novo curso para o sistema'}
                   </DialogDescription>
                 </DialogHeader>
                 
                 <div className="space-y-4 py-4">
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-sm font-medium mb-2 block">Nome da Série *</label>
+                      <label className="text-sm font-medium mb-2 block">Nome do Curso *</label>
                       <Input
                         value={formData.name}
                         onChange={(e) => setFormData({...formData, name: e.target.value})}
-                        placeholder="Ex: 1ª Série A"
+                        placeholder="Ex: 6º Ano"
                         required
                       />
                     </div>
@@ -433,7 +434,7 @@ export function SeriesPage() {
                   
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label className="text-sm font-medium mb-2 block">Ano/Série</label>
+                      <label className="text-sm font-medium mb-2 block">Ano do Curso</label>
                       <Select value={formData.grade.toString()} onValueChange={(value) => setFormData({...formData, grade: parseInt(value)})}>
                         <SelectTrigger>
                           <SelectValue />
@@ -482,7 +483,7 @@ export function SeriesPage() {
                     <Textarea
                       value={formData.description}
                       onChange={(e) => setFormData({...formData, description: e.target.value})}
-                      placeholder="Descrição opcional da série..."
+                      placeholder="Descrição opcional do curso..."
                       rows={3}
                     />
                   </div>
@@ -519,7 +520,7 @@ export function SeriesPage() {
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
             <div>
-              <label className="text-sm font-medium mb-2 block">Buscar Série</label>
+              <label className="text-sm font-medium mb-2 block">Buscar Curso</label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -559,7 +560,7 @@ export function SeriesPage() {
                 <School className="w-5 h-5 text-white" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Total de Séries</p>
+                <p className="text-sm text-muted-foreground">Total de Cursos</p>
                 <p className="font-semibold">{series.length}</p>
               </div>
             </div>
@@ -573,7 +574,7 @@ export function SeriesPage() {
                 <CheckCircle2 className="w-5 h-5 text-green-600" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Séries Ativas</p>
+                <p className="text-sm text-muted-foreground">Cursos Ativos</p>
                 <p className="font-semibold">{series.filter(s => s.isActive).length}</p>
               </div>
             </div>
@@ -621,9 +622,9 @@ export function SeriesPage() {
           {/* Desktop Table */}
           <Card className="hidden md:block">
             <CardHeader>
-              <CardTitle>Séries Cadastradas</CardTitle>
+              <CardTitle>Cursos Cadastrados</CardTitle>
               <CardDescription>
-                {filteredSeries.length} série{filteredSeries.length !== 1 ? 's' : ''} encontrada{filteredSeries.length !== 1 ? 's' : ''}
+                {filteredSeries.length} curso{filteredSeries.length !== 1 ? 's' : ''} encontrado{filteredSeries.length !== 1 ? 's' : ''}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -710,17 +711,17 @@ export function SeriesPage() {
               {filteredSeries.length === 0 && (
                 <div className="text-center py-8">
                   <GraduationCap className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="font-medium mb-2">Nenhuma série encontrada</h3>
+                  <h3 className="font-medium mb-2">Nenhum curso encontrado</h3>
                   <p className="text-muted-foreground mb-4">
                     {searchTerm || levelFilter !== 'all' 
                       ? 'Tente alterar os filtros de busca'
-                      : 'Comece criando sua primeira série'
+                      : 'Comece criando seu primeiro curso'
                     }
                   </p>
                   {!searchTerm && levelFilter === 'all' && (
                     <Button onClick={() => setIsDialogOpen(true)}>
                       <Plus className="w-4 h-4 mr-2" />
-                      Criar Primeira Série
+                      Criar Primeiro Curso
                     </Button>
                   )}
                 </div>
@@ -758,7 +759,7 @@ export function SeriesPage() {
                       <p className="font-medium">{serie.academicYear}</p>
                     </div>
                     <div>
-                      <span className="text-muted-foreground">Série:</span>
+                      <span className="text-muted-foreground">Curso:</span>
                       <p className="font-medium">
                         {serie.grade}º {serie.level === 'medio' ? 'Ano' : 
                                        serie.level.includes('fundamental') ? 'Ano' : 'Período'}
@@ -808,17 +809,17 @@ export function SeriesPage() {
               <Card>
                 <CardContent className="text-center py-8">
                   <GraduationCap className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
-                  <h3 className="font-medium mb-2">Nenhuma série encontrada</h3>
+                  <h3 className="font-medium mb-2">Nenhum curso encontrado</h3>
                   <p className="text-muted-foreground mb-4">
                     {searchTerm || levelFilter !== 'all' 
                       ? 'Tente alterar os filtros de busca'
-                      : 'Comece criando sua primeira série'
+                      : 'Comece criando seu primeiro curso'
                     }
                   </p>
                   {!searchTerm && levelFilter === 'all' && (
                     <Button onClick={() => setIsDialogOpen(true)}>
                       <Plus className="w-4 h-4 mr-2" />
-                      Criar Primeira Série
+                      Criar Primeiro Curso
                     </Button>
                   )}
                 </CardContent>

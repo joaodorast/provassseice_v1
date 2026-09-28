@@ -12,9 +12,12 @@ import {
   TrendingUp,
   FileText,
   Calendar,
-  Award
+  Award,
+  CheckCircle,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../utils/toast';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { User, Exam, Submission } from '../App';
 
@@ -304,9 +307,9 @@ export function Dashboard({ user, onLogout, onStartExam, onViewResults, onCreate
                     <CardContent className="pt-0">
                       <div className="flex items-center justify-between text-sm text-muted-foreground mb-3">
                         <span>{submission.score}/{submission.totalQuestions} acertos</span>
-                        <span>
-                          {submission.percentage >= 70 ? '✅ Aprovado' : 
-                           submission.percentage >= 50 ? '⚠️ Regular' : '❌ Reprovado'}
+                        <span className="flex items-center gap-1">
+                          {submission.percentage >= 70 ? <><CheckCircle className="w-4 h-4 text-green-600" />Aprovado</> :
+                           submission.percentage >= 50 ? <><AlertTriangle className="w-4 h-4 text-yellow-600" />Regular</> : <><XCircle className="w-4 h-4 text-red-600" />Reprovado</>}
                         </span>
                       </div>
                       <Button 

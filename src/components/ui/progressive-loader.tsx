@@ -1,5 +1,5 @@
 import React from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Check, MoreHorizontal } from 'lucide-react';
 import { Progress } from './progress';
 
 type ProgressiveLoaderProps = {
@@ -45,7 +45,7 @@ export function ProgressiveLoader({ stages, currentStage, className = "" }: Prog
                 {stage.name}
               </span>
               <span className="text-muted-foreground">
-                {stage.completed ? '✓' : '⋯'}
+                {stage.completed ? <Check className="w-3 h-3 text-green-600" /> : <MoreHorizontal className="w-3 h-3" />}
               </span>
             </div>
           ))}

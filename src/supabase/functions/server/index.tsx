@@ -586,7 +586,7 @@ app.get('/make-server-83358821/questions', requireAuth, async (c) => {
           return true;
         });
       
-      console.log(`✓ Returning ${validQuestions.length} valid questions out of ${questions.length} total`);
+      console.log(`Returning ${validQuestions.length} valid questions out of ${questions.length} total`);
       
       // Log first few question IDs for debugging
       if (validQuestions.length > 0) {
@@ -677,7 +677,7 @@ app.post('/make-server-83358821/questions', requireAuth, async (c) => {
       }, 500);
     }
     
-    console.log(`✓ Question created and verified successfully: ${questionId}`);
+    console.log(`Question created and verified successfully: ${questionId}`);
     return c.json({ success: true, question: savedQuestion });
   } catch (error) {
     console.error('Error saving question:', error);
@@ -755,7 +755,7 @@ app.get('/make-server-83358821/exams', requireAuth, async (c) => {
           return true;
         });
       
-      console.log(`✓ Returning ${validExams.length} valid exams out of ${exams.length} total`);
+      console.log(`Returning ${validExams.length} valid exams out of ${exams.length} total`);
       
       if (validExams.length > 0) {
         console.log('Valid exams IDs:', validExams.map(e => e.id).join(', '));
@@ -1917,7 +1917,7 @@ app.get('/make-server-83358821/series/:id', requireAuth, async (c) => {
     const serie = await kv.get(`series:${user.id}:${serieId}`);
     
     if (!serie) {
-      return c.json({ error: 'Série não encontrada' }, 404);
+      return c.json({ error: 'Curso não encontrado' }, 404);
     }
     
     return c.json({ success: true, data: serie });
@@ -1936,7 +1936,7 @@ app.put('/make-server-83358821/series/:id', requireAuth, async (c) => {
     const existingSerie = await kv.get(`series:${user.id}:${serieId}`);
     
     if (!existingSerie) {
-      return c.json({ error: 'Série não encontrada' }, 404);
+      return c.json({ error: 'Curso não encontrado' }, 404);
     }
 
     // Check if code already exists (excluding current serie)
@@ -1985,12 +1985,12 @@ app.delete('/make-server-83358821/series/:id', requireAuth, async (c) => {
     const serie = await kv.get(`series:${user.id}:${serieId}`);
     
     if (!serie) {
-      return c.json({ error: 'Série não encontrada' }, 404);
+      return c.json({ error: 'Curso não encontrado' }, 404);
     }
 
     // Check if serie has students
     if (serie.studentCount > 0) {
-      return c.json({ error: 'Não é possível excluir uma série que possui alunos' }, 400);
+      return c.json({ error: 'Não é possível excluir um curso que possui alunos' }, 400);
     }
 
     await kv.del(`series:${user.id}:${serieId}`);
@@ -2232,10 +2232,10 @@ const initializeStorage = async () => {
       if (error) {
         console.error('Error creating storage bucket:', error);
       } else {
-        console.log('✓ Storage bucket created:', ANSWER_SHEETS_BUCKET);
+        console.log('Storage bucket created:', ANSWER_SHEETS_BUCKET);
       }
     } else {
-      console.log('✓ Storage bucket already exists:', ANSWER_SHEETS_BUCKET);
+      console.log('Storage bucket already exists:', ANSWER_SHEETS_BUCKET);
     }
   } catch (error) {
     console.error('Error initializing storage:', error);
@@ -2318,7 +2318,7 @@ app.post('/make-server-83358821/submissions/:id/upload-answer-sheet', requireAut
       await kv.set(`submissions:${user.id}:${submissionId}`, updatedSubmission);
     }
 
-    console.log(`✓ Answer sheet uploaded: ${filePath}`);
+    console.log(`Answer sheet uploaded: ${filePath}`);
     
     return c.json({ 
       success: true, 
@@ -2406,7 +2406,7 @@ app.delete('/make-server-83358821/answer-sheets/:imageId', requireAuth, async (c
       }
     }
 
-    console.log(`✓ Answer sheet deleted: ${image.filePath}`);
+    console.log(`Answer sheet deleted: ${image.filePath}`);
     
     return c.json({ success: true });
   } catch (error) {

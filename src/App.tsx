@@ -4,7 +4,7 @@ import { ResetPasswordPage } from './components/ResetPasswordPage';
 import { MainDashboard } from './components/MainDashboard';
 import { LoadingProvider } from './components/LoadingProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { Toaster } from './components/ui/sonner';
+import { ActionResultHost } from './components/dashboard/ActionResultDialog';
 import { supabase } from './utils/supabase-client';
 
 export type User = {
@@ -171,7 +171,7 @@ function App() {
       <ErrorBoundary>
         <LoadingProvider>
           <ResetPasswordPage onDone={() => setShowPasswordReset(false)} />
-          <Toaster />
+          <ActionResultHost />
         </LoadingProvider>
       </ErrorBoundary>
     );
@@ -197,7 +197,7 @@ function App() {
       <ErrorBoundary>
         <LoadingProvider>
           <LoginPage onLogin={handleLogin} />
-          <Toaster />
+          <ActionResultHost />
         </LoadingProvider>
       </ErrorBoundary>
     );
@@ -212,7 +212,7 @@ function App() {
             onLogout={handleLogout}
           />
         </div>
-        <Toaster />
+        <ActionResultHost />
       </LoadingProvider>
     </ErrorBoundary>
   );

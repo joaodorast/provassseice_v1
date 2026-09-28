@@ -3,6 +3,7 @@ import { User } from '../App';
 import { Button } from './ui/button';
 import { Sheet, SheetContent, SheetTrigger } from './ui/sheet';
 import { ErrorBoundary } from './ErrorBoundary';
+import type { ActionResult } from './dashboard/ActionResultDialog';
 import seiceLogo from '../assets/seice-logo.png';
 import {
   LogOut,
@@ -57,6 +58,7 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
   const [currentPage, setCurrentPage] = useState('inicio');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [examToEdit, setExamToEdit] = useState<any>(null);
+  const [questionBankArrival, setQuestionBankArrival] = useState<ActionResult | null>(null);
 
   const menuItems = [
     {
@@ -85,7 +87,7 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
     {
       section: 'CONFIGURAÇÕES',
       items: [
-        { key: 'gerenciar-series', label: 'Gerenciar Séries', icon: BookOpen },
+        { key: 'gerenciar-series', label: 'Gerenciar Cursos', icon: BookOpen },
         { key: 'gerenciar-turmas', label: 'Gerenciar Turmas', icon: Users },
         { key: 'gerenciar-alunos', label: 'Gerenciar Alunos', icon: Users },
         { key: 'usuarios', label: 'Configurações', icon: Settings }
@@ -105,11 +107,29 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
       case 'gerenciar-series':
         return <ManageSeriesPage />;
       case 'banco-questoes':
-        return <QuestionBankPage />;
+        return (
+          <QuestionBankPage
+            arrivalResult={questionBankArrival}
+            onArrivalResultClose={() => setQuestionBankArrival(null)}
+          />
+        );
       case 'criar-simulado':
         return (
           <CreateSimuladoPage
             examToEdit={examToEdit}
+            onGoToManageExams={() => {
+              setExamToEdit(null);
+              setCurrentPage('avaliacao');
+            }}
+            onGoToQuestionBank={({ title, isNew }) => {
+              setExamToEdit(null);
+              setQuestionBankArrival({
+                type: 'success',
+                title: isNew ? 'Simulado criado!' : 'Simulado salvo!',
+                message: `"${title}" foi salvo. Você está no Banco de Questões.`
+              });
+              setCurrentPage('banco-questoes');
+            }}
             onBack={() => {
               const cameFromEdit = !!examToEdit;
               setExamToEdit(null);
@@ -164,7 +184,7 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
       'inicio': 'Início',
       'gerenciar-alunos': 'Gerenciar Alunos',
       'gerenciar-turmas': 'Gerenciar Turmas',
-      'gerenciar-series': 'Gerenciar Séries',
+      'gerenciar-series': 'Gerenciar Cursos',
       'banco-questoes': 'Banco de Questões',
       'criar-simulado': 'Criar Simulado',
       'avaliacao': 'Gerenciar Simulados',
@@ -172,7 +192,7 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
       'correcao': 'Correção',
       'enviar-imagens': 'Enviar Imagens',
       'relatorios-gerais': 'Relatórios Gerais',
-      'series': 'Séries',
+      'series': 'Cursos',
       'turma': 'Turma',
       'alunos': 'Alunos',
       'usuarios': 'Configurações'

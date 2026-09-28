@@ -19,11 +19,19 @@ import {
   Filter,
   AlertCircle,
   Eye,
-  Image as ImageIcon
+  Image as ImageIcon,
+  UserCheck,
+  School,
+  UserX
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
-import { toast } from 'sonner@2.0.3';
+import { Checkbox } from '../ui/checkbox';
+import { toast } from '../../utils/toast';
+import { ActionResultDialog, ActionResult } from './ActionResultDialog';
+import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
+import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { apiService } from '../../utils/api';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
 type Student = {
   id: string;
@@ -36,111 +44,28 @@ type Student = {
   createdAt: string;
 };
 
-const stripAccents = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '');
-const normalizeHeaderCell = (h: unknown) => stripAccents(String(h ?? '')).toLowerCase().trim();
 
-// Quando a planilha não tem cabeçalho reconhecível, tenta adivinhar qual coluna é o nome, o
-// email e a matrícula só olhando pro CONTEÚDO das linhas: email é o que tem "@"; matrícula é
-// a coluna que é só número; nome é a coluna de texto (não numérica, não email) com mais
-// palavras em média, já que nome completo costuma ter nome + sobrenome(s).
-function guessColumnsFromData(dataRows: any[][], colCount: number) {
-  const stats = Array.from({ length: colCount }, () => ({ total: 0, emailish: 0, numeric: 0, wordsSum: 0 }));
-
-  dataRows.slice(0, 30).forEach(row => {
-    for (let c = 0; c < colCount; c++) {
-      const v = String(row?.[c] ?? '').trim();
-      if (!v) continue;
-      const s = stats[c];
-      s.total++;
-      if (v.includes('@')) s.emailish++;
-      if (/^\d+$/.test(v)) s.numeric++;
-      s.wordsSum += v.split(/\s+/).filter(Boolean).length;
-    }
-  });
-
-  let cEmail = -1;
-  stats.forEach((s, i) => {
-    if (cEmail === -1 && s.total > 0 && s.emailish / s.total > 0.5) cEmail = i;
-  });
-
-  let cName = -1;
-  let bestAvgWords = -1;
-  stats.forEach((s, i) => {
-    if (i === cEmail || s.total === 0) return;
-    if (s.numeric / s.total > 0.5) return; // coluna majoritariamente numérica não é nome
-    const avgWords = s.wordsSum / s.total;
-    if (avgWords > bestAvgWords) { bestAvgWords = avgWords; cName = i; }
-  });
-
-  let cRegistration = -1;
-  stats.forEach((s, i) => {
-    if (cRegistration === -1 && i !== cEmail && i !== cName && s.total > 0 && s.numeric / s.total > 0.5) {
-      cRegistration = i;
-    }
-  });
-
-  return { cName, cEmail, cRegistration };
+// Gera e baixa um CSV que abre certo no Excel em português: separador ";", BOM UTF-8
+// (para os acentos) e campos entre aspas quando necessário.
+function downloadCsv(filename: string, rows: (string | number | undefined | null)[][]) {
+  const escape = (v: string | number | undefined | null) => {
+    const str = String(v ?? '');
+    return /[";\r\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+  };
+  const content = '﻿' + rows.map(r => r.map(escape).join(';')).join('\r\n');
+  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' });
+  const url = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  window.URL.revokeObjectURL(url);
 }
 
-// Converte linhas de uma planilha/CSV em alunos. Tenta, nessa ordem: (1) reconhecer as
-// colunas pelo nome do cabeçalho (Nome, Email, Turma, Série, Matrícula, em qualquer ordem —
-// cobre exportações de outros sistemas, como "MATRÍCULA, ALUNO"); (2) se não achar cabeçalho
-// nenhum, adivinhar pelo conteúdo das células (guessColumnsFromData); (3) por último, assume o
-// modelo fixo antigo (Nome, Email, Turma, Série, Matrícula, nessa ordem). Assim, mesmo uma
-// planilha "de qualquer jeito" — sem os campos certos — tem uma chance boa de ser importada.
-function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Omit<Student, 'id' | 'status' | 'createdAt'>[] {
-  if (rows.length === 0) return [];
-
-  const colCount = Math.max(...rows.map(r => r?.length || 0), 1);
-  const header = rows[0].map(normalizeHeaderCell);
-  const findCol = (...names: string[]) => header.findIndex(h => names.some(n => h.includes(n)));
-
-  let cName = findCol('nome', 'aluno', 'estudante');
-  let cEmail = findCol('email', 'e-mail');
-  let cClass = findCol('turma', 'classe');
-  let cGrade = findCol('serie', 'ano');
-  let cRegistration = findCol('matricula', 'registro', 'ra');
-
-  const dataRows = rows.slice(1);
-
-  if (cName < 0) {
-    // Nenhum cabeçalho reconhecido: tenta adivinhar pelo conteúdo dos dados
-    const guessed = guessColumnsFromData(dataRows, colCount);
-    if (guessed.cName >= 0) {
-      cName = guessed.cName;
-      cEmail = guessed.cEmail;
-      cRegistration = guessed.cRegistration;
-      cClass = -1;
-      cGrade = -1;
-    } else {
-      // Último recurso: modelo fixo antigo (Nome, Email, Turma, Série, Matrícula)
-      cName = 0; cEmail = 1; cClass = 2; cGrade = 3; cRegistration = 4;
-    }
-  }
-
-  const cell = (row: any[], idx: number) => (idx >= 0 ? String(row?.[idx] ?? '').trim() : '');
-  const students: Omit<Student, 'id' | 'status' | 'createdAt'>[] = [];
-
-  for (const row of dataRows) {
-    if (!row || row.length === 0) continue;
-
-    const name = cell(row, cName);
-    if (!name) continue;
-
-    students.push({
-      name,
-      email: cell(row, cEmail),
-      class: cell(row, cClass) || sheetNameAsClassFallback,
-      grade: cell(row, cGrade),
-      registration: cell(row, cRegistration)
-    });
-  }
-
-  return students;
-}
 
 export function ManageStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
+  const [importResult, setImportResult] = useState<ActionResult | null>(null);
   
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
@@ -151,9 +76,22 @@ export function ManageStudentsPage() {
     grade: '',
     registration: ''
   });
-  const [searchTerm, setSearchTerm] = useState('');
+  // Filtros da lista: a lista só aparece depois que pelo menos um deles é preenchido
+  const [filterName, setFilterName] = useState('');
+  const [filterCourse, setFilterCourse] = useState('all');
   const [filterClass, setFilterClass] = useState('all');
+  const [filterRegistration, setFilterRegistration] = useState('');
+  // Cursos vêm de "Gerenciar Cursos"; turmas de "Gerenciar Turmas" (cada turma pertence a um curso)
+  const [registeredCourses, setRegisteredCourses] = useState<string[]>([]);
+  const [registeredClasses, setRegisteredClasses] = useState<{ id: string; name: string; grade: string }[]>([]);
+  // Exclusão: alunos marcados na tabela e a confirmação pendente (alunos ou turma inteira)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [pendingDelete, setPendingDelete] = useState<
+    { kind: 'students'; ids: string[] } | { kind: 'class'; name: string } | null
+  >(null);
+  const [deleteClassStudentsToo, setDeleteClassStudentsToo] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
   // Cartões-resposta enviados na página "Enviar Imagens", agrupados por aluno
   const [studentImages, setStudentImages] = useState<Record<string, any[]>>({});
   const [viewingCardsOf, setViewingCardsOf] = useState<Student | null>(null);
@@ -161,7 +99,27 @@ export function ManageStudentsPage() {
   useEffect(() => {
     loadStudents();
     loadStudentImages();
+    loadCoursesAndClasses();
   }, []);
+
+  const loadCoursesAndClasses = async () => {
+    try {
+      const [coursesResponse, classesResponse] = await Promise.all([
+        fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
+          headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+        }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+        apiService.getClasses().catch(() => null),
+      ]);
+      setRegisteredCourses((coursesResponse?.series || []).filter(Boolean).map((c: string) => String(c).trim()));
+      setRegisteredClasses(
+        (classesResponse?.classes || [])
+          .filter((c: any) => c?.name)
+          .map((c: any) => ({ id: String(c.id), name: String(c.name).trim(), grade: String(c.grade || '').trim() }))
+      );
+    } catch (error) {
+      console.error('Error loading courses/classes:', error);
+    }
+  };
 
   // Carrega em segundo plano os cartões enviados (a lista de alunos aparece sem esperar as fotos)
   const loadStudentImages = async () => {
@@ -204,94 +162,56 @@ export function ManageStudentsPage() {
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    // Limpa o input já, para o mesmo arquivo poder ser escolhido de novo
+    event.target.value = '';
+    if (file) await importFile(file);
+  };
 
-    const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv');
-    const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
-                    file.type === 'application/vnd.ms-excel' ||
-                    file.name.endsWith('.xlsx') ||
-                    file.name.endsWith('.xls');
+  const handleFileDrop = async (event: React.DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    setIsDraggingFile(false);
+    if (loading) return;
+    const file = event.dataTransfer.files?.[0];
+    if (file) await importFile(file);
+  };
 
-    if (!isCSV && !isExcel) {
-      toast.error('Por favor, selecione um arquivo CSV ou Excel (.xlsx, .xls)');
+  const importFile = async (file: File) => {
+    if (!isStudentSpreadsheet(file)) {
+      setImportResult({
+        type: 'error',
+        title: 'Arquivo não suportado',
+        message: 'Selecione um arquivo CSV ou Excel (.xlsx, .xls).'
+      });
       return;
     }
 
     try {
       setLoading(true);
-      let newStudents: Omit<Student, 'id' | 'status' | 'createdAt'>[] = [];
-      let sheetNameHint = '';
-
-      if (isCSV) {
-        // Process CSV (aceita separador por vírgula ou tabulação)
-        const csvData = await file.text();
-        const lines = csvData.split(/\r?\n/).filter(l => l.trim());
-        const rows = lines.map(line => (line.includes('\t') ? line.split('\t') : line.split(',')));
-        newStudents = rowsToStudents(rows);
-      } else if (isExcel) {
-        // Process Excel
-        const XLSX = await import('xlsx');
-        const arrayBuffer = await file.arrayBuffer();
-        const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const firstSheetName = workbook.SheetNames[0];
-        const firstSheet = workbook.Sheets[firstSheetName];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][];
-        // Se a planilha não tem coluna de turma, o nome da aba às vezes já é o código da turma
-        // (ex: aba "9001" numa relação de alunos daquela turma)
-        sheetNameHint = /^plan\d*$|^sheet\d*$/i.test(firstSheetName.trim()) ? '' : firstSheetName.trim();
-        newStudents = rowsToStudents(jsonData, sheetNameHint);
-      }
+      const newStudents: ImportedStudent[] = await readStudentsFromFile(file);
 
       if (newStudents.length === 0) {
-        toast.error('Nenhum aluno válido encontrado no arquivo. Confira se há uma coluna com o nome do aluno.');
+        setImportResult({
+          type: 'error',
+          title: 'Nenhum aluno importado',
+          message: 'Nenhum aluno válido encontrado no arquivo. Confira se há uma coluna com o nome do aluno.'
+        });
         return;
       }
 
       console.log(`Importing ${newStudents.length} students:`, newStudents.slice(0, 3));
 
-      await apiService.createStudents(newStudents);
-      await ensureClassesExist(newStudents);
-      await loadStudents();
-      toast.success(`${newStudents.length} alunos importados com sucesso!`);
-      
-      // Clear file input
-      event.target.value = '';
+      const summary = await saveImportedStudents(newStudents);
+      await Promise.all([loadStudents(), loadCoursesAndClasses()]);
+      setImportResult(describeStudentImport(summary));
     } catch (error) {
       console.error('Error processing file:', error);
-      toast.error('Erro ao processar arquivo: ' + (error.message || 'Erro desconhecido'));
+      setImportResult({
+        type: 'error',
+        title: 'Falha na importação',
+        message: 'Erro ao processar arquivo: ' + (error.message || 'Erro desconhecido')
+      });
     } finally {
       setLoading(false);
-    }
-  };
-
-  // Cadastra em "Gerenciar Turmas" as turmas dos alunos que ainda não existem lá
-  const ensureClassesExist = async (studentsList: { class?: string; grade?: string }[]) => {
-    try {
-      const names = new Map<string, string>();
-      studentsList.forEach(s => {
-        const name = (s.class || '').trim();
-        if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), s.grade?.trim() || '');
-      });
-      if (names.size === 0) return;
-
-      const existing = (await apiService.getClasses())?.classes || [];
-      const existingNames = new Set(existing.map((c: any) => String(c.name).trim().toLowerCase()));
-      const missing = Array.from(names.entries()).filter(([key]) => !existingNames.has(key));
-
-      for (const [key, grade] of missing) {
-        const original = studentsList.find(s => (s.class || '').trim().toLowerCase() === key)!.class!.trim();
-        await apiService.createClass({
-          name: original,
-          grade: grade || original,
-          shift: 'Matutino',
-          year: new Date().getFullYear().toString()
-        });
-      }
-      if (missing.length > 0) {
-        toast.success(`${missing.length} turma(s) cadastrada(s) automaticamente em Gerenciar Turmas`);
-      }
-    } catch (error) {
-      console.error('Error auto-registering classes:', error);
     }
   };
 
@@ -303,8 +223,10 @@ export function ManageStudentsPage() {
 
     try {
       setLoading(true);
-      await apiService.createStudents([newStudent]);
-      await ensureClassesExist([newStudent]);
+      const response = await apiService.createStudents([newStudent]);
+      if (!response?.success) throw new Error(response?.error || 'O servidor não confirmou o cadastro');
+      const createdClasses = await ensureClassesExist([newStudent]);
+      if (createdClasses > 0) toast.success('Turma cadastrada automaticamente em Gerenciar Turmas');
       await loadStudents();
       setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
       setShowAddForm(false);
@@ -317,18 +239,70 @@ export function ManageStudentsPage() {
     }
   };
 
-  const handleDeleteStudent = async (id: string) => {
+  // Apaga os alunos em lotes paralelos (cada aluno é uma chave separada no servidor).
+  // A API não lança erro quando o servidor recusa; por isso confere cada resposta e
+  // lança erro se algum aluno não foi apagado, em vez de mostrar sucesso.
+  const deleteStudentsByIds = async (ids: string[]) => {
+    let failed = 0;
+    let lastError = '';
+    for (let i = 0; i < ids.length; i += 10) {
+      const responses = await Promise.all(ids.slice(i, i + 10).map(id => apiService.deleteStudent(id)));
+      responses.forEach(r => {
+        if (!r?.success) { failed++; lastError = r?.error || lastError; }
+      });
+    }
+    if (failed > 0) {
+      throw new Error(`${failed} de ${ids.length} aluno(s) não foram apagados${lastError ? ` (${lastError})` : ''}`);
+    }
+  };
+
+  const handleDeleteStudents = async (ids: string[]) => {
     try {
       setLoading(true);
-      await apiService.deleteStudent(id);
+      await deleteStudentsByIds(ids);
+      setSelectedIds(new Set());
       await loadStudents();
-      toast.success('Aluno removido com sucesso!');
+      toast.success(ids.length === 1 ? 'Aluno removido com sucesso!' : `${ids.length} alunos removidos com sucesso!`);
     } catch (error) {
-      console.error('Error deleting student:', error);
-      toast.error('Erro ao remover aluno');
+      console.error('Error deleting students:', error);
+      await loadStudents();
+      toast.error('Erro ao remover alunos: ' + ((error as Error)?.message || 'erro desconhecido'));
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDeleteClass = async (className: string) => {
+    const classesToDelete = registeredClassesMatching(className);
+    const studentIds = deleteClassStudentsToo ? studentsOfClass(className).map(s => s.id) : [];
+    try {
+      setLoading(true);
+      // Uma por vez: o servidor reescreve a lista inteira de turmas a cada exclusão
+      for (const cls of classesToDelete) {
+        await apiService.deleteClass(cls.id);
+      }
+      await deleteStudentsByIds(studentIds);
+      setFilterClass('all');
+      setSelectedIds(new Set());
+      await Promise.all([loadStudents(), loadCoursesAndClasses()]);
+      toast.success(
+        `Turma "${className}" removida` + (studentIds.length ? ` com ${studentIds.length} aluno(s)` : '')
+      );
+    } catch (error) {
+      console.error('Error deleting class:', error);
+      await Promise.all([loadStudents(), loadCoursesAndClasses()]);
+      toast.error('Erro ao remover turma: ' + ((error as Error)?.message || 'erro desconhecido'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const confirmPendingDelete = async () => {
+    const pending = pendingDelete;
+    setPendingDelete(null);
+    if (!pending) return;
+    if (pending.kind === 'students') await handleDeleteStudents(pending.ids);
+    else await handleDeleteClass(pending.name);
   };
 
   const handleEditStudent = (student: Student) => {
@@ -374,40 +348,92 @@ export function ManageStudentsPage() {
   };
 
   const exportToCSV = () => {
-    const csvContent = [
-      'Nome,Email,Turma,Turno,Matrícula,Status',
-      ...students.map(s => `${s.name},${s.email},${s.class},${s.grade},${s.registration},${s.status}`)
-    ].join('\n');
-
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'alunos.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
+    downloadCsv('alunos.csv', [
+      ['Nome', 'Email', 'Turma', 'Turno', 'Matrícula', 'Status'],
+      ...students.map(s => [s.name, s.email, s.class, s.grade, s.registration, s.status])
+    ]);
   };
 
   const downloadTemplate = () => {
-    const csvContent = 'NOME,EMAIL,TURMA,TURNO,MATRICULA\nJoão Silva,joao@email.com,Turma A,Matutino,001\nMaria Santos,maria@email.com,Turma B,Vespertino,002';
-    const blob = new Blob([csvContent], { type: 'text/csv' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'modelo_alunos.csv';
-    a.click();
-    window.URL.revokeObjectURL(url);
+    downloadCsv('modelo_alunos.csv', [
+      ['NOME', 'EMAIL', 'TURMA', 'TURNO', 'MATRICULA'],
+      ['João Silva', 'joao@email.com', 'Turma A', 'Manhã', '001'],
+      ['Maria Santos', 'maria@email.com', 'Turma B', 'Tarde', '002']
+    ]);
     toast.success('Modelo baixado com sucesso!');
   };
 
-  const filteredStudents = students.filter(student => {
-    const matchesSearch = student.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                         student.email.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesClass = filterClass === 'all' || student.class === filterClass;
-    return matchesSearch && matchesClass;
+  const uniqueClasses = Array.from(new Set(students.map(s => s.class))).filter(Boolean);
+
+  // Números do card de estatísticas
+  const activeCount = students.filter(s => s.status === 'active').length;
+  const withoutClassCount = students.filter(s => !s.class?.trim()).length;
+  const activePercent = students.length ? Math.round((activeCount / students.length) * 100) : 0;
+  const studentsPerClass = uniqueClasses
+    .map(name => ({ name, count: students.filter(s => s.class === name).length }))
+    .sort((a, b) => b.count - a.count);
+  const topClasses = studentsPerClass.slice(0, 5);
+  const maxClassCount = topClasses[0]?.count || 1;
+
+  // Ignora acento, maiúsculas, "º"/"°"/"ª" e espaços repetidos ("5º Ano" == "5 ano")
+  const normalize = (text: string) =>
+    stripAccents(String(text || '')).toLowerCase().replace(/[º°ª]/g, '').replace(/\s+/g, ' ').trim();
+  const sortPtBr = (list: string[]) => list.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+
+  // Uma turma pertence a um curso se estiver cadastrada nele em "Gerenciar Turmas" ou, para
+  // turmas importadas com nome longo (ex: "- (2025) - 5º ano (5002) Ensino Fundamental - Tarde"),
+  // se o nome do curso aparecer dentro do nome da turma.
+  const classBelongsToCourse = (className: string, course: string) => {
+    const nClass = normalize(className);
+    const nCourse = normalize(course);
+    if (!nClass || !nCourse) return false;
+    return registeredClasses.some(c => normalize(c.name) === nClass && normalize(c.grade) === nCourse) ||
+      nClass.includes(nCourse);
+  };
+
+  const studentsOfClass = (className: string) =>
+    students.filter(s => normalize(s.class) === normalize(className));
+  const studentsInClass = (className: string) => studentsOfClass(className).length;
+  // Turmas cadastradas com esse nome; com um curso escolhido, só a desse curso
+  const registeredClassesMatching = (className: string) =>
+    registeredClasses.filter(c =>
+      normalize(c.name) === normalize(className) &&
+      (filterCourse === 'all' || normalize(c.grade) === normalize(filterCourse))
+    );
+  const studentsInCourse = (course: string) =>
+    students.filter(s => classBelongsToCourse(s.class, course)).length;
+
+  const courseOptions = sortPtBr(Array.from(new Set(
+    [...registeredCourses, ...registeredClasses.map(c => c.grade)].filter(Boolean)
+  )));
+  const classOptions = sortPtBr(Array.from(new Set(
+    [...registeredClasses.map(c => c.name), ...uniqueClasses].filter(name =>
+      filterCourse === 'all' || classBelongsToCourse(name, filterCourse)
+    )
+  )));
+
+  const hasActiveFilter = !!filterName.trim() || !!filterRegistration.trim() ||
+    filterCourse !== 'all' || filterClass !== 'all';
+
+  const filteredStudents = !hasActiveFilter ? [] : students.filter(student => {
+    const matchesName = !filterName.trim() || normalize(student.name).includes(normalize(filterName));
+    const matchesRegistration = !filterRegistration.trim() ||
+      normalize(student.registration).includes(normalize(filterRegistration));
+    const matchesCourse = filterCourse === 'all' || classBelongsToCourse(student.class, filterCourse);
+    const matchesClass = filterClass === 'all' || normalize(student.class) === normalize(filterClass);
+    return matchesName && matchesRegistration && matchesCourse && matchesClass;
   });
 
-  const uniqueClasses = Array.from(new Set(students.map(s => s.class))).filter(Boolean);
+  // Só conta como selecionado o que está visível com os filtros atuais
+  const selectedFiltered = filteredStudents.filter(s => selectedIds.has(s.id));
+  const allFilteredSelected = filteredStudents.length > 0 && selectedFiltered.length === filteredStudents.length;
+
+  const clearFilters = () => {
+    setFilterName('');
+    setFilterCourse('all');
+    setFilterClass('all');
+    setFilterRegistration('');
+  };
 
   return (
     <div className="space-y-6">
@@ -445,20 +471,46 @@ export function ManageStudentsPage() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div>
-                <Label htmlFor="file">Arquivo CSV ou Excel</Label>
-                <Input
+              {/* Área de anexo: clique para escolher ou arraste o arquivo para cá */}
+              <label
+                htmlFor="file"
+                onDragOver={(e) => { e.preventDefault(); if (!loading) setIsDraggingFile(true); }}
+                onDragLeave={() => setIsDraggingFile(false)}
+                onDrop={handleFileDrop}
+                className={`flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-8 text-center transition-colors ${
+                  loading
+                    ? 'cursor-wait border-zinc-300 bg-zinc-50 opacity-70'
+                    : isDraggingFile
+                      ? 'cursor-copy border-amber-500 bg-amber-50'
+                      : 'cursor-pointer border-amber-300 bg-amber-50/60 hover:border-amber-500 hover:bg-amber-50'
+                }`}
+              >
+                <div className={`rounded-full p-3 ${isDraggingFile ? 'bg-amber-200' : 'bg-amber-100'}`}>
+                  <Upload className={`w-6 h-6 ${isDraggingFile ? 'text-amber-700' : 'text-amber-600'}`} />
+                </div>
+                <p className="text-sm font-medium text-zinc-800">
+                  {loading
+                    ? 'Importando alunos...'
+                    : isDraggingFile
+                      ? 'Solte o arquivo aqui'
+                      : 'Arraste a planilha aqui ou clique para anexar'}
+                </p>
+                <p className="text-xs text-muted-foreground">CSV (.csv) ou Excel (.xlsx, .xls)</p>
+                {!loading && (
+                  <span className="mt-1 inline-flex items-center rounded-md bg-zinc-900 px-3 py-1.5 text-sm font-medium text-white">
+                    <FileSpreadsheet className="w-4 h-4 mr-2" />
+                    Anexar arquivo
+                  </span>
+                )}
+                <input
                   id="file"
                   type="file"
                   accept=".csv,.xlsx,.xls"
                   onChange={handleFileUpload}
-                  className="mt-1"
                   disabled={loading}
+                  className="sr-only"
                 />
-                <p className="text-sm text-muted-foreground mt-2">
-                  Formatos aceitos: CSV (.csv), Excel (.xlsx, .xls)
-                </p>
-              </div>
+              </label>
               
               <Card className="border-zinc-200 bg-zinc-50">
                 <CardContent className="p-4">
@@ -489,23 +541,55 @@ export function ManageStudentsPage() {
               <Users className="w-5 h-5 mr-2" />
               Estatísticas
             </CardTitle>
+            <CardDescription>Resumo dos alunos cadastrados no sistema</CardDescription>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              <div className="flex justify-between">
-                <span>Total de Alunos:</span>
-                <Badge variant="secondary">{students.length}</Badge>
-              </div>
-              <div className="flex justify-between">
-                <span>Alunos Ativos:</span>
-                <Badge variant="default">
-                  {students.filter(s => s.status === 'active').length}
-                </Badge>
-              </div>
-              <div className="flex justify-between">
-                <span>Turmas:</span>
-                <Badge variant="outline">{uniqueClasses.length}</Badge>
-              </div>
+          <CardContent className="space-y-5">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { label: 'Total de alunos', value: students.length, icon: Users, tone: 'bg-amber-50 border-amber-200 text-amber-700' },
+                { label: 'Alunos ativos', value: activeCount, hint: `${activePercent}% do total`, icon: UserCheck, tone: 'bg-green-50 border-green-200 text-green-700' },
+                { label: 'Turmas', value: uniqueClasses.length, icon: School, tone: 'bg-sky-50 border-sky-200 text-sky-700' },
+                {
+                  label: 'Sem turma',
+                  value: withoutClassCount,
+                  hint: withoutClassCount > 0 ? 'Defina a turma desses alunos' : 'Todos com turma',
+                  icon: UserX,
+                  tone: withoutClassCount > 0 ? 'bg-red-50 border-red-200 text-red-700' : 'bg-zinc-50 border-zinc-200 text-zinc-600'
+                }
+              ].map(({ label, value, hint, icon: Icon, tone }) => (
+                <div key={label} className={`rounded-xl border p-3 ${tone}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium">{label}</span>
+                    <Icon className="w-4 h-4" />
+                  </div>
+                  <p className="mt-1 text-2xl font-semibold text-zinc-900 tabular-nums">{value}</p>
+                  {hint && <p className="text-xs opacity-80">{hint}</p>}
+                </div>
+              ))}
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-zinc-800 mb-2">
+                Alunos por turma
+                {studentsPerClass.length > topClasses.length && (
+                  <span className="font-normal text-muted-foreground"> (5 maiores de {studentsPerClass.length})</span>
+                )}
+              </p>
+              {topClasses.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Nenhuma turma com alunos ainda.</p>
+              ) : (
+                <div className="space-y-2">
+                  {topClasses.map(({ name, count }) => (
+                    <div key={name} className="flex items-center gap-3 text-sm">
+                      <span className="w-24 truncate text-zinc-700" title={name}>{name}</span>
+                      <div className="flex-1 h-2 rounded-full bg-zinc-100 overflow-hidden">
+                        <div className="h-full rounded-full bg-amber-400" style={{ width: `${(count / maxClassCount) * 100}%` }} />
+                      </div>
+                      <span className="w-8 text-right tabular-nums text-zinc-900 font-medium">{count}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -596,37 +680,121 @@ export function ManageStudentsPage() {
           <CardTitle>Lista de Alunos</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col md:flex-row space-y-2 md:space-y-0 md:space-x-4 mb-6">
-            <div className="flex-1">
-              <div className="relative">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+            <div>
+              <Label htmlFor="filter-name">Nome</Label>
+              <div className="relative mt-1">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
-                  placeholder="Buscar por nome ou email..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
+                  id="filter-name"
+                  placeholder="Nome do aluno"
+                  value={filterName}
+                  onChange={(e) => setFilterName(e.target.value)}
                   className="pl-10"
                 />
               </div>
             </div>
-            <Select value={filterClass} onValueChange={setFilterClass}>
-              <SelectTrigger className="w-full md:w-48">
-                <SelectValue placeholder="Filtrar por turma" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todas as turmas</SelectItem>
-                {uniqueClasses.map(className => (
-                  <SelectItem key={className} value={className}>
-                    {className}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div>
+              <Label>Curso</Label>
+              <Select
+                value={filterCourse}
+                onValueChange={(value) => { setFilterCourse(value); setFilterClass('all'); }}
+              >
+                <SelectTrigger className="w-full mt-1">
+                  <SelectValue placeholder="Todos os cursos" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os cursos</SelectItem>
+                  {courseOptions.map(course => (
+                    <SelectItem key={course} value={course}>
+                      {course} <span className="text-muted-foreground">({studentsInCourse(course)} alunos)</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label>Turma</Label>
+              <Select value={filterClass} onValueChange={setFilterClass}>
+                <SelectTrigger className="w-full mt-1">
+                  <SelectValue placeholder="Todas as turmas" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas as turmas</SelectItem>
+                  {classOptions.map(className => (
+                    <SelectItem key={className} value={className}>
+                      {className} <span className="text-muted-foreground">({studentsInClass(className)} alunos)</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div>
+              <Label htmlFor="filter-registration">Matrícula</Label>
+              <Input
+                id="filter-registration"
+                placeholder="Número da matrícula"
+                value={filterRegistration}
+                onChange={(e) => setFilterRegistration(e.target.value)}
+                className="mt-1"
+              />
+            </div>
           </div>
 
+          {hasActiveFilter && (
+            <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-sm text-slate-600">
+              <span>
+                {filteredStudents.length} aluno(s) encontrado(s)
+                {selectedFiltered.length > 0 && ` · ${selectedFiltered.length} selecionado(s)`}
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {selectedFiltered.length > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={loading}
+                    onClick={() => setPendingDelete({ kind: 'students', ids: selectedFiltered.map(s => s.id) })}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Apagar selecionados ({selectedFiltered.length})
+                  </Button>
+                )}
+                {filterClass !== 'all' && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={loading}
+                    className="text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
+                    onClick={() => {
+                      setDeleteClassStudentsToo(true);
+                      setPendingDelete({ kind: 'class', name: filterClass });
+                    }}
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Apagar turma
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={clearFilters}>Limpar filtros</Button>
+              </div>
+            </div>
+          )}
+
+          {filteredStudents.length > 0 && (
           <div className="border rounded-lg overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead className="w-10">
+                    <Checkbox
+                      aria-label="Selecionar todos"
+                      checked={allFilteredSelected ? true : selectedFiltered.length > 0 ? 'indeterminate' : false}
+                      onCheckedChange={(checked) => {
+                        const next = new Set(selectedIds);
+                        filteredStudents.forEach(s => (checked === true ? next.add(s.id) : next.delete(s.id)));
+                        setSelectedIds(next);
+                      }}
+                    />
+                  </TableHead>
                   <TableHead>Nome</TableHead>
                   <TableHead>Email</TableHead>
                   <TableHead>Turma</TableHead>
@@ -639,7 +807,18 @@ export function ManageStudentsPage() {
               </TableHeader>
               <TableBody>
                 {filteredStudents.map((student) => (
-                  <TableRow key={student.id}>
+                  <TableRow key={student.id} data-state={selectedIds.has(student.id) ? 'selected' : undefined}>
+                    <TableCell>
+                      <Checkbox
+                        aria-label={`Selecionar ${student.name}`}
+                        checked={selectedIds.has(student.id)}
+                        onCheckedChange={(checked) => {
+                          const next = new Set(selectedIds);
+                          if (checked === true) next.add(student.id); else next.delete(student.id);
+                          setSelectedIds(next);
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="font-medium">{student.name}</TableCell>
                     <TableCell>{student.email}</TableCell>
                     <TableCell>{student.class}</TableCell>
@@ -688,7 +867,7 @@ export function ManageStudentsPage() {
                         <Button 
                           variant="outline" 
                           size="sm" 
-                          onClick={() => handleDeleteStudent(student.id)}
+                          onClick={() => setPendingDelete({ kind: 'students', ids: [student.id] })}
                           disabled={loading}
                         >
                           <Trash2 className="w-4 h-4" />
@@ -700,20 +879,80 @@ export function ManageStudentsPage() {
               </TableBody>
             </Table>
           </div>
+          )}
 
           {filteredStudents.length === 0 && (
             <div className="text-center py-8">
-              <Users className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              {hasActiveFilter || students.length === 0 ? (
+                <Users className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              ) : (
+                <Filter className="w-12 h-12 mx-auto text-muted-foreground mb-4" />
+              )}
               <p className="text-muted-foreground">
-                {searchTerm || filterClass !== 'all' 
-                  ? 'Nenhum aluno encontrado com os filtros aplicados'
-                  : 'Nenhum aluno cadastrado ainda'
+                {hasActiveFilter
+                  ? (filterClass !== 'all' && studentsInClass(filterClass) === 0
+                      ? `A turma "${filterClass}" ainda não tem nenhum aluno vinculado. Importe ou cadastre alunos com essa turma.`
+                      : 'Nenhum aluno encontrado com os filtros aplicados')
+                  : students.length > 0
+                    ? 'Preencha nome, curso, turma ou matrícula para buscar os alunos'
+                    : 'Nenhum aluno cadastrado ainda'
                 }
               </p>
             </div>
           )}
         </CardContent>
       </Card>
+
+      {/* Confirmação de exclusão de alunos ou de uma turma */}
+      <ConfirmDeleteDialog
+        open={!!pendingDelete}
+        title={
+          pendingDelete?.kind === 'class'
+            ? 'Apagar turma?'
+            : pendingDelete?.ids.length === 1
+              ? 'Apagar aluno?'
+              : `Apagar ${pendingDelete?.ids.length ?? 0} alunos?`
+        }
+        itemName={
+          pendingDelete?.kind === 'class'
+            ? pendingDelete.name
+            : pendingDelete?.ids.length === 1
+              ? students.find(s => s.id === pendingDelete.ids[0])?.name
+              : undefined
+        }
+        description={(() => {
+          if (pendingDelete?.kind !== 'class') {
+            return pendingDelete && pendingDelete.ids.length > 1
+              ? 'Os alunos selecionados serão removidos do sistema. Essa ação não pode ser desfeita.'
+              : 'O aluno será removido do sistema. Essa ação não pode ser desfeita.';
+          }
+          const matching = registeredClassesMatching(pendingDelete.name);
+          return (matching.length === 0
+            ? 'Essa turma não está cadastrada em Gerenciar Turmas; só existe nos alunos importados.'
+            : matching.length === 1
+              ? `A turma será removida de Gerenciar Turmas${matching[0].grade ? ` (curso ${matching[0].grade})` : ''}.`
+              : `${matching.length} turmas com esse nome serão removidas de Gerenciar Turmas (cursos: ${matching.map(c => c.grade).join(', ')}).`
+          ) + ' Essa ação não pode ser desfeita.';
+        })()}
+        confirmLabel="Sim, apagar"
+        confirmDisabled={
+          pendingDelete?.kind === 'class' &&
+          registeredClassesMatching(pendingDelete.name).length === 0 &&
+          !deleteClassStudentsToo
+        }
+        onConfirm={confirmPendingDelete}
+        onCancel={() => setPendingDelete(null)}
+      >
+        {pendingDelete?.kind === 'class' && studentsInClass(pendingDelete.name) > 0 && (
+          <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-slate-800 cursor-pointer">
+            <Checkbox
+              checked={deleteClassStudentsToo}
+              onCheckedChange={(checked) => setDeleteClassStudentsToo(checked === true)}
+            />
+            Apagar também os {studentsInClass(pendingDelete.name)} aluno(s) dessa turma
+          </label>
+        )}
+      </ConfirmDeleteDialog>
 
       {/* Cartões resposta enviados de um aluno */}
       <Dialog open={!!viewingCardsOf} onOpenChange={(open) => { if (!open) setViewingCardsOf(null); }}>
@@ -757,6 +996,7 @@ export function ManageStudentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+      <ActionResultDialog result={importResult} onClose={() => setImportResult(null)} />
     </div>
   );
 }

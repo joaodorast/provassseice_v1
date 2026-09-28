@@ -8,7 +8,7 @@ import { Badge } from './ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from './ui/alert-dialog';
 import { ArrowLeft, Plus, Trash2, Save, BookOpen, Clock } from 'lucide-react';
-import { toast } from 'sonner@2.0.3';
+import { toast } from '../utils/toast';
 import { projectId, publicAnonKey } from '../utils/supabase/info';
 import { Question } from '../App';
 

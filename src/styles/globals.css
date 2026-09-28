@@ -34,8 +34,9 @@
   --destructive: #dc2626;
   --destructive-foreground: #ffffff;
   --border: #e4e4e7;
-  --input: transparent;
-  --input-background: #fafafa;
+  /* Borda visível e fundo branco: campos precisam parecer campos */
+  --input: #a1a1aa;
+  --input-background: #ffffff;
   --switch-background: #d4d4d8;
   --font-weight-medium: 500;
   --font-weight-normal: 400;
@@ -314,7 +315,7 @@ html {
   }
 
   .seice-input {
-    @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-sm lg:text-base;
+    @apply bg-white border border-zinc-400 hover:border-zinc-500 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent text-sm lg:text-base;
   }
 
   .seice-badge-success {
@@ -405,4 +406,15 @@ html {
   .responsive-title {
     @apply text-lg lg:text-xl xl:text-2xl;
   }
+}
+
+/* Espaço entre o rótulo e o campo logo abaixo dele, em todos os formulários.
+   Fica fora de @layer para prevalecer sobre utilitários como mt-1. */
+label + [data-slot="input"],
+label + [data-slot="textarea"],
+label + [data-slot="select-trigger"],
+label + input:not([type="checkbox"]):not([type="radio"]),
+label + textarea,
+label + select {
+  margin-top: 0.5rem;
 }

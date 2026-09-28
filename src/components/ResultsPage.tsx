@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/
 import { Badge } from './ui/badge';
 import { Progress } from './ui/progress';
 import { Separator } from './ui/separator';
-import { ArrowLeft, CheckCircle, XCircle, Award, Target, Clock, Printer } from 'lucide-react';
+import { ArrowLeft, CheckCircle, XCircle, Award, Target, Clock, Printer, PartyPopper, ThumbsUp, AlertTriangle, BookOpen } from 'lucide-react';
 import { Submission } from '../App';
 
 type ResultsPageProps = {
@@ -31,10 +31,10 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
   };
 
   const getPerformanceLabel = (percentage: number) => {
-    if (percentage >= 80) return { label: 'Excelente', emoji: '🎉' };
-    if (percentage >= 70) return { label: 'Bom', emoji: '👍' };
-    if (percentage >= 50) return { label: 'Regular', emoji: '⚠️' };
-    return { label: 'Precisa melhorar', emoji: '📚' };
+    if (percentage >= 80) return { label: 'Excelente', icon: PartyPopper };
+    if (percentage >= 70) return { label: 'Bom', icon: ThumbsUp };
+    if (percentage >= 50) return { label: 'Regular', icon: AlertTriangle };
+    return { label: 'Precisa melhorar', icon: BookOpen };
   };
 
   const performance = getPerformanceLabel(submission.percentage);
@@ -77,7 +77,7 @@ export function ResultsPage({ submission, onBack }: ResultsPageProps) {
             <CardHeader className="text-center">
               <div className="flex items-center justify-center space-x-2 mb-2">
                 <Award className={`w-8 h-8 ${getPerformanceColor(submission.percentage)}`} />
-                <span className="text-3xl">{performance.emoji}</span>
+                <performance.icon className={`w-8 h-8 ${getPerformanceColor(submission.percentage)}`} />
               </div>
               <CardTitle className="text-2xl">
                 Performance: {performance.label}

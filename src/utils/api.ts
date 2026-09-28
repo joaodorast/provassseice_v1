@@ -72,10 +72,11 @@ class ApiService {
   }
 
   async createStudents(students: any[]) {
+    // O servidor salva um aluno por vez; um lote grande passa dos 10s padrão
     return this.request('/students', {
       method: 'POST',
       body: JSON.stringify({ students }),
-    });
+    }, 60000);
   }
 
   async updateStudent(id: string, data: any) {

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { confirmAction } from '../../utils/confirm';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
@@ -152,7 +153,7 @@ export function StudentsManagementPage() {
   };
 
   const handleDeleteStudent = async (studentId: string) => {
-    if (!confirm('Tem certeza que deseja excluir este aluno?')) return;
+    if (!(await confirmAction({ title: 'Excluir aluno?' }))) return;
 
     try {
       const token = localStorage.getItem('access_token');
@@ -177,7 +178,7 @@ export function StudentsManagementPage() {
       return;
     }
 
-    if (!confirm('Tem certeza que deseja excluir esta turma?')) return;
+    if (!(await confirmAction({ title: 'Excluir turma?' }))) return;
 
     try {
       const token = localStorage.getItem('access_token');
@@ -471,7 +472,7 @@ export function StudentsManagementPage() {
               </SelectContent>
             </Select>
             <Input
-              placeholder="Série/Ano"
+              placeholder="Curso"
               value={newStudent.grade}
               onChange={(e) => setNewStudent({ ...newStudent, grade: e.target.value })}
             />
@@ -503,7 +504,7 @@ export function StudentsManagementPage() {
               onChange={(e) => setNewClass({ ...newClass, name: e.target.value })}
             />
             <Input
-              placeholder="Série/Ano (ex: 9º Ano)"
+              placeholder="Curso (ex: 9º Ano)"
               value={newClass.grade}
               onChange={(e) => setNewClass({ ...newClass, grade: e.target.value })}
             />
