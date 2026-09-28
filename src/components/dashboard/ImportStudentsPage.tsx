@@ -36,6 +36,50 @@ type Student = {
   createdAt: string;
 };
 
+const stripAccents = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '');
+const normalizeHeaderCell = (h: unknown) => stripAccents(String(h ?? '')).toLowerCase().trim();
+
+// Converte linhas de uma planilha/CSV em alunos. Tenta reconhecer as colunas pelo nome do
+// cabeçalho (Nome, Email, Turma, Série, Matrícula, em qualquer ordem — cobre exportações de
+// outros sistemas, como "MATRÍCULA, ALUNO"); se não achar um cabeçalho reconhecível, cai no
+// formato fixo antigo (Nome, Email, Turma, Série, Matrícula, nessa ordem) para não quebrar
+// planilhas já usadas com o modelo do sistema.
+function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Omit<Student, 'id' | 'status' | 'createdAt'>[] {
+  if (rows.length === 0) return [];
+
+  const header = rows[0].map(normalizeHeaderCell);
+  const findCol = (...names: string[]) => header.findIndex(h => names.some(n => h.includes(n)));
+
+  const cName = findCol('nome', 'aluno', 'estudante');
+  const cEmail = findCol('email', 'e-mail');
+  const cClass = findCol('turma', 'classe');
+  const cGrade = findCol('serie', 'ano');
+  const cRegistration = findCol('matricula', 'registro', 'ra');
+
+  const useHeader = cName >= 0;
+  const dataRows = rows.slice(1);
+  const students: Omit<Student, 'id' | 'status' | 'createdAt'>[] = [];
+
+  for (const row of dataRows) {
+    if (!row || row.length === 0) continue;
+
+    const name = useHeader
+      ? String(row[cName] ?? '').trim()
+      : String(row[0] ?? '').trim();
+    if (!name) continue;
+
+    students.push({
+      name,
+      email: String((useHeader ? row[cEmail] : row[1]) ?? '').trim(),
+      class: String((useHeader ? row[cClass] : row[2]) ?? '').trim() || sheetNameAsClassFallback,
+      grade: String((useHeader ? row[cGrade] : row[3]) ?? '').trim(),
+      registration: String((useHeader ? row[cRegistration] : row[4]) ?? '').trim()
+    });
+  }
+
+  return students;
+}
+
 export function ManageStudentsPage() {
   const [students, setStudents] = useState<Student[]>([]);
   
@@ -104,9 +148,9 @@ export function ManageStudentsPage() {
     if (!file) return;
 
     const isCSV = file.type === 'text/csv' || file.name.endsWith('.csv');
-    const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || 
-                    file.type === 'application/vnd.ms-excel' || 
-                    file.name.endsWith('.xlsx') || 
+    const isExcel = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
+                    file.type === 'application/vnd.ms-excel' ||
+                    file.name.endsWith('.xlsx') ||
                     file.name.endsWith('.xls');
 
     if (!isCSV && !isExcel) {
@@ -117,55 +161,30 @@ export function ManageStudentsPage() {
     try {
       setLoading(true);
       let newStudents: Omit<Student, 'id' | 'status' | 'createdAt'>[] = [];
+      let sheetNameHint = '';
 
       if (isCSV) {
-        // Process CSV
+        // Process CSV (aceita separador por vírgula ou tabulação)
         const csvData = await file.text();
-        const lines = csvData.split('\n');
-        
-        // Skip header row
-        for (let i = 1; i < lines.length; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-          
-          // Split by comma or tab
-          const data = line.includes('\t') ? line.split('\t') : line.split(',');
-          
-          if (data.length >= 3 && data[0].trim()) {
-            newStudents.push({
-              name: data[0].trim(),
-              email: data[1].trim(),
-              class: data[2]?.trim() || '',
-              grade: data[3]?.trim() || '',
-              registration: data[4]?.trim() || ''
-            });
-          }
-        }
+        const lines = csvData.split(/\r?\n/).filter(l => l.trim());
+        const rows = lines.map(line => (line.includes('\t') ? line.split('\t') : line.split(',')));
+        newStudents = rowsToStudents(rows);
       } else if (isExcel) {
         // Process Excel
         const XLSX = await import('xlsx');
         const arrayBuffer = await file.arrayBuffer();
         const workbook = XLSX.read(arrayBuffer, { type: 'array' });
-        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
-        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1 }) as any[][];
-        
-        // Skip header row
-        for (let i = 1; i < jsonData.length; i++) {
-          const row = jsonData[i];
-          if (row.length >= 3 && row[0]) {
-            newStudents.push({
-              name: String(row[0]).trim(),
-              email: String(row[1] || '').trim(),
-              class: String(row[2] || '').trim(),
-              grade: String(row[3] || '').trim(),
-              registration: String(row[4] || '').trim()
-            });
-          }
-        }
+        const firstSheetName = workbook.SheetNames[0];
+        const firstSheet = workbook.Sheets[firstSheetName];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet, { header: 1, defval: '' }) as any[][];
+        // Se a planilha não tem coluna de turma, o nome da aba às vezes já é o código da turma
+        // (ex: aba "9001" numa relação de alunos daquela turma)
+        sheetNameHint = /^plan\d*$|^sheet\d*$/i.test(firstSheetName.trim()) ? '' : firstSheetName.trim();
+        newStudents = rowsToStudents(jsonData, sheetNameHint);
       }
 
       if (newStudents.length === 0) {
-        toast.error('Nenhum aluno válido encontrado no arquivo');
+        toast.error('Nenhum aluno válido encontrado no arquivo. Confira se há uma coluna com o nome do aluno.');
         return;
       }
 
