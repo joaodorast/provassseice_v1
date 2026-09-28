@@ -39,6 +39,9 @@ interface DocLine {
   heading: boolean;
   /** Linha contém trecho de texto em vermelho (indicação de gabarito usada no Word) */
   redMarked: boolean;
+  /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
+   * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
+  listItem: boolean;
 }
 
 const LETTER_INDEX: Record<string, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 };
@@ -79,6 +82,9 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     const pStyleEl = pPr ? firstChildNamed(pPr, 'pStyle') : undefined;
     const styleVal = pStyleEl?.getAttribute('w:val') || pStyleEl?.getAttribute('val') || '';
     const isHeadingStyle = /^(heading|t[ií]tulo)/i.test(styleVal);
+    // Parágrafo com numeração/marcador automático do Word (a lista "a) b) c)..." às vezes é só
+    // essa numeração automática, sem nenhuma letra digitada no texto)
+    const isListItem = !!(pPr && firstChildNamed(pPr, 'numPr'));
 
     // Junta runs (e runs dentro de hyperlinks) na ordem em que aparecem no parágrafo
     const runs: Element[] = [];
@@ -99,8 +105,13 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
       if (text) {
         lines.push({
           text,
-          heading: isFirstLineOfParagraph && (isHeadingStyle || (curAllBold && text.length <= 60)),
-          redMarked: curHasRed
+          // Negrito sozinho no parágrafo NÃO conta como título aqui: o enunciado usa negrito
+          // também em instruções ("Leia o texto...") e títulos de texto de apoio, então esse
+          // sinal sozinho causava seções demais. Só um estilo de título do Word conta como certeza;
+          // o teste de "tudo em maiúsculas" (looksLikeSectionHeading) cuida do resto mais abaixo.
+          heading: isFirstLineOfParagraph && isHeadingStyle,
+          redMarked: curHasRed,
+          listItem: isFirstLineOfParagraph && isListItem
         });
       }
       isFirstLineOfParagraph = false;
@@ -182,7 +193,8 @@ async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
   return rawLines.map(l => ({
     text: l.text,
     heading: medianSize > 0 && l.size > medianSize * 1.15 && l.text.length <= 60,
-    redMarked: false
+    redMarked: false,
+    listItem: false
   }));
 }
 
@@ -198,13 +210,20 @@ const OPTION_RE = /^\(?([a-eA-E])\)?\s*[\.\)\-–:]\s*(\S.*)$/;
 const LOOSE_OPTION_RE = /^([A-E])\s+(\S.*)$/;
 const ANSWER_RE = /^(?:gabarito|resposta(?:\s+correta)?|correta)\s*[:\-–]?\s*\(?([a-eA-E])\)?/i;
 
+// Tira travessões/pontos decorativos que costumam cercar o título da seção
+// (ex: "––––––– LÍNGUA PORTUGUESA –––––" vira "LÍNGUA PORTUGUESA").
+function cleanHeadingText(line: string): string {
+  return line.replace(/^[\s\-–—_.:·•]+|[\s\-–—_.:·•]+$/g, '').trim();
+}
+
 function looksLikeSectionHeading(line: string): boolean {
   if (SECTION_RE.test(line)) return true;
-  const trimmed = line.trim();
+  const trimmed = cleanHeadingText(line);
   if (trimmed.length < 3 || trimmed.length > 45) return false;
   if (QUESTION_RE.test(trimmed) || OPTION_RE.test(trimmed)) return false;
   const letters = trimmed.replace(/[^A-Za-zÀ-ÿ]/g, '');
-  if (letters.length === 0) return false;
+  // Exige pelo menos 3 letras (evita falso positivo em siglas/numerações curtas tipo "I.", "OK")
+  if (letters.length < 3) return false;
   // Título curto todo em maiúsculas (ex: "MATEMÁTICA", "LÍNGUA PORTUGUESA")
   return letters === letters.toUpperCase() && /[A-Za-zÀ-ÿ]/.test(letters);
 }
@@ -250,12 +269,12 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
 
   let anyRedMarked = false;
 
-  for (const { text: line, heading, redMarked } of lines) {
-    const explicitHeading = heading || SECTION_RE.test(line) || (!currentQuestion && looksLikeSectionHeading(line));
+  for (const { text: line, heading, redMarked, listItem } of lines) {
+    const explicitHeading = heading || SECTION_RE.test(line) || looksLikeSectionHeading(line);
 
     if (explicitHeading && !QUESTION_RE.test(line) && !OPTION_RE.test(line) && !ANSWER_RE.test(line)) {
       anyExplicitHeading = true;
-      const name = SECTION_RE.exec(line)?.[1] || line;
+      const name = SECTION_RE.exec(line)?.[1] || cleanHeadingText(line);
       startSection(name);
       continue;
     }
@@ -274,6 +293,9 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
         optionMatch = loose;
       }
     }
+    // Alternativa sem NENHUMA letra digitada (a numeração "a) b) c)..." é gerada automaticamente
+    // pela lista do Word, então só existe no texto o conteúdo da alternativa em si).
+    const isImplicitListOption = !optionMatch && !questionMatch && listItem && !!currentQuestion && lastOptionIndex < 4;
 
     if (questionMatch) {
       const number = parseInt(questionMatch[1], 10);
@@ -299,10 +321,9 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       continue;
     }
 
-    if (optionMatch && currentQuestion) {
-      const letter = optionMatch[1].toLowerCase();
-      const idx = LETTER_INDEX[letter];
-      let text = optionMatch[2] || '';
+    if ((optionMatch || isImplicitListOption) && currentQuestion) {
+      const idx = optionMatch ? LETTER_INDEX[optionMatch[1].toLowerCase()] : lastOptionIndex + 1;
+      let text = optionMatch ? (optionMatch[2] || '') : line;
       const starMarksCorrect = /\*\s*$/.test(text) || /^\*/.test(text);
       if (starMarksCorrect) {
         text = text.replace(/^\*|\*\s*$/g, '').trim();
