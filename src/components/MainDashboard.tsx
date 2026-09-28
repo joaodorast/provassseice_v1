@@ -19,22 +19,34 @@ import {
   Menu
 } from 'lucide-react';
 
+function PageLoadingFallback() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <div className="flex items-center gap-3 text-slate-500">
+        <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
+        <span className="text-sm">Carregando...</span>
+      </div>
+    </div>
+  );
+}
+
 // Import all pages
-import { OverviewPage } from './dashboard/OverviewPage';
-import { ManageStudentsPage } from './dashboard/ImportStudentsPage';
-import { ManageExamsPage } from './dashboard/ManageExamsPage';
-import { ApplyExamsPage } from './dashboard/ApplyExamsPage';
-import { GradeExamsPage } from './dashboard/GradeExamsPage';
-import { ReportsPage } from './dashboard/ReportsPage';
-import { ConfigurationPage } from './dashboard/ConfigurationPage';
-import { QuestionBankPage } from './dashboard/QuestionBankPage';
-import { EvaluationPage } from './dashboard/EvaluationPage';
-import { SendImagesPage } from './dashboard/SendImagesPage';
-import { StudentsManagementPage } from './dashboard/StudentsManagementPage';
-import { CreateSimuladoPage } from './dashboard/CreateSimuladoPage';
-import { SeriesPage } from './dashboard/SeriesPage';
-import { ManageClassesPage } from './dashboard/ManageClassesPage';
-import { ManageSeriesPage } from './dashboard/ManageSeriesPage';
+// Cada página do painel só é baixada quando o usuário realmente a acessa (code splitting),
+// o que deixa o carregamento inicial do sistema bem mais rápido.
+const OverviewPage = React.lazy(() => import('./dashboard/OverviewPage').then(m => ({ default: m.OverviewPage })));
+const ManageStudentsPage = React.lazy(() => import('./dashboard/ImportStudentsPage').then(m => ({ default: m.ManageStudentsPage })));
+const ManageExamsPage = React.lazy(() => import('./dashboard/ManageExamsPage').then(m => ({ default: m.ManageExamsPage })));
+const ApplyExamsPage = React.lazy(() => import('./dashboard/ApplyExamsPage').then(m => ({ default: m.ApplyExamsPage })));
+const GradeExamsPage = React.lazy(() => import('./dashboard/GradeExamsPage').then(m => ({ default: m.GradeExamsPage })));
+const ReportsPage = React.lazy(() => import('./dashboard/ReportsPage').then(m => ({ default: m.ReportsPage })));
+const ConfigurationPage = React.lazy(() => import('./dashboard/ConfigurationPage').then(m => ({ default: m.ConfigurationPage })));
+const QuestionBankPage = React.lazy(() => import('./dashboard/QuestionBankPage').then(m => ({ default: m.QuestionBankPage })));
+const SendImagesPage = React.lazy(() => import('./dashboard/SendImagesPage').then(m => ({ default: m.SendImagesPage })));
+const StudentsManagementPage = React.lazy(() => import('./dashboard/StudentsManagementPage').then(m => ({ default: m.StudentsManagementPage })));
+const CreateSimuladoPage = React.lazy(() => import('./dashboard/CreateSimuladoPage').then(m => ({ default: m.CreateSimuladoPage })));
+const SeriesPage = React.lazy(() => import('./dashboard/SeriesPage').then(m => ({ default: m.SeriesPage })));
+const ManageClassesPage = React.lazy(() => import('./dashboard/ManageClassesPage').then(m => ({ default: m.ManageClassesPage })));
+const ManageSeriesPage = React.lazy(() => import('./dashboard/ManageSeriesPage').then(m => ({ default: m.ManageSeriesPage })));
 
 type MainDashboardProps = {
   user: User;
@@ -329,7 +341,9 @@ export function MainDashboard({ user, onLogout }: MainDashboardProps) {
         {/* Content Area */}
         <div className="flex-1 min-h-0 overflow-y-auto p-4 lg:p-8 pb-10 lg:pb-14 seice-content-bg">
           <ErrorBoundary key={currentPage} variant="inline">
-            {renderPage()}
+            <React.Suspense fallback={<PageLoadingFallback />}>
+              {renderPage()}
+            </React.Suspense>
           </ErrorBoundary>
         </div>
       </div>

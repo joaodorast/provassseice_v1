@@ -54,6 +54,26 @@
     build: {
       target: 'esnext',
       outDir: 'build',
+      chunkSizeWarningLimit: 900,
+      rollupOptions: {
+        output: {
+          // Separa bibliotecas grandes em seus próprios pedaços, para que o navegador
+          // baixe (e cacheie) só o que cada página realmente usa.
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return undefined;
+            if (id.includes('xlsx')) return 'vendor-xlsx';
+            if (id.includes('pdfjs-dist')) return 'vendor-pdf';
+            if (id.includes('jszip')) return 'vendor-docx';
+            if (id.includes('jsqr')) return 'vendor-qr';
+            if (id.includes('recharts') || id.includes('d3-')) return 'vendor-charts';
+            if (id.includes('@radix-ui')) return 'vendor-radix';
+            if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler')) return 'vendor-react';
+            if (id.includes('@supabase') || id.includes('@jsr/supabase')) return 'vendor-supabase';
+            if (id.includes('lucide-react')) return 'vendor-icons';
+            return 'vendor';
+          },
+        },
+      },
     },
     server: {
       port: 3000,

@@ -44,11 +44,13 @@ const requireAuth = async (c: any, next: any) => {
 // Routes
 
 // Auth routes
-app.post('/make-server-83358821/signup', async (c) => {
+// Autocadastro público foi removido: novos logins são criados manualmente pelo administrador
+// (esta rota agora exige um usuário já autenticado, então não pode mais ser usada por quem não tem acesso).
+app.post('/make-server-83358821/signup', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
     const { name, email, password } = body;
-    
+
     if (!name || !email || !password) {
       return c.json({ error: 'Name, email and password are required' }, 400);
     }

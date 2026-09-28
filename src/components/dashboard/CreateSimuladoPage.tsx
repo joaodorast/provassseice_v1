@@ -21,7 +21,8 @@ import {
   List,
   Database,
   CheckCircle2,
-  Loader2
+  Loader2,
+  Upload
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { apiService } from '../../utils/api';
@@ -546,6 +547,50 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
     return simuladoData.sections.reduce((sum, section) => sum + section.questions.length, 0);
   };
 
+  // Importa um arquivo Word, Excel/CSV ou PDF e converte em seções/questões prontas.
+  const [isImportingFile, setIsImportingFile] = useState(false);
+  const handleImportFile = async (file: File | undefined) => {
+    if (!file) return;
+    setIsImportingFile(true);
+    try {
+      const { importExamFile } = await import('../../utils/examImport');
+      const result = await importExamFile(file);
+
+      if (result.sections.length === 0) {
+        toast.error(result.warnings[0] || 'Não foi possível importar questões desse arquivo.');
+        return;
+      }
+
+      const importedSections: Section[] = result.sections.map((s, si) => ({
+        id: `section_import_${Date.now()}_${si}`,
+        name: s.name,
+        description: s.description,
+        questions: s.questions.map((q, qi) => ({
+          id: `q_import_${Date.now()}_${si}_${qi}`,
+          question: q.question,
+          subject: q.subject || s.name,
+          difficulty: q.difficulty,
+          type: q.type,
+          options: q.options,
+          correctAnswer: q.correctAnswer,
+          tags: [],
+          points: q.points
+        }))
+      }));
+
+      setSimuladoData(prev => ({ ...prev, sections: [...prev.sections, ...importedSections] }));
+
+      const totalQuestions = importedSections.reduce((sum, s) => sum + s.questions.length, 0);
+      toast.success(`${importedSections.length} seção(ões) e ${totalQuestions} questão(ões) importadas! Revise antes de salvar.`);
+      result.warnings.forEach(w => toast.warning(w));
+    } catch (error) {
+      console.error('Error importing file:', error);
+      toast.error('Erro ao importar arquivo');
+    } finally {
+      setIsImportingFile(false);
+    }
+  };
+
   const getTotalPoints = () => {
     return simuladoData.sections.reduce((sum, section) => 
       sum + section.questions.reduce((qSum, q) => qSum + q.points, 0), 0
@@ -831,13 +876,40 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
             </CardContent>
           </Card>
 
-          <div className="flex justify-between items-center">
+          <div className="flex flex-wrap justify-between items-center gap-2">
             <h3 className="text-lg font-semibold text-slate-800">Seções do Simulado</h3>
-            <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
-              <Plus className="w-4 h-4 mr-2" />
-              Adicionar Seção
-            </Button>
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="file"
+                id="import-exam-file"
+                accept=".docx,.xlsx,.xls,.csv,.pdf"
+                className="hidden"
+                onChange={(e) => {
+                  handleImportFile(e.target.files?.[0]);
+                  e.target.value = '';
+                }}
+              />
+              <Button
+                variant="outline"
+                disabled={isImportingFile}
+                onClick={() => document.getElementById('import-exam-file')?.click()}
+              >
+                {isImportingFile ? (
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="w-4 h-4 mr-2" />
+                )}
+                {isImportingFile ? 'Importando...' : 'Importar Word/Excel/PDF'}
+              </Button>
+              <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
+                <Plus className="w-4 h-4 mr-2" />
+                Adicionar Seção
+              </Button>
+            </div>
           </div>
+          <p className="text-xs text-slate-500 -mt-4">
+            O arquivo é lido automaticamente e separado em seções e questões (numeração "1)", alternativas "A)" a "E)" e gabarito indicado). Sempre revise o resultado antes de salvar.
+          </p>
 
           {simuladoData.sections.length === 0 ? (
             <Card>
@@ -845,12 +917,26 @@ export function CreateSimuladoPage({ onBack, examToEdit }: { onBack: () => void;
                 <List className="w-16 h-16 text-slate-300 mx-auto mb-4" />
                 <h3 className="font-semibold text-slate-800 mb-2">Nenhuma Seção Criada</h3>
                 <p className="text-slate-600 mb-6">
-                  Comece criando seções para organizar as questões do seu simulado.
+                  Comece criando seções para organizar as questões do seu simulado, ou importe um arquivo pronto.
                 </p>
-                <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Criar Primeira Seção
-                </Button>
+                <div className="flex flex-wrap justify-center gap-2">
+                  <Button
+                    variant="outline"
+                    disabled={isImportingFile}
+                    onClick={() => document.getElementById('import-exam-file')?.click()}
+                  >
+                    {isImportingFile ? (
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    ) : (
+                      <Upload className="w-4 h-4 mr-2" />
+                    )}
+                    {isImportingFile ? 'Importando...' : 'Importar Word/Excel/PDF'}
+                  </Button>
+                  <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Criar Primeira Seção
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ) : (
