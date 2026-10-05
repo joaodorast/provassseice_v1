@@ -29,65 +29,64 @@ type ActionResultDialogProps = {
 };
 
 // Cada tipo tem linguagem visual própria; o corpo é cinza, como o restante do sistema
+// Cabeçalho cinza-carvão do sistema; a cor de cada tipo aparece só no ícone, no filete e nos botões.
+// O amarelo entra como toque sóbrio (atenção), e o erro segue o vermelho do sistema.
 const VARIANTS = {
   success: {
-    // Sucesso: faixa de confirmação com anéis que se expandem ao redor do ícone
-    band: 'bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600',
-    ring: 'border-emerald-300',
-    iconWrap: 'bg-white text-emerald-600 shadow-emerald-900/30',
-    title: 'text-zinc-900',
-    text: 'text-zinc-600',
-    detail: 'border-emerald-200 bg-emerald-50/70 text-zinc-800',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-emerald-500/25',
+    rule: 'bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-600',
+    ring: 'border-emerald-400/60',
+    iconWrap: 'bg-emerald-600 text-white shadow-emerald-900/50 ring-zinc-700',
+    detail: 'border-zinc-200 bg-zinc-100 text-zinc-800',
     detailDot: 'text-emerald-600',
-    button: 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-emerald-600/30',
-    bar: 'bg-gradient-to-r from-emerald-400 to-teal-600',
-    pattern: '',
+    text: 'text-zinc-600',
+    button: 'bg-gradient-to-r from-emerald-600 to-zinc-800 hover:from-emerald-700 hover:to-zinc-900 shadow-zinc-900/30',
+    bar: 'bg-gradient-to-r from-emerald-500 to-zinc-700',
     icon: CheckCircle2,
-    iconClass: 'w-11 h-11'
+    iconClass: 'w-10 h-10'
   },
   error: {
-    // Erro: listras de atenção na faixa e ícone que treme ao aparecer
-    band: 'bg-gradient-to-br from-rose-600 via-red-600 to-red-800',
-    ring: 'border-rose-300',
-    iconWrap: 'bg-white text-red-600 shadow-red-900/30',
-    title: 'text-zinc-900',
-    text: 'text-zinc-600',
-    detail: 'border-red-200 bg-red-50/70 text-zinc-800',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-red-500/30',
+    rule: 'bg-gradient-to-r from-red-700 via-red-500 to-red-700',
+    ring: '',
+    iconWrap: 'bg-red-600 text-white shadow-red-900/50 ring-zinc-700 seice-shake',
+    detail: 'border-zinc-200 bg-zinc-100 text-zinc-800',
     detailDot: 'text-red-600',
-    button: 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 shadow-red-600/30',
-    bar: 'bg-gradient-to-r from-rose-500 to-red-700',
-    pattern: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 12px, transparent 12px 24px)',
+    text: 'text-zinc-600',
+    button: 'bg-gradient-to-r from-red-600 to-zinc-800 hover:from-red-700 hover:to-zinc-900 shadow-zinc-900/30',
+    bar: 'bg-gradient-to-r from-red-500 to-zinc-700',
     icon: XCircle,
-    iconClass: 'w-11 h-11 seice-shake'
+    iconClass: 'w-10 h-10'
   },
   info: {
-    band: 'bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700',
-    ring: 'border-sky-300',
-    iconWrap: 'bg-white text-sky-600 shadow-sky-900/30',
-    title: 'text-zinc-900',
-    text: 'text-zinc-600',
-    detail: 'border-sky-200 bg-sky-50/70 text-zinc-800',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-sky-500/25',
+    rule: 'bg-gradient-to-r from-sky-600 via-sky-400 to-sky-600',
+    ring: '',
+    iconWrap: 'bg-sky-600 text-white shadow-sky-900/50 ring-zinc-700',
+    detail: 'border-zinc-200 bg-zinc-100 text-zinc-800',
     detailDot: 'text-sky-600',
-    button: 'bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-600 hover:to-blue-800 shadow-sky-600/30',
-    bar: 'bg-gradient-to-r from-sky-400 to-blue-700',
-    pattern: '',
+    text: 'text-zinc-600',
+    button: 'bg-gradient-to-r from-sky-600 to-zinc-800 hover:from-sky-700 hover:to-zinc-900 shadow-zinc-900/30',
+    bar: 'bg-gradient-to-r from-sky-500 to-zinc-700',
     icon: Info,
-    iconClass: 'w-11 h-11'
+    iconClass: 'w-10 h-10'
   },
   warning: {
-    // Atenção: listras amarelas de sinalização e ícone pulsando
-    band: 'bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600',
-    ring: 'border-amber-300',
-    iconWrap: 'bg-white text-amber-600 shadow-amber-900/30',
-    title: 'text-zinc-900',
-    text: 'text-zinc-600',
-    detail: 'border-amber-200 bg-amber-50/80 text-zinc-800',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-amber-400/20',
+    rule: 'bg-gradient-to-r from-amber-500 via-amber-300 to-amber-500',
+    ring: '',
+    iconWrap: 'bg-amber-400 text-zinc-900 shadow-amber-900/40 ring-zinc-700 animate-pulse motion-reduce:animate-none',
+    detail: 'border-amber-200 bg-amber-50/70 text-zinc-800',
     detailDot: 'text-amber-600',
-    button: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-600/30',
-    bar: 'bg-gradient-to-r from-amber-400 to-orange-600',
-    pattern: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0 14px, transparent 14px 28px)',
+    text: 'text-zinc-600',
+    button: 'bg-gradient-to-r from-amber-500 to-zinc-700 hover:from-amber-600 hover:to-zinc-800 shadow-zinc-900/30',
+    bar: 'bg-gradient-to-r from-amber-400 to-zinc-700',
     icon: AlertTriangle,
-    iconClass: 'w-11 h-11 animate-pulse motion-reduce:animate-none'
+    iconClass: 'w-10 h-10'
   }
 };
 
@@ -128,15 +127,13 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
   return (
     <Dialog open={!!result} onOpenChange={(open) => { if (!open) onClose(); }}>
       {/* Mais largo que o padrão e em cinza; entrada e saída lentas para dar tempo de ler */}
-      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-200 bg-zinc-50 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
+      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-300 bg-zinc-100 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
         {result && (
           <>
-            {/* Faixa colorida com o ícone; a textura muda conforme o tipo */}
+            {/* Cabeçalho cinza-carvão com brilho da cor do tipo e um filete colorido embaixo */}
             <div className={`relative flex flex-col items-center gap-4 overflow-hidden px-8 pt-10 pb-12 ${v.band}`}>
-              {v.pattern && (
-                <div className="pointer-events-none absolute inset-0 opacity-70" style={{ backgroundImage: v.pattern }} />
-              )}
-              <div className="pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+              <div className={`pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full blur-3xl ${v.glow}`} />
+              <div className={`absolute inset-x-0 bottom-0 h-1 ${v.rule}`} />
 
               <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
                 {result.type === 'success' && (
@@ -151,7 +148,7 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
               </div>
 
               <div className="relative space-y-1 px-1 animate-in slide-in-from-bottom-2 fade-in duration-700 delay-500 fill-mode-both motion-reduce:animate-none">
-                <DialogTitle className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
+                <DialogTitle className="text-2xl font-bold tracking-tight text-white">
                   {result.title}
                 </DialogTitle>
               </div>
