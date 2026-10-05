@@ -12,6 +12,7 @@
 // É uma leitura heurística: sempre revise as questões importadas antes de publicar o simulado.
 
 import * as XLSX from 'xlsx';
+import { projectId } from './supabase/info';
 
 export interface ImportedQuestion {
   question: string;
@@ -42,6 +43,8 @@ interface DocLine {
   /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
    * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
   listItem: boolean;
+  /** Caminhos (dentro do .docx) das imagens que estão neste parágrafo. Viram texto antes do parser. */
+  images?: string[];
 }
 
 const LETTER_INDEX: Record<string, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 };
@@ -64,11 +67,38 @@ const firstChildNamed = (el: Element, name: string) => childrenNamed(el, name)[0
 
 // ---------- Extração de linhas (com detecção de título/negrito/vermelho) por tipo de arquivo ----------
 
-async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
+const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+
+// Texto de uma equação do Word (OMML). Lê os textos <m:t> na ordem do documento e
+// marca raízes (<m:rad>) com "√". Frações e outras estruturas saem como texto corrido.
+function mathToText(math: Element): string {
+  let out = '';
+  Array.from(math.getElementsByTagName('*')).forEach((el) => {
+    const name = localName(el);
+    if (name === 'rad') out += '√';
+    else if (name === 't') out += el.textContent || '';
+  });
+  return out.replace(/\s+/g, ' ').trim();
+}
+
+async function extractLinesFromDocx(file: File): Promise<{ lines: DocLine[]; readImage: (path: string) => Promise<Blob | null> }> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(file);
+  const readImage = async (path: string) => (await zip.file(path)?.async('blob')) ?? null;
   const xmlText = await zip.file('word/document.xml')?.async('text');
-  if (!xmlText) return [];
+  if (!xmlText) return { lines: [], readImage };
+
+  // Relações do documento: rId -> caminho da mídia dentro do .docx (ex: word/media/image1.png)
+  const relTargets = new Map<string, string>();
+  const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('text');
+  if (relsXml) {
+    const relsDoc = new DOMParser().parseFromString(relsXml, 'application/xml');
+    Array.from(relsDoc.getElementsByTagName('Relationship')).forEach((rel) => {
+      const id = rel.getAttribute('Id');
+      const target = rel.getAttribute('Target');
+      if (id && target) relTargets.set(id, target.startsWith('/') ? target.slice(1) : `word/${target}`);
+    });
+  }
 
   const xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
   const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p')).length > 0
@@ -78,6 +108,17 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
   const lines: DocLine[] = [];
 
   paragraphs.forEach((p) => {
+    const linesBefore = lines.length;
+    // Imagens do parágrafo: <a:blip r:embed> (desenho moderno) ou <v:imagedata r:id> (VML antigo)
+    const imagePaths: string[] = [];
+    Array.from(p.getElementsByTagName('*')).forEach((el) => {
+      const name = localName(el);
+      if (name !== 'blip' && name !== 'imagedata') return;
+      const rId = el.getAttributeNS(REL_NS, 'embed') || el.getAttributeNS(REL_NS, 'id') || el.getAttribute('r:embed') || el.getAttribute('r:id');
+      const path = rId ? relTargets.get(rId) : undefined;
+      if (path) imagePaths.push(path);
+    });
+
     const pPr = firstChildNamed(p, 'pPr');
     const pStyleEl = pPr ? firstChildNamed(pPr, 'pStyle') : undefined;
     const styleVal = pStyleEl?.getAttribute('w:val') || pStyleEl?.getAttribute('val') || '';
@@ -91,6 +132,7 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     Array.from(p.children).forEach(c => {
       const name = localName(c);
       if (name === 'r') runs.push(c);
+      else if (name === 'oMath') runs.push(c); // equação do Word (ex: √56 m) — não é um w:r
       else if (name === 'hyperlink') childrenNamed(c, 'r').forEach(r => runs.push(r));
     });
 
@@ -122,6 +164,15 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     };
 
     runs.forEach((r) => {
+      if (localName(r) === 'oMath') {
+        const math = mathToText(r);
+        if (math) {
+          curHasText = true;
+          curAllBold = false;
+          curText += math;
+        }
+        return;
+      }
       const rPr = firstChildNamed(r, 'rPr');
       let bold = false;
       let color: string | null = null;
@@ -155,9 +206,19 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
       void curHasText;
     });
     flush();
+
+    if (imagePaths.length > 0) {
+      if (lines.length > linesBefore) {
+        // Imagem no fim da linha de texto (ex: "1) " + figura do enunciado): acompanha essa linha
+        lines[lines.length - 1].images = imagePaths;
+      } else {
+        // Parágrafo só com imagem (questão ou alternativa inteira colada como figura)
+        lines.push({ text: '', heading: false, redMarked: false, listItem: false, images: imagePaths });
+      }
+    }
   });
 
-  return lines;
+  return { lines, readImage };
 }
 
 async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
@@ -453,14 +514,150 @@ function parseSpreadsheet(buffer: ArrayBuffer): ImportResult {
   return { sections, warnings };
 }
 
+// ---------- Imagens do Word -> texto (Claude Vision, via servidor) ----------
+
+const MAX_IMAGE_SIDE = 1600;
+const TRANSCRIBE_BATCH = 8;
+const TRANSCRIBE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-83358821/ai/transcribe-images`;
+
+// Reduz a imagem (lado maior até MAX_IMAGE_SIDE) e converte para JPEG com fundo branco.
+// Imagens que o navegador não consegue decodificar (EMF/WMF, por exemplo) devolvem null.
+async function blobToScaledDataUrl(blob: Blob): Promise<string | null> {
+  try {
+    const bitmap = await createImageBitmap(blob);
+    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, width, height);
+    ctx.drawImage(bitmap, 0, 0, width, height);
+    bitmap.close?.();
+    return canvas.toDataURL('image/jpeg', 0.92);
+  } catch {
+    return null;
+  }
+}
+
+// Troca cada imagem das linhas pelo texto transcrito e refaz as linhas (uma por quebra de linha).
+// Retorna as linhas prontas para o parser, mais avisos caso alguma imagem não pôde ser lida.
+async function resolveImageLines(
+  lines: DocLine[],
+  readImage: (path: string) => Promise<Blob | null>
+): Promise<{ lines: DocLine[]; warnings: string[] }> {
+  const warnings: string[] = [];
+  if (!lines.some(l => l.images?.length)) return { lines, warnings };
+
+  // Carrega e reduz cada imagem uma vez, mesmo que apareça em vários lugares
+  const scaled = new Map<string, string | null>();
+  for (const line of lines) {
+    for (const path of line.images ?? []) {
+      if (scaled.has(path)) continue;
+      const blob = await readImage(path);
+      scaled.set(path, blob ? await blobToScaledDataUrl(blob) : null);
+    }
+  }
+
+  // Ocorrências legíveis, na ordem do documento
+  const jobs: { lineIndex: number; imageIndex: number; dataUrl: string }[] = [];
+  let unreadable = 0;
+  lines.forEach((line, lineIndex) => {
+    (line.images ?? []).forEach((path, imageIndex) => {
+      const dataUrl = scaled.get(path);
+      if (dataUrl) jobs.push({ lineIndex, imageIndex, dataUrl });
+      else unreadable++;
+    });
+  });
+  if (unreadable > 0) {
+    warnings.push(`${unreadable} imagem(ns) do arquivo não puderam ser lidas (formato não suportado pelo navegador). Essas partes ficaram de fora.`);
+  }
+
+  const token = localStorage.getItem('access_token');
+  const transcribed = new Map<string, { text: string; red: boolean }>();
+  if (jobs.length > 0 && !token) {
+    warnings.push('Não consegui ler as imagens do arquivo porque a sessão expirou. Entre de novo e importe.');
+  } else {
+    for (let start = 0; start < jobs.length && token; start += TRANSCRIBE_BATCH) {
+      const batch = jobs.slice(start, start + TRANSCRIBE_BATCH);
+      try {
+        const response = await fetch(TRANSCRIBE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          body: JSON.stringify({ images: batch.map(j => j.dataUrl) }),
+        });
+        const data = await response.json();
+        if (!response.ok || !Array.isArray(data?.results)) {
+          throw new Error(data?.error || `HTTP ${response.status}`);
+        }
+        batch.forEach((job, i) => transcribed.set(`${job.lineIndex}:${job.imageIndex}`, {
+          text: String(data.results[i]?.text ?? ''),
+          red: data.results[i]?.red === true,
+        }));
+      } catch (error) {
+        console.error('Error transcribing Word images:', error);
+        warnings.push('Não consegui transcrever algumas imagens do arquivo (erro na leitura por IA). Revise as questões que dependem delas.');
+        break;
+      }
+    }
+  }
+
+  // Letra de alternativa que ficou como texto ("A)") seguida do conteúdo que está na imagem:
+  // as duas partes precisam ficar na mesma linha para o parser reconhecer a alternativa.
+  const LABEL_ONLY = /^\(?[a-eA-E]\)?\s*[.\-–:]?$/;
+
+  const rebuilt: DocLine[] = [];
+  lines.forEach((line, lineIndex) => {
+    const pieces: { text: string; red: boolean }[] = [];
+    const parts = [{ text: line.text, red: false }];
+    (line.images ?? []).forEach((_, imageIndex) => {
+      const t = transcribed.get(`${lineIndex}:${imageIndex}`);
+      parts.push({ text: t?.text ?? '', red: t?.red ?? false });
+    });
+    parts.forEach((part) => {
+      part.text.split('\n').map(s => s.trim()).filter(Boolean).forEach((seg) => {
+        const prev = pieces[pieces.length - 1];
+        if (prev && LABEL_ONLY.test(prev.text)) {
+          prev.text = `${prev.text} ${seg}`;
+          prev.red = prev.red || part.red;
+        } else {
+          pieces.push({ text: seg, red: part.red });
+        }
+      });
+    });
+    // Parágrafo só com imagem logo depois de uma linha só com a letra ("A)"): junta as duas
+    const last = rebuilt[rebuilt.length - 1];
+    if (!line.text && last && LABEL_ONLY.test(last.text) && pieces.length > 0) {
+      const first = pieces.shift()!;
+      last.text = `${last.text} ${first.text}`;
+      last.redMarked = last.redMarked || first.red;
+    }
+    pieces.forEach((piece, i) => {
+      rebuilt.push({
+        text: piece.text,
+        heading: i === 0 && line.heading,
+        redMarked: line.redMarked || piece.red,
+        listItem: i === 0 && line.listItem,
+      });
+    });
+  });
+
+  return { lines: rebuilt, warnings };
+}
+
 // ---------- Ponto de entrada ----------
 
 export async function importExamFile(file: File): Promise<ImportResult> {
   const name = file.name.toLowerCase();
   try {
     if (name.endsWith('.docx')) {
-      const lines = await extractLinesFromDocx(file);
-      return parseLinesIntoSections(lines);
+      const { lines, readImage } = await extractLinesFromDocx(file);
+      const resolved = await resolveImageLines(lines, readImage);
+      const parsed = parseLinesIntoSections(resolved.lines);
+      return { sections: parsed.sections, warnings: [...resolved.warnings, ...parsed.warnings] };
     }
     if (name.endsWith('.pdf')) {
       const lines = await extractLinesFromPdf(file);
