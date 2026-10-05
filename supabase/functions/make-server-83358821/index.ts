@@ -283,12 +283,13 @@ app.put('/make-server-83358821/user/settings', requireAuth, async (c) => {
 // Turmas e cursos (séries) são de cada login: a chave guardada inclui o id do usuário.
 const classesKey = (c: any) => `classes-list:${c.get('user').id}`;
 const seriesKey = (c: any) => `series-list:${c.get('user').id}`;
+const subjectsKey = (c: any) => `subjects-list:${c.get('user').id}`;
 
 // Subjects and Series Management
 app.get('/make-server-83358821/subjects-series', requireAuth, async (c) => {
   try {
     // Get subjects and series from KV store (global, not per user)
-    const subjects = await kv.get('subjects') || [
+    const subjects = await kv.get(subjectsKey(c)) || [
       'Matemática',
       'Português',
       'História',
@@ -332,7 +333,7 @@ app.put('/make-server-83358821/subjects-series', requireAuth, async (c) => {
     
     // Update subjects if provided
     if (subjects && Array.isArray(subjects)) {
-      await kv.set('subjects', subjects);
+      await kv.set(subjectsKey(c), subjects);
     }
     
     // Update series if provided
@@ -342,7 +343,7 @@ app.put('/make-server-83358821/subjects-series', requireAuth, async (c) => {
     
     return c.json({ 
       success: true, 
-      subjects: subjects || await kv.get('subjects'),
+      subjects: subjects || await kv.get(subjectsKey(c)),
       series: series || await kv.get(seriesKey(c))
     });
   } catch (error) {
