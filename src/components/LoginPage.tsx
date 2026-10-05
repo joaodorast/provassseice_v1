@@ -55,7 +55,13 @@ export function LoginPage({ onLogin }: LoginPageProps) {
       });
 
       if (error) {
-        toast.error('Erro no login: ' + error.message);
+        // Mensagens de erro do Supabase vêm em inglês; traduzimos as mais comuns
+        const traducoes: Record<string, string> = {
+          'Invalid login credentials': 'E-mail ou senha incorretos.',
+          'Email not confirmed': 'Seu e-mail ainda não foi confirmado.',
+          'Too many requests': 'Muitas tentativas. Aguarde um pouco e tente de novo.',
+        };
+        toast.error('Não foi possível entrar', { description: traducoes[error.message] ?? error.message });
         return;
       }
 
