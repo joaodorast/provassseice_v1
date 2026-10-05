@@ -25,25 +25,26 @@ type ConfirmDeleteDialogProps = {
 };
 
 // Cada tom tem sua faixa: exclusão com listras vermelhas e ícone tremendo; atenção com listras amarelas
+// Cabeçalho cinza-carvão, igual aos avisos; vermelho para exclusão e um toque de amarelo para atenção
 const TONES = {
   danger: {
-    band: 'bg-gradient-to-br from-rose-600 via-red-600 to-red-800',
-    pattern: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 12px, transparent 12px 24px)',
-    iconWrap: 'bg-white text-red-600 shadow-red-900/30',
-    iconClass: 'w-10 h-10 seice-shake',
-    detail: 'border-red-200 bg-red-50/70',
-    detailText: 'text-zinc-800',
-    button: 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 shadow-red-600/30',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-red-500/30',
+    rule: 'bg-gradient-to-r from-red-700 via-red-500 to-red-700',
+    iconWrap: 'bg-red-600 text-white shadow-red-900/50 ring-zinc-700 seice-shake',
+    iconClass: 'w-10 h-10',
+    detail: 'border-zinc-200 bg-zinc-100',
+    button: 'bg-gradient-to-r from-red-600 to-zinc-800 hover:from-red-700 hover:to-zinc-900 shadow-zinc-900/30',
     spinner: 'Excluindo...'
   },
   warning: {
-    band: 'bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600',
-    pattern: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0 14px, transparent 14px 28px)',
-    iconWrap: 'bg-white text-amber-600 shadow-amber-900/30',
-    iconClass: 'w-10 h-10 animate-pulse motion-reduce:animate-none',
-    detail: 'border-amber-200 bg-amber-50/80',
-    detailText: 'text-zinc-800',
-    button: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-600/30',
+    band: 'bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700',
+    glow: 'bg-amber-400/20',
+    rule: 'bg-gradient-to-r from-amber-500 via-amber-300 to-amber-500',
+    iconWrap: 'bg-amber-400 text-zinc-900 shadow-amber-900/40 ring-zinc-700 animate-pulse motion-reduce:animate-none',
+    iconClass: 'w-10 h-10',
+    detail: 'border-amber-200 bg-amber-50/70',
+    button: 'bg-gradient-to-r from-amber-500 to-zinc-700 hover:from-amber-600 hover:to-zinc-800 shadow-zinc-900/30',
     spinner: 'Aguarde...'
   }
 };
@@ -71,15 +72,16 @@ export function ConfirmDeleteDialog({
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !loading) onCancel(); }}>
       {/* Mais largo que o padrão e em cinza; entrada e saída lentas para o usuário ler antes de confirmar */}
-      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-200 bg-zinc-50 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
+      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-300 bg-zinc-100 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
         <div className={`relative flex flex-col items-center gap-3 overflow-hidden px-8 pt-10 pb-12 ${t.band}`}>
-          <div className="pointer-events-none absolute inset-0 opacity-70" style={{ backgroundImage: t.pattern }} />
+          <div className={`pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full blur-3xl ${t.glow}`} />
+          <div className={`absolute inset-x-0 bottom-0 h-1 ${t.rule}`} />
           <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
             <div className={`relative w-20 h-20 rounded-full flex items-center justify-center shadow-2xl ring-8 ring-white/30 ${t.iconWrap}`}>
               <Icon className={t.iconClass} strokeWidth={2.4} />
             </div>
           </div>
-          <DialogTitle className="relative text-2xl font-bold tracking-tight text-white drop-shadow-sm">{title}</DialogTitle>
+          <DialogTitle className="relative text-2xl font-bold tracking-tight text-white">{title}</DialogTitle>
         </div>
 
         <div className="relative -mt-6 mx-5 mb-5 flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white px-6 pb-6 pt-6 shadow-lg">
