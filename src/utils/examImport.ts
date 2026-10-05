@@ -5,14 +5,14 @@
 // que o enunciado usa: título com estilo "Título"/heading do Word ou texto em negrito sozinho
 // no parágrafo vira nova seção (matéria); alternativa com QUALQUER texto em vermelho vira o
 // gabarito da questão (além de "Gabarito: B", "Resposta: B" ou um "*" do jeito tradicional).
-// PDF: mesma lógica de seções/questões/alternativas, mas por texto simples (usa fonte maior
-// que o resto do texto para tentar achar títulos de seção; não há como ler cor no PDF aqui).
+// PDF: lê a posição e a cor de cada trecho do content stream (sem IA). Vermelho = gabarito,
+// como no Word. Provas em duas colunas são lidas na ordem certa (coluna da esquerda, depois a da direita).
+// Alternativas que são imagem no PDF não têm texto: a letra é mantida e a questão é sinalizada para preencher.
 // Excel/CSV: usa uma linha de cabeçalho (Seção, Pergunta, Alternativa A..E, Resposta, etc).
 //
 // É uma leitura heurística: sempre revise as questões importadas antes de publicar o simulado.
 
 import * as XLSX from 'xlsx';
-import { projectId } from './supabase/info';
 
 export interface ImportedQuestion {
   question: string;
@@ -43,8 +43,6 @@ interface DocLine {
   /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
    * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
   listItem: boolean;
-  /** Caminhos (dentro do .docx) das imagens que estão neste parágrafo. Viram texto antes do parser. */
-  images?: string[];
 }
 
 const LETTER_INDEX: Record<string, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 };
@@ -67,8 +65,6 @@ const firstChildNamed = (el: Element, name: string) => childrenNamed(el, name)[0
 
 // ---------- Extração de linhas (com detecção de título/negrito/vermelho) por tipo de arquivo ----------
 
-const REL_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
-
 // Texto de uma equação do Word (OMML). Lê os textos <m:t> na ordem do documento e
 // marca raízes (<m:rad>) com "√". Frações e outras estruturas saem como texto corrido.
 function mathToText(math: Element): string {
@@ -81,24 +77,11 @@ function mathToText(math: Element): string {
   return out.replace(/\s+/g, ' ').trim();
 }
 
-async function extractLinesFromDocx(file: File): Promise<{ lines: DocLine[]; readImage: (path: string) => Promise<Blob | null> }> {
+async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(file);
-  const readImage = async (path: string) => (await zip.file(path)?.async('blob')) ?? null;
   const xmlText = await zip.file('word/document.xml')?.async('text');
-  if (!xmlText) return { lines: [], readImage };
-
-  // Relações do documento: rId -> caminho da mídia dentro do .docx (ex: word/media/image1.png)
-  const relTargets = new Map<string, string>();
-  const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('text');
-  if (relsXml) {
-    const relsDoc = new DOMParser().parseFromString(relsXml, 'application/xml');
-    Array.from(relsDoc.getElementsByTagName('Relationship')).forEach((rel) => {
-      const id = rel.getAttribute('Id');
-      const target = rel.getAttribute('Target');
-      if (id && target) relTargets.set(id, target.startsWith('/') ? target.slice(1) : `word/${target}`);
-    });
-  }
+  if (!xmlText) return [];
 
   const xmlDoc = new DOMParser().parseFromString(xmlText, 'application/xml');
   const paragraphs = Array.from(xmlDoc.getElementsByTagName('w:p')).length > 0
@@ -108,17 +91,6 @@ async function extractLinesFromDocx(file: File): Promise<{ lines: DocLine[]; rea
   const lines: DocLine[] = [];
 
   paragraphs.forEach((p) => {
-    const linesBefore = lines.length;
-    // Imagens do parágrafo: <a:blip r:embed> (desenho moderno) ou <v:imagedata r:id> (VML antigo)
-    const imagePaths: string[] = [];
-    Array.from(p.getElementsByTagName('*')).forEach((el) => {
-      const name = localName(el);
-      if (name !== 'blip' && name !== 'imagedata') return;
-      const rId = el.getAttributeNS(REL_NS, 'embed') || el.getAttributeNS(REL_NS, 'id') || el.getAttribute('r:embed') || el.getAttribute('r:id');
-      const path = rId ? relTargets.get(rId) : undefined;
-      if (path) imagePaths.push(path);
-    });
-
     const pPr = firstChildNamed(p, 'pPr');
     const pStyleEl = pPr ? firstChildNamed(pPr, 'pStyle') : undefined;
     const styleVal = pStyleEl?.getAttribute('w:val') || pStyleEl?.getAttribute('val') || '';
@@ -206,21 +178,32 @@ async function extractLinesFromDocx(file: File): Promise<{ lines: DocLine[]; rea
       void curHasText;
     });
     flush();
-
-    if (imagePaths.length > 0) {
-      if (lines.length > linesBefore) {
-        // Imagem no fim da linha de texto (ex: "1) " + figura do enunciado): acompanha essa linha
-        lines[lines.length - 1].images = imagePaths;
-      } else {
-        // Parágrafo só com imagem (questão ou alternativa inteira colada como figura)
-        lines.push({ text: '', heading: false, redMarked: false, listItem: false, images: imagePaths });
-      }
-    }
   });
 
-  return { lines, readImage };
+  return lines;
 }
 
+// Operadores do content stream do PDF (números internos do pdf.js) usados para ler texto e cor
+const PDF_OP_SET_TEXT_MATRIX = 42; // posição do texto na página
+const PDF_OP_SHOW_TEXT = 44; // trecho de texto (glifos)
+const PDF_OP_SET_FILL_RGB = 59; // cor de preenchimento do texto (ex: "#ff0000")
+const PDF_OP_SET_FONT = 37; // fonte e tamanho do texto que vem depois
+
+// Vermelho de gabarito: canal R forte e G/B baixos
+function isRedHex(hex: string): boolean {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex);
+  if (!m) return false;
+  const r = parseInt(m[1].slice(0, 2), 16);
+  const g = parseInt(m[1].slice(2, 4), 16);
+  const b = parseInt(m[1].slice(4, 6), 16);
+  return r > 150 && r - g > 90 && r - b > 90;
+}
+
+// Cabeçalho/rodapé repetido em todas as páginas (título do simulado, série, número da página)
+const PDF_NOISE_RE = /^(SIMULADO\b|\d{1,2}º\s*ANO\b|\d{1,3}$|\.$|.*BIMESTRE|.*ANO\s*[–-]\s*A\s*$|[–\-\s]*2026\b.{0,4}$)/i;
+
+// Lê o PDF com a posição e a cor de cada trecho de texto, separando as colunas da página
+// (provas costumam ter duas colunas: primeiro a esquerda de cima para baixo, depois a direita).
 async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
   const pdfjsLib: any = await import('pdfjs-dist');
   const workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
@@ -229,39 +212,89 @@ async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
   const arrayBuffer = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
 
-  const rawLines: { text: string; size: number }[] = [];
+  const lines: DocLine[] = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    const groups: Record<string, { parts: string[]; size: number }> = {};
-    content.items.forEach((item: any) => {
-      const y = Math.round(item.transform[5] / 2) * 2;
-      const size = Math.abs(item.transform[3]) || Math.abs(item.transform[0]) || 0;
-      if (!groups[y]) groups[y] = { parts: [], size };
-      groups[y].parts.push(item.str);
-      groups[y].size = Math.max(groups[y].size, size);
+    const ops = await page.getOperatorList();
+    const pageWidth = page.view[2] - page.view[0];
+
+    // size: tamanho da fonte; adv: largura estimada do trecho (para saber se há espaço entre trechos)
+    type Span = { x: number; y: number; text: string; red: boolean; size: number; adv: number };
+    const spans: Span[] = [];
+    let fill = '#000000';
+    let size = 10;
+    let x = 0;
+    let y = 0;
+    ops.fnArray.forEach((fn: number, idx: number) => {
+      const args = ops.argsArray[idx];
+      if (fn === PDF_OP_SET_FILL_RGB) {
+        fill = String(args?.[0] ?? '#000000').toLowerCase();
+      } else if (fn === PDF_OP_SET_FONT) {
+        size = Number(args?.[1]) || size;
+      } else if (fn === PDF_OP_SET_TEXT_MATRIX) {
+        const m = args?.[0];
+        x = m?.[4] ?? 0;
+        y = m?.[5] ?? 0;
+      } else if (fn === PDF_OP_SHOW_TEXT) {
+        let text = '';
+        let adv = 0;
+        for (const g of args?.[0] ?? []) {
+          if (g && typeof g === 'object') {
+            text += g.isSpace ? ' ' : (g.unicode ?? '');
+            adv += (g.width ?? 0) / 1000 * size;
+          }
+        }
+        if (text.trim()) spans.push({ x, y, text, red: isRedHex(fill), size, adv });
+      }
     });
-    const orderedY = Object.keys(groups).map(Number).sort((a, b) => b - a);
-    orderedY.forEach(y => {
-      const text = groups[y].parts.join(' ').trim();
-      if (text) rawLines.push({ text, size: groups[y].size });
+
+    // Duas colunas: a da esquerda vem antes da da direita
+    const mid = pageWidth / 2;
+    const columns = [spans.filter(s => s.x < mid), spans.filter(s => s.x >= mid)];
+    columns.forEach((column) => {
+      const byY = new Map<number, Span[]>();
+      column.forEach((s) => {
+        const key = Math.round(s.y);
+        if (!byY.has(key)) byY.set(key, []);
+        byY.get(key)!.push(s);
+      });
+      [...byY.keys()].sort((a, b) => b - a).forEach((key) => {
+        const row = byY.get(key)!.sort((a, b) => a.x - b.x);
+        // Junta os trechos; insere espaço quando há uma folga entre o fim de um e o início do próximo
+        let text = '';
+        row.forEach((s, i) => {
+          const prev = row[i - 1];
+          if (prev && !/\s$/.test(text) && !/^\s/.test(s.text) && s.x - (prev.x + prev.adv) > s.size * 0.15) {
+            text += ' ';
+          }
+          text += s.text;
+        });
+        text = text.replace(/\s+/g, ' ').trim();
+        if (!text || PDF_NOISE_RE.test(text)) return;
+
+        // Gabarito: a alternativa é vermelha se a letra dela ("C)") estiver em vermelho,
+        // ou se quase todo o texto da linha estiver em vermelho
+        const chars = row.flatMap(s => [...s.text].filter(c => !/\s/.test(c)).map(c => ({ c, red: s.red })));
+        const label = chars.slice(0, 2);
+        const labelRed = label.length === 2 && /^[a-eA-E]\)$/.test(label.map(l => l.c).join('')) && label.every(l => l.red);
+        const visible = chars.length;
+        const redChars = chars.filter(c => c.red).length;
+        lines.push({
+          text,
+          heading: false,
+          redMarked: labelRed || (visible > 0 && redChars >= visible * 0.6),
+          listItem: false
+        });
+      });
     });
   }
-
-  const sizes = rawLines.map(l => l.size).filter(s => s > 0).sort((a, b) => a - b);
-  const medianSize = sizes.length > 0 ? sizes[Math.floor(sizes.length / 2)] : 0;
-
-  return rawLines.map(l => ({
-    text: l.text,
-    heading: medianSize > 0 && l.size > medianSize * 1.15 && l.text.length <= 60,
-    redMarked: false,
-    listItem: false
-  }));
+  return lines;
 }
 
 // ---------- Parser heurístico de linhas (Word/PDF) ----------
 
-const SECTION_RE = /^(?:se(?:c|ç)(?:a|ã)o|parte|m(?:o|ó)dulo)\s*[:\-–]?\s*(.+)$/i;
+// Exige ":" ou "–" depois da palavra (ex: "Seção: Matemática"), para não pegar "parte do governo." no meio de um texto
+const SECTION_RE = /^(?:se(?:c|ç)(?:a|ã)o|parte|m(?:o|ó)dulo)\s*[:\-–]\s*(.+)$/i;
 const QUESTION_RE = /^(?:quest(?:a|ã)o\s*)?0*(\d{1,3})\s*[\.\)\-–]\s*(.*)$/i;
 // Alternativa "de verdade": letra + pontuação (A), (A), A., A -, A:). É o formato esperado.
 const OPTION_RE = /^\(?([a-eA-E])\)?\s*[\.\)\-–:]\s*(\S.*)$/;
@@ -269,6 +302,8 @@ const OPTION_RE = /^\(?([a-eA-E])\)?\s*[\.\)\-–:]\s*(\S.*)$/;
 // só aceita se a letra for exatamente a próxima esperada em sequência (evita confundir com
 // palavras comuns como "A costa..." que também começam com uma letra maiúscula seguida de espaço).
 const LOOSE_OPTION_RE = /^([A-E])\s+(\S.*)$/;
+// Letra de alternativa sem nenhum texto na mesma linha (o conteúdo está em imagem no arquivo)
+const BARE_OPTION_RE = /^\(?([a-eA-E])\)?\s*[.\-–:]?$/;
 const ANSWER_RE = /^(?:gabarito|resposta(?:\s+correta)?|correta)\s*[:\-–]?\s*\(?([a-eA-E])\)?/i;
 
 // Tira travessões/pontos decorativos que costumam cercar o título da seção
@@ -280,7 +315,10 @@ function cleanHeadingText(line: string): string {
 function looksLikeSectionHeading(line: string): boolean {
   if (SECTION_RE.test(line)) return true;
   const trimmed = cleanHeadingText(line);
-  if (trimmed.length < 3 || trimmed.length > 45) return false;
+  // Mínimo de 5 caracteres: evita que uma sigla solta em caixa alta (ex: "LCD.") vire seção
+  if (trimmed.length < 5 || trimmed.length > 45) return false;
+  // Título de seção não tem parênteses: "(CNBB)." no meio de uma alternativa não é cabeçalho
+  if (/[()]/.test(trimmed)) return false;
   if (QUESTION_RE.test(trimmed) || OPTION_RE.test(trimmed)) return false;
   const letters = trimmed.replace(/[^A-Za-zÀ-ÿ]/g, '');
   // Exige pelo menos 3 letras (evita falso positivo em siglas/numerações curtas tipo "I.", "OK")
@@ -329,6 +367,9 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   };
 
   let anyRedMarked = false;
+  // Questões com letras de alternativa mas sem texto nelas (conteúdo em imagem): ficam objetivas
+  const bareOptionQuestions = new Set<ImportedQuestion>();
+  const questionNumbers = new Map<ImportedQuestion, number>();
 
   for (const { text: line, heading, redMarked, listItem } of lines) {
     const explicitHeading = heading || SECTION_RE.test(line) || looksLikeSectionHeading(line);
@@ -346,7 +387,12 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       continue;
     }
 
-    const questionMatch = QUESTION_RE.exec(line);
+    let questionMatch = QUESTION_RE.exec(line);
+    // Dentro de uma seção já numerada, um número igual ou menor que o último é quebra de linha
+    // do enunciado (ex: "...pontos P(2," + "4) e Q(10, 12)?"), não uma nova questão
+    if (questionMatch && currentQuestion && anyExplicitHeading && parseInt(questionMatch[1], 10) <= lastQuestionNumber) {
+      questionMatch = null;
+    }
     let optionMatch = !questionMatch ? OPTION_RE.exec(line) : null;
     if (!optionMatch && !questionMatch && currentQuestion) {
       const loose = LOOSE_OPTION_RE.exec(line);
@@ -357,6 +403,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     // Alternativa sem NENHUMA letra digitada (a numeração "a) b) c)..." é gerada automaticamente
     // pela lista do Word, então só existe no texto o conteúdo da alternativa em si).
     const isImplicitListOption = !optionMatch && !questionMatch && listItem && !!currentQuestion && lastOptionIndex < 4;
+    const bareMatch = !optionMatch && !questionMatch ? BARE_OPTION_RE.exec(line) : null;
 
     if (questionMatch) {
       const number = parseInt(questionMatch[1], 10);
@@ -379,6 +426,19 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
         difficulty: 'Médio',
         points: 1
       };
+      questionNumbers.set(currentQuestion, number);
+      continue;
+    }
+
+    if (bareMatch && currentQuestion) {
+      const idx = LETTER_INDEX[bareMatch[1].toLowerCase()];
+      currentQuestion.options[idx] = currentQuestion.options[idx] ?? '';
+      if (redMarked) {
+        currentQuestion.correctAnswer = idx;
+        anyRedMarked = true;
+      }
+      bareOptionQuestions.add(currentQuestion);
+      lastOptionIndex = idx;
       continue;
     }
 
@@ -416,7 +476,8 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       q.subject = q.subject || section.name;
       for (let i = 0; i < 5; i++) if (!q.options[i]) q.options[i] = q.options[i] || '';
       const filled = q.options.filter(o => o.trim()).length;
-      if (filled < 2) {
+      // Alternativas em imagem continuam objetivas (para preencher); só vira dissertativa sem letras
+      if (filled < 2 && !bareOptionQuestions.has(q)) {
         q.type = 'essay';
         q.options = ['', '', '', '', ''];
       }
@@ -435,6 +496,14 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     }
     if (!anyRedMarked && totalQuestions > 0) {
       warnings.push('Não encontrei alternativas marcadas em vermelho, então o gabarito não foi identificado automaticamente (ficou "A" por padrão) — confira e corrija manualmente.');
+    }
+    const bareNumbers = sections
+      .flatMap(s => s.questions)
+      .filter(q => bareOptionQuestions.has(q) && q.options.every(o => !o.trim()))
+      .map(q => questionNumbers.get(q))
+      .filter((n): n is number => n !== undefined);
+    if (bareNumbers.length > 0) {
+      warnings.push(`Questão(ões) ${bareNumbers.join(', ')}: as alternativas estão como imagem no arquivo e não têm texto para ler. Preencha o texto delas manualmente.`);
     }
     if (essayCount > 0) {
       warnings.push(`${essayCount} questão(ões) ficaram como dissertativa porque não achei ao menos 2 alternativas nela(s) — confira a formatação das alternativas dessas questões.`);
@@ -514,150 +583,14 @@ function parseSpreadsheet(buffer: ArrayBuffer): ImportResult {
   return { sections, warnings };
 }
 
-// ---------- Imagens do Word -> texto (Claude Vision, via servidor) ----------
-
-const MAX_IMAGE_SIDE = 1600;
-const TRANSCRIBE_BATCH = 8;
-const TRANSCRIBE_URL = `https://${projectId}.supabase.co/functions/v1/make-server-83358821/ai/transcribe-images`;
-
-// Reduz a imagem (lado maior até MAX_IMAGE_SIDE) e converte para JPEG com fundo branco.
-// Imagens que o navegador não consegue decodificar (EMF/WMF, por exemplo) devolvem null.
-async function blobToScaledDataUrl(blob: Blob): Promise<string | null> {
-  try {
-    const bitmap = await createImageBitmap(blob);
-    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
-    const width = Math.max(1, Math.round(bitmap.width * scale));
-    const height = Math.max(1, Math.round(bitmap.height * scale));
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return null;
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, width, height);
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    bitmap.close?.();
-    return canvas.toDataURL('image/jpeg', 0.92);
-  } catch {
-    return null;
-  }
-}
-
-// Troca cada imagem das linhas pelo texto transcrito e refaz as linhas (uma por quebra de linha).
-// Retorna as linhas prontas para o parser, mais avisos caso alguma imagem não pôde ser lida.
-async function resolveImageLines(
-  lines: DocLine[],
-  readImage: (path: string) => Promise<Blob | null>
-): Promise<{ lines: DocLine[]; warnings: string[] }> {
-  const warnings: string[] = [];
-  if (!lines.some(l => l.images?.length)) return { lines, warnings };
-
-  // Carrega e reduz cada imagem uma vez, mesmo que apareça em vários lugares
-  const scaled = new Map<string, string | null>();
-  for (const line of lines) {
-    for (const path of line.images ?? []) {
-      if (scaled.has(path)) continue;
-      const blob = await readImage(path);
-      scaled.set(path, blob ? await blobToScaledDataUrl(blob) : null);
-    }
-  }
-
-  // Ocorrências legíveis, na ordem do documento
-  const jobs: { lineIndex: number; imageIndex: number; dataUrl: string }[] = [];
-  let unreadable = 0;
-  lines.forEach((line, lineIndex) => {
-    (line.images ?? []).forEach((path, imageIndex) => {
-      const dataUrl = scaled.get(path);
-      if (dataUrl) jobs.push({ lineIndex, imageIndex, dataUrl });
-      else unreadable++;
-    });
-  });
-  if (unreadable > 0) {
-    warnings.push(`${unreadable} imagem(ns) do arquivo não puderam ser lidas (formato não suportado pelo navegador). Essas partes ficaram de fora.`);
-  }
-
-  const token = localStorage.getItem('access_token');
-  const transcribed = new Map<string, { text: string; red: boolean }>();
-  if (jobs.length > 0 && !token) {
-    warnings.push('Não consegui ler as imagens do arquivo porque a sessão expirou. Entre de novo e importe.');
-  } else {
-    for (let start = 0; start < jobs.length && token; start += TRANSCRIBE_BATCH) {
-      const batch = jobs.slice(start, start + TRANSCRIBE_BATCH);
-      try {
-        const response = await fetch(TRANSCRIBE_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-          body: JSON.stringify({ images: batch.map(j => j.dataUrl) }),
-        });
-        const data = await response.json();
-        if (!response.ok || !Array.isArray(data?.results)) {
-          throw new Error(data?.error || `HTTP ${response.status}`);
-        }
-        batch.forEach((job, i) => transcribed.set(`${job.lineIndex}:${job.imageIndex}`, {
-          text: String(data.results[i]?.text ?? ''),
-          red: data.results[i]?.red === true,
-        }));
-      } catch (error) {
-        console.error('Error transcribing Word images:', error);
-        warnings.push('Não consegui transcrever algumas imagens do arquivo (erro na leitura por IA). Revise as questões que dependem delas.');
-        break;
-      }
-    }
-  }
-
-  // Letra de alternativa que ficou como texto ("A)") seguida do conteúdo que está na imagem:
-  // as duas partes precisam ficar na mesma linha para o parser reconhecer a alternativa.
-  const LABEL_ONLY = /^\(?[a-eA-E]\)?\s*[.\-–:]?$/;
-
-  const rebuilt: DocLine[] = [];
-  lines.forEach((line, lineIndex) => {
-    const pieces: { text: string; red: boolean }[] = [];
-    const parts = [{ text: line.text, red: false }];
-    (line.images ?? []).forEach((_, imageIndex) => {
-      const t = transcribed.get(`${lineIndex}:${imageIndex}`);
-      parts.push({ text: t?.text ?? '', red: t?.red ?? false });
-    });
-    parts.forEach((part) => {
-      part.text.split('\n').map(s => s.trim()).filter(Boolean).forEach((seg) => {
-        const prev = pieces[pieces.length - 1];
-        if (prev && LABEL_ONLY.test(prev.text)) {
-          prev.text = `${prev.text} ${seg}`;
-          prev.red = prev.red || part.red;
-        } else {
-          pieces.push({ text: seg, red: part.red });
-        }
-      });
-    });
-    // Parágrafo só com imagem logo depois de uma linha só com a letra ("A)"): junta as duas
-    const last = rebuilt[rebuilt.length - 1];
-    if (!line.text && last && LABEL_ONLY.test(last.text) && pieces.length > 0) {
-      const first = pieces.shift()!;
-      last.text = `${last.text} ${first.text}`;
-      last.redMarked = last.redMarked || first.red;
-    }
-    pieces.forEach((piece, i) => {
-      rebuilt.push({
-        text: piece.text,
-        heading: i === 0 && line.heading,
-        redMarked: line.redMarked || piece.red,
-        listItem: i === 0 && line.listItem,
-      });
-    });
-  });
-
-  return { lines: rebuilt, warnings };
-}
-
 // ---------- Ponto de entrada ----------
 
 export async function importExamFile(file: File): Promise<ImportResult> {
   const name = file.name.toLowerCase();
   try {
     if (name.endsWith('.docx')) {
-      const { lines, readImage } = await extractLinesFromDocx(file);
-      const resolved = await resolveImageLines(lines, readImage);
-      const parsed = parseLinesIntoSections(resolved.lines);
-      return { sections: parsed.sections, warnings: [...resolved.warnings, ...parsed.warnings] };
+      const lines = await extractLinesFromDocx(file);
+      return parseLinesIntoSections(lines);
     }
     if (name.endsWith('.pdf')) {
       const lines = await extractLinesFromPdf(file);
