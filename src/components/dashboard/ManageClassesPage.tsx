@@ -24,7 +24,18 @@ import {
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from '../../utils/toast';
 import { apiService } from '../../utils/api';
-import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
+import { DeleteClassDialog, DeleteClassMode } from './DeleteClassDialog';
+
+// Executa uma ação em cada item, em lotes de 10 para não sobrecarregar a API.
+// Devolve quantos falharam (erro de rede ou resposta sem sucesso).
+async function runInBatches(ids: string[], action: (id: string) => Promise<any>, size = 10): Promise<number> {
+  let failed = 0;
+  for (let i = 0; i < ids.length; i += size) {
+    const results = await Promise.allSettled(ids.slice(i, i + size).map(action));
+    failed += results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value?.success === false)).length;
+  }
+  return failed;
+}
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 import {
   STAGE_LABELS,
@@ -387,12 +398,20 @@ export function ManageClassesPage() {
     }
   };
 
-  const handleDeleteClass = async () => {
+  const handleDeleteClass = async (mode: DeleteClassMode, studentIds: string[]) => {
     if (!deletingClass) return;
     const id = deletingClass.id;
 
     try {
       setDeleteLoading(true);
+      // Alunos primeiro: excluídos (ou só desvinculados, se a turma for mantida) antes da turma
+      let studentsFailed = 0;
+      if (mode === 'class-only') {
+        studentsFailed = await runInBatches(studentIds, (sid) => apiService.updateStudent(sid, { class: '', grade: '' }));
+      } else if (studentIds.length > 0) {
+        studentsFailed = await runInBatches(studentIds, (sid) => apiService.deleteStudent(sid));
+      }
+
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/classes/${id}`, {
         method: 'DELETE',
         headers: { 'Authorization': `Bearer ${publicAnonKey}` }
@@ -406,7 +425,14 @@ export function ManageClassesPage() {
       }
       
       setDeletingClass(null);
-      toast.success('Turma excluída com sucesso!');
+      if (mode === 'class-only') {
+        toast.success(studentIds.length > 0 ? `Turma excluída. ${studentIds.length} aluno(s) ficaram sem turma.` : 'Turma excluída com sucesso!');
+      } else {
+        toast.success(`Turma e ${studentIds.length} aluno(s) excluídos com sucesso!`);
+      }
+      if (studentsFailed > 0) {
+        toast.warning(`${studentsFailed} aluno(s) não puderam ser ${mode === 'class-only' ? 'desvinculados' : 'excluídos'}. Confira a lista de alunos.`);
+      }
       await loadClasses();
     } catch (error) {
       console.error('Error deleting class:', error);
@@ -867,14 +893,8 @@ export function ManageClassesPage() {
         </CardContent>
       </Card>
 
-      <ConfirmDeleteDialog
-        open={!!deletingClass}
-        title="Excluir turma?"
-        itemName={deletingClass?.name}
-        itemDetail={deletingClass ? [deletingClass.grade, deletingClass.shift, deletingClass.year].filter(Boolean).join(' · ') : undefined}
-        warning={deletingClass && deletingClass.studentCount > 0 ? (
-          <>Esta turma tem <strong>{deletingClass.studentCount}</strong> aluno{deletingClass.studentCount !== 1 ? 's' : ''} vinculado{deletingClass.studentCount !== 1 ? 's' : ''}.</>
-        ) : undefined}
+      <DeleteClassDialog
+        classItem={deletingClass}
         loading={deleteLoading}
         onConfirm={handleDeleteClass}
         onCancel={() => setDeletingClass(null)}
