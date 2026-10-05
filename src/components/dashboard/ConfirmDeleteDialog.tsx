@@ -24,6 +24,28 @@ type ConfirmDeleteDialogProps = {
   onCancel: () => void;
 };
 
+// Paleta por tom: exclusão (vermelho forte) ou atenção (âmbar forte)
+const TONES = {
+  danger: {
+    hero: 'from-red-100 via-red-50 to-white',
+    orb: 'from-rose-500 to-red-700 shadow-red-500/50',
+    accent: 'from-rose-500 via-red-600 to-rose-700',
+    title: 'text-red-900',
+    button: 'from-rose-500 to-red-700 hover:from-rose-600 hover:to-red-800 shadow-red-500/40',
+    itemBox: 'border-l-red-600 bg-red-50',
+    spinner: 'Excluindo...'
+  },
+  warning: {
+    hero: 'from-amber-100 via-amber-50 to-white',
+    orb: 'from-amber-400 to-orange-600 shadow-amber-500/50',
+    accent: 'from-amber-400 via-orange-500 to-amber-600',
+    title: 'text-amber-900',
+    button: 'from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/40',
+    itemBox: 'border-l-amber-500 bg-amber-50',
+    spinner: 'Aguarde...'
+  }
+};
+
 // Modal de confirmação de exclusão (substitui o window.confirm do navegador)
 export function ConfirmDeleteDialog({
   open,
@@ -41,48 +63,53 @@ export function ConfirmDeleteDialog({
   onCancel
 }: ConfirmDeleteDialogProps) {
   const isDanger = tone === 'danger';
+  const t = TONES[isDanger ? 'danger' : 'warning'];
+  const Icon = isDanger ? Trash2 : AlertTriangle;
+
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !loading) onCancel(); }}>
-      <DialogContent className="sm:max-w-[420px] text-center">
-        <div className="flex flex-col items-center gap-4 pt-2">
-          <div className={`w-16 h-16 rounded-full flex items-center justify-center ring-8 ${isDanger ? 'bg-red-100 ring-red-50' : 'bg-amber-100 ring-amber-50'}`}>
-            {isDanger
-              ? <Trash2 className="w-8 h-8 text-red-600" />
-              : <AlertTriangle className="w-8 h-8 text-amber-600" />}
+      <DialogContent className="sm:max-w-[440px] p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center">
+        <div className={`relative flex flex-col items-center gap-3 bg-gradient-to-b px-6 pt-9 pb-5 ${t.hero}`}>
+          <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${t.accent}`} />
+          <div className="relative animate-in zoom-in-50 fade-in duration-500 motion-reduce:animate-none">
+            <div className={`w-20 h-20 rounded-full bg-gradient-to-br shadow-xl flex items-center justify-center ring-4 ring-white ${t.orb}`}>
+              <Icon className="w-9 h-9 text-white drop-shadow" strokeWidth={2.5} />
+            </div>
           </div>
-
-          <div className="space-y-1">
-            <DialogTitle className="text-xl text-slate-900">{title}</DialogTitle>
-            <DialogDescription className="text-slate-500">{description}</DialogDescription>
+          <div className="space-y-1.5 px-2">
+            <DialogTitle className={`text-xl font-bold tracking-tight ${t.title}`}>{title}</DialogTitle>
+            <DialogDescription className="text-base font-medium text-slate-600">{description}</DialogDescription>
           </div>
+        </div>
 
+        <div className="flex flex-col gap-4 bg-white px-6 pb-6 pt-4">
           {itemName && (
-            <div className="w-full rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left">
-              <p className="font-medium text-slate-800 break-words">{itemName}</p>
-              {itemDetail && <p className="text-xs text-slate-500 mt-1">{itemDetail}</p>}
+            <div className={`w-full rounded-xl border-l-4 px-4 py-3 text-left shadow-sm ${t.itemBox}`}>
+              <p className="font-semibold text-slate-900 break-words">{itemName}</p>
+              {itemDetail && <p className="text-xs font-medium text-slate-600 mt-1">{itemDetail}</p>}
             </div>
           )}
 
           {warning && (
-            <div className="w-full flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-sm text-amber-800">
-              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+            <div className="w-full flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2.5 text-left text-sm font-medium text-amber-900">
+              <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0 text-amber-600" />
               <span>{warning}</span>
             </div>
           )}
 
           {children && <div className="w-full text-left text-sm">{children}</div>}
 
-          <div className="w-full grid grid-cols-2 gap-2 pt-1">
-            <Button variant="outline" onClick={onCancel} disabled={loading} autoFocus>
+          <div className="w-full grid grid-cols-2 gap-3 pt-1">
+            <Button variant="outline" onClick={onCancel} disabled={loading} autoFocus className="h-11 border-2 font-semibold">
               Cancelar
             </Button>
             <Button
               onClick={onConfirm}
               disabled={loading || confirmDisabled}
-              className={`text-white ${isDanger ? 'bg-red-600 hover:bg-red-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+              className={`h-11 font-semibold text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 ${t.button}`}
             >
-              {isDanger && <Trash2 className="w-4 h-4 mr-2" />}
-              {loading ? (isDanger ? 'Excluindo...' : 'Aguarde...') : confirmLabel}
+              {isDanger && !loading && <Trash2 className="w-4 h-4 mr-2" />}
+              {loading ? t.spinner : confirmLabel}
             </Button>
           </div>
         </div>
