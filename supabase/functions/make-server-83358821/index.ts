@@ -2806,6 +2806,74 @@ Avalie a resposta do aluno atribuindo uma nota de 0 a ${maxScore} (pode usar cas
   }
 });
 
+// Transcreve o texto contido em imagens (ex: enunciado ou alternativa de questão colada como figura
+// no Word) para texto puro, usando Claude Vision. Recebe até 8 imagens por chamada e devolve o texto
+// de cada uma na mesma ordem. Imagens sem texto (figuras, gráficos sem legenda) voltam vazias.
+app.post('/make-server-83358821/ai/transcribe-images', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const images: unknown[] = Array.isArray(body?.images) ? body.images : [];
+
+    if (images.length === 0) {
+      return c.json({ success: true, texts: [] });
+    }
+    if (images.length > 8) {
+      return c.json({ error: 'Envie no máximo 8 imagens por chamada' }, 400);
+    }
+
+    const imageBlocks = images.map((img) => {
+      const dataUrl = String(img || '');
+      const match = dataUrl.match(/^data:(image\/(?:png|jpeg|gif|webp));base64,(.*)$/s);
+      if (!match) {
+        throw new Error('Formato de imagem inválido (use PNG, JPEG, GIF ou WEBP)');
+      }
+      return {
+        type: 'image',
+        source: { type: 'base64', media_type: match[1], data: match[2] },
+      };
+    });
+
+    const prompt = `Você está transcrevendo imagens de questões de prova em português (matemática, português, etc.).
+Recebeu ${images.length} imagem(ns), na ordem em que aparecem. Para CADA uma:
+- "text": transcreva exatamente o conteúdo, preservando acentos, números, frações, raízes (use "√" para raiz quadrada), unidades e a letra da alternativa caso ela esteja escrita na imagem (ex: "A) √56 m"). Não resuma, não corrija e não explique.
+- "red": true SOMENTE se o conteúdo inteiro estiver escrito em vermelho (cor de gabarito); false caso contrário.
+Se a imagem não tiver texto (apenas uma figura, gráfico ou desenho sem legenda), devolva "text" como string vazia.
+Responda pela tool return_result com "items": uma entrada por imagem, na mesma ordem.`;
+
+    const result = await callClaude(
+      [...imageBlocks, { type: 'text', text: prompt }],
+      {
+        type: 'object',
+        properties: {
+          items: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                text: { type: 'string' },
+                red: { type: 'boolean' },
+              },
+              required: ['text', 'red'],
+            },
+          },
+        },
+        required: ['items'],
+      }
+    );
+
+    const rawItems: any[] = Array.isArray(result.items) ? result.items : [];
+    const results = images.map((_, i) => ({
+      text: String(rawItems[i]?.text ?? '').trim(),
+      red: rawItems[i]?.red === true,
+    }));
+
+    return c.json({ success: true, results });
+  } catch (error) {
+    console.error('Error transcribing images with AI:', error);
+    return c.json({ error: 'Failed to transcribe images: ' + (error.message || 'Unknown error') }, 500);
+  }
+});
+
 // Health check (NO AUTH REQUIRED - must be accessible for testing)
 app.get('/make-server-83358821/health', (c) => {
   return c.json({ 
