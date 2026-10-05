@@ -155,7 +155,7 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
             </div>
 
             {/* Corpo cinza: mensagem, detalhes, botões e barra de tempo */}
-            <div className="relative -mt-6 mx-5 flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white px-6 pb-6 pt-6 shadow-lg">
+            <div className="relative flex flex-col items-stretch gap-4 bg-white px-6 pb-7 pt-6 text-center">
               {result.message && (
                 <DialogDescription className={`text-base font-medium leading-relaxed whitespace-pre-line ${v.text}`}>
                   {result.message}
@@ -206,7 +206,6 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
                 />
               )}
             </div>
-            <div className="h-5" />
           </>
         )}
       </DialogContent>
