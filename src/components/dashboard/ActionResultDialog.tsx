@@ -28,55 +28,66 @@ type ActionResultDialogProps = {
   autoCloseMs?: number | null;
 };
 
-// Paleta forte de cada tipo de resultado (contraste alto, cores saturadas e legíveis)
+// Cada tipo tem linguagem visual própria; o corpo é cinza, como o restante do sistema
 const VARIANTS = {
   success: {
-    hero: 'from-emerald-100 via-emerald-50 to-white',
-    orb: 'from-emerald-400 to-green-600 shadow-emerald-500/50',
-    halo: 'bg-emerald-400',
-    accent: 'from-emerald-400 via-green-500 to-emerald-600',
-    title: 'text-emerald-900',
-    text: 'text-emerald-800',
-    details: 'border-l-emerald-500 bg-emerald-50 text-emerald-900',
-    button: 'from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 shadow-emerald-500/40',
-    bar: 'from-emerald-400 to-green-600',
-    icon: CheckCircle2
+    // Sucesso: faixa de confirmação com anéis que se expandem ao redor do ícone
+    band: 'bg-gradient-to-br from-emerald-500 via-green-500 to-teal-600',
+    ring: 'border-emerald-300',
+    iconWrap: 'bg-white text-emerald-600 shadow-emerald-900/30',
+    title: 'text-zinc-900',
+    text: 'text-zinc-600',
+    detail: 'border-emerald-200 bg-emerald-50/70 text-zinc-800',
+    detailDot: 'text-emerald-600',
+    button: 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 shadow-emerald-600/30',
+    bar: 'bg-gradient-to-r from-emerald-400 to-teal-600',
+    pattern: '',
+    icon: CheckCircle2,
+    iconClass: 'w-11 h-11'
   },
   error: {
-    hero: 'from-red-100 via-red-50 to-white',
-    orb: 'from-rose-500 to-red-700 shadow-red-500/50',
-    halo: 'bg-red-500',
-    accent: 'from-rose-500 via-red-600 to-rose-700',
-    title: 'text-red-900',
-    text: 'text-red-800',
-    details: 'border-l-red-600 bg-red-50 text-red-900',
-    button: 'from-rose-500 to-red-700 hover:from-rose-600 hover:to-red-800 shadow-red-500/40',
-    bar: 'from-rose-500 to-red-700',
-    icon: XCircle
+    // Erro: listras de atenção na faixa e ícone que treme ao aparecer
+    band: 'bg-gradient-to-br from-rose-600 via-red-600 to-red-800',
+    ring: 'border-rose-300',
+    iconWrap: 'bg-white text-red-600 shadow-red-900/30',
+    title: 'text-zinc-900',
+    text: 'text-zinc-600',
+    detail: 'border-red-200 bg-red-50/70 text-zinc-800',
+    detailDot: 'text-red-600',
+    button: 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 shadow-red-600/30',
+    bar: 'bg-gradient-to-r from-rose-500 to-red-700',
+    pattern: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 12px, transparent 12px 24px)',
+    icon: XCircle,
+    iconClass: 'w-11 h-11 seice-shake'
   },
   info: {
-    hero: 'from-sky-100 via-sky-50 to-white',
-    orb: 'from-sky-400 to-blue-700 shadow-sky-500/50',
-    halo: 'bg-sky-400',
-    accent: 'from-sky-400 via-blue-500 to-sky-600',
-    title: 'text-sky-900',
-    text: 'text-sky-800',
-    details: 'border-l-sky-500 bg-sky-50 text-sky-900',
-    button: 'from-sky-500 to-blue-700 hover:from-sky-600 hover:to-blue-800 shadow-sky-500/40',
-    bar: 'from-sky-400 to-blue-700',
-    icon: Info
+    band: 'bg-gradient-to-br from-sky-500 via-blue-600 to-indigo-700',
+    ring: 'border-sky-300',
+    iconWrap: 'bg-white text-sky-600 shadow-sky-900/30',
+    title: 'text-zinc-900',
+    text: 'text-zinc-600',
+    detail: 'border-sky-200 bg-sky-50/70 text-zinc-800',
+    detailDot: 'text-sky-600',
+    button: 'bg-gradient-to-r from-sky-500 to-blue-700 hover:from-sky-600 hover:to-blue-800 shadow-sky-600/30',
+    bar: 'bg-gradient-to-r from-sky-400 to-blue-700',
+    pattern: '',
+    icon: Info,
+    iconClass: 'w-11 h-11'
   },
   warning: {
-    hero: 'from-amber-100 via-amber-50 to-white',
-    orb: 'from-amber-400 to-orange-600 shadow-amber-500/50',
-    halo: 'bg-amber-400',
-    accent: 'from-amber-400 via-orange-500 to-amber-600',
-    title: 'text-amber-900',
-    text: 'text-amber-800',
-    details: 'border-l-amber-500 bg-amber-50 text-amber-900',
-    button: 'from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/40',
-    bar: 'from-amber-400 to-orange-600',
-    icon: AlertTriangle
+    // Atenção: listras amarelas de sinalização e ícone pulsando
+    band: 'bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600',
+    ring: 'border-amber-300',
+    iconWrap: 'bg-white text-amber-600 shadow-amber-900/30',
+    title: 'text-zinc-900',
+    text: 'text-zinc-600',
+    detail: 'border-amber-200 bg-amber-50/80 text-zinc-800',
+    detailDot: 'text-amber-600',
+    button: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-600/30',
+    bar: 'bg-gradient-to-r from-amber-400 to-orange-600',
+    pattern: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0 14px, transparent 14px 28px)',
+    icon: AlertTriangle,
+    iconClass: 'w-11 h-11 animate-pulse motion-reduce:animate-none'
   }
 };
 
@@ -88,9 +99,9 @@ function AutoCloseBar({ className, durationMs }: { className: string; durationMs
     return () => cancelAnimationFrame(frame);
   }, []);
   return (
-    <div className="w-full h-1.5 rounded-full bg-slate-200 overflow-hidden">
+    <div className="w-full h-1.5 rounded-full bg-zinc-200 overflow-hidden">
       <div
-        className={`h-full w-full rounded-full bg-gradient-to-r origin-left ${className}`}
+        className={`h-full w-full rounded-full origin-left ${className}`}
         style={{
           transform: started ? 'scaleX(0)' : 'scaleX(1)',
           transition: `transform ${durationMs}ms linear`
@@ -116,39 +127,49 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
 
   return (
     <Dialog open={!!result} onOpenChange={(open) => { if (!open) onClose(); }}>
-      {/* Entrada e saída lentas de propósito: o aviso fica visível o bastante para ser lido */}
-      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6">
+      {/* Mais largo que o padrão e em cinza; entrada e saída lentas para dar tempo de ler */}
+      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-200 bg-zinc-50 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
         {result && (
           <>
-            {/* Cabeçalho com brilho de fundo e o ícone em destaque, que entram em sequência */}
-            <div className={`relative flex flex-col items-center gap-4 overflow-hidden bg-gradient-to-b px-6 pt-10 pb-7 ${v.hero}`}>
-              <span className={`pointer-events-none absolute -top-16 -left-10 h-44 w-44 rounded-full blur-3xl opacity-40 ${v.halo}`} />
-              <span className={`pointer-events-none absolute -bottom-20 -right-10 h-44 w-44 rounded-full blur-3xl opacity-30 ${v.halo}`} />
-              <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${v.accent}`} />
+            {/* Faixa colorida com o ícone; a textura muda conforme o tipo */}
+            <div className={`relative flex flex-col items-center gap-4 overflow-hidden px-8 pt-10 pb-12 ${v.band}`}>
+              {v.pattern && (
+                <div className="pointer-events-none absolute inset-0 opacity-70" style={{ backgroundImage: v.pattern }} />
+              )}
+              <div className="pointer-events-none absolute -top-20 -right-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+
               <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
-                <span className={`absolute inset-0 rounded-full opacity-30 animate-ping motion-reduce:hidden ${v.halo}`} />
-                <div className={`relative w-20 h-20 rounded-full bg-gradient-to-br shadow-xl flex items-center justify-center ring-4 ring-white ${v.orb}`}>
-                  <Icon className="w-10 h-10 text-white drop-shadow" strokeWidth={2.5} />
+                {result.type === 'success' && (
+                  <>
+                    <span className={`absolute inset-0 rounded-full border-4 seice-ring motion-reduce:hidden ${v.ring}`} />
+                    <span className={`absolute inset-0 rounded-full border-4 seice-ring motion-reduce:hidden [animation-delay:0.6s] ${v.ring}`} />
+                  </>
+                )}
+                <div className={`relative w-24 h-24 rounded-full flex items-center justify-center shadow-2xl ring-8 ring-white/30 ${v.iconWrap}`}>
+                  <Icon className={v.iconClass} strokeWidth={2.4} />
                 </div>
               </div>
-              <div className="relative space-y-1.5 px-2 animate-in slide-in-from-bottom-2 fade-in duration-700 delay-500 fill-mode-both motion-reduce:animate-none">
-                <DialogTitle className={`text-xl font-bold tracking-tight ${v.title}`}>
+
+              <div className="relative space-y-1 px-1 animate-in slide-in-from-bottom-2 fade-in duration-700 delay-500 fill-mode-both motion-reduce:animate-none">
+                <DialogTitle className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
                   {result.title}
                 </DialogTitle>
-                {result.message && (
-                  <DialogDescription className={`text-base font-medium whitespace-pre-line leading-relaxed ${v.text}`}>
-                    {result.message}
-                  </DialogDescription>
-                )}
               </div>
             </div>
 
-            {/* Corpo: detalhes, botões e barra de tempo */}
-            <div className="flex flex-col gap-4 bg-white px-6 pb-6 pt-4">
+            {/* Corpo cinza: mensagem, detalhes, botões e barra de tempo */}
+            <div className="relative -mt-6 mx-5 flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white px-6 pb-6 pt-6 shadow-lg">
+              {result.message && (
+                <DialogDescription className={`text-base font-medium leading-relaxed whitespace-pre-line ${v.text}`}>
+                  {result.message}
+                </DialogDescription>
+              )}
               {result.details && result.details.length > 0 && (
-                <ul className={`w-full rounded-xl border-l-4 px-4 py-3 text-sm text-left space-y-1.5 shadow-sm ${v.details}`}>
+                <ul className={`w-full rounded-xl border px-4 py-3 text-sm text-left space-y-1.5 ${v.detail}`}>
                   {result.details.map((d) => (
-                    <li key={d} className="font-medium">• {d}</li>
+                    <li key={d} className="font-medium">
+                      <span className={`mr-1.5 font-bold ${v.detailDot}`}>•</span>{d}
+                    </li>
                   ))}
                 </ul>
               )}
@@ -160,9 +181,9 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
                       autoFocus={idx === 0}
                       variant={action.variant === 'outline' ? 'outline' : 'default'}
                       onClick={action.onClick}
-                      className={`w-full h-11 font-semibold transition-all duration-200 ${
+                      className={`w-full h-12 font-semibold transition-all duration-200 ${
                         action.variant === 'outline'
-                          ? 'border-2'
+                          ? 'border-2 border-zinc-300'
                           : `text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 ${v.button}`
                       }`}
                     >
@@ -175,7 +196,7 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
                 <Button
                   autoFocus
                   onClick={onClose}
-                  className={`w-full h-11 text-base font-semibold text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 ${v.button}`}
+                  className={`w-full h-12 text-base font-semibold text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 ${v.button}`}
                 >
                   OK
                 </Button>
@@ -188,6 +209,7 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: Acti
                 />
               )}
             </div>
+            <div className="h-5" />
           </>
         )}
       </DialogContent>
