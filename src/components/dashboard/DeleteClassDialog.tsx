@@ -97,7 +97,7 @@ export function DeleteClassDialog({ classItem, loading, onCancel, onConfirm }: P
 
   return (
     <Dialog open={!!classItem} onOpenChange={(open) => { if (!open && !loading) onCancel(); }}>
-      <DialogContent className="sm:max-w-xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden rounded-3xl before:hidden">
+      <DialogContent className="sm:max-w-3xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden rounded-3xl before:hidden">
         <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700 px-7 py-6">
           <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full bg-red-500/25 blur-3xl" />
           <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-red-700 via-red-500 to-red-700" />
