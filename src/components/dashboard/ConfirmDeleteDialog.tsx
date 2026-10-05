@@ -29,6 +29,7 @@ const TONES = {
   danger: {
     hero: 'from-red-100 via-red-50 to-white',
     orb: 'from-rose-500 to-red-700 shadow-red-500/50',
+    glow: 'bg-red-500',
     accent: 'from-rose-500 via-red-600 to-rose-700',
     title: 'text-red-900',
     button: 'from-rose-500 to-red-700 hover:from-rose-600 hover:to-red-800 shadow-red-500/40',
@@ -38,6 +39,7 @@ const TONES = {
   warning: {
     hero: 'from-amber-100 via-amber-50 to-white',
     orb: 'from-amber-400 to-orange-600 shadow-amber-500/50',
+    glow: 'bg-amber-400',
     accent: 'from-amber-400 via-orange-500 to-amber-600',
     title: 'text-amber-900',
     button: 'from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/40',
@@ -68,10 +70,12 @@ export function ConfirmDeleteDialog({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !loading) onCancel(); }}>
-      <DialogContent className="sm:max-w-[440px] p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center">
-        <div className={`relative flex flex-col items-center gap-3 bg-gradient-to-b px-6 pt-9 pb-5 ${t.hero}`}>
+      {/* Entrada e saída lentas de propósito: o usuário precisa de tempo para ler antes de confirmar */}
+      <DialogContent className="sm:max-w-[440px] p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6">
+        <div className={`relative flex flex-col items-center gap-3 overflow-hidden bg-gradient-to-b px-6 pt-10 pb-6 ${t.hero}`}>
+          <span className={`pointer-events-none absolute -top-16 -left-10 h-44 w-44 rounded-full blur-3xl opacity-40 ${t.glow}`} />
           <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${t.accent}`} />
-          <div className="relative animate-in zoom-in-50 fade-in duration-500 motion-reduce:animate-none">
+          <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
             <div className={`w-20 h-20 rounded-full bg-gradient-to-br shadow-xl flex items-center justify-center ring-4 ring-white ${t.orb}`}>
               <Icon className="w-9 h-9 text-white drop-shadow" strokeWidth={2.5} />
             </div>
