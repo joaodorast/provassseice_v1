@@ -280,8 +280,12 @@ app.put('/make-server-83358821/user/settings', requireAuth, async (c) => {
   }
 });
 
+// Turmas e cursos (séries) são de cada login: a chave guardada inclui o id do usuário.
+const classesKey = (c: any) => `classes-list:${c.get('user').id}`;
+const seriesKey = (c: any) => `series-list:${c.get('user').id}`;
+
 // Subjects and Series Management
-app.get('/make-server-83358821/subjects-series', async (c) => {
+app.get('/make-server-83358821/subjects-series', requireAuth, async (c) => {
   try {
     // Get subjects and series from KV store (global, not per user)
     const subjects = await kv.get('subjects') || [
@@ -295,7 +299,7 @@ app.get('/make-server-83358821/subjects-series', async (c) => {
       'Artes'
     ];
     
-    const series = await kv.get('series') || [
+    const series = await kv.get(seriesKey(c)) || [
       '1º Ano',
       '2º Ano',
       '3º Ano',
@@ -317,7 +321,7 @@ app.get('/make-server-83358821/subjects-series', async (c) => {
   }
 });
 
-app.put('/make-server-83358821/subjects-series', async (c) => {
+app.put('/make-server-83358821/subjects-series', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
     const { subjects, series } = body;
@@ -333,13 +337,13 @@ app.put('/make-server-83358821/subjects-series', async (c) => {
     
     // Update series if provided
     if (series && Array.isArray(series)) {
-      await kv.set('series', series);
+      await kv.set(seriesKey(c), series);
     }
     
     return c.json({ 
       success: true, 
       subjects: subjects || await kv.get('subjects'),
-      series: series || await kv.get('series')
+      series: series || await kv.get(seriesKey(c))
     });
   } catch (error) {
     console.error('Error updating subjects and series:', error);
@@ -348,9 +352,9 @@ app.put('/make-server-83358821/subjects-series', async (c) => {
 });
 
 // Classes Management
-app.get('/make-server-83358821/classes', async (c) => {
+app.get('/make-server-83358821/classes', requireAuth, async (c) => {
   try {
-    const classes = await kv.get('classes') || [];
+    const classes = await kv.get(classesKey(c)) || [];
     return c.json({ success: true, classes });
   } catch (error) {
     console.error('Error fetching classes:', error);
@@ -358,7 +362,7 @@ app.get('/make-server-83358821/classes', async (c) => {
   }
 });
 
-app.post('/make-server-83358821/classes', async (c) => {
+app.post('/make-server-83358821/classes', requireAuth, async (c) => {
   try {
     const body = await c.req.json();
     const { name, grade, shift, year } = body;
@@ -367,7 +371,7 @@ app.post('/make-server-83358821/classes', async (c) => {
       return c.json({ error: 'Name, grade, and shift are required' }, 400);
     }
     
-    const classes = await kv.get('classes') || [];
+    const classes = await kv.get(classesKey(c)) || [];
     const newClass = {
       id: `class-${Date.now()}`,
       name,
@@ -379,7 +383,7 @@ app.post('/make-server-83358821/classes', async (c) => {
     };
     
     classes.push(newClass);
-    await kv.set('classes', classes);
+    await kv.set(classesKey(c), classes);
     
     return c.json({ success: true, class: newClass });
   } catch (error) {
@@ -388,13 +392,13 @@ app.post('/make-server-83358821/classes', async (c) => {
   }
 });
 
-app.put('/make-server-83358821/classes/:id', async (c) => {
+app.put('/make-server-83358821/classes/:id', requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
     const { name, grade, shift, year } = body;
     
-    const classes = await kv.get('classes') || [];
+    const classes = await kv.get(classesKey(c)) || [];
     const classIndex = classes.findIndex((cls: any) => cls.id === id);
     
     if (classIndex === -1) {
@@ -410,7 +414,7 @@ app.put('/make-server-83358821/classes/:id', async (c) => {
       updatedAt: new Date().toISOString()
     };
     
-    await kv.set('classes', classes);
+    await kv.set(classesKey(c), classes);
     
     return c.json({ success: true, class: classes[classIndex] });
   } catch (error) {
@@ -419,18 +423,18 @@ app.put('/make-server-83358821/classes/:id', async (c) => {
   }
 });
 
-app.delete('/make-server-83358821/classes/:id', async (c) => {
+app.delete('/make-server-83358821/classes/:id', requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
     
-    const classes = await kv.get('classes') || [];
+    const classes = await kv.get(classesKey(c)) || [];
     const updatedClasses = classes.filter((cls: any) => cls.id !== id);
     
     if (classes.length === updatedClasses.length) {
       return c.json({ error: 'Class not found' }, 404);
     }
     
-    await kv.set('classes', updatedClasses);
+    await kv.set(classesKey(c), updatedClasses);
     
     return c.json({ success: true });
   } catch (error) {
