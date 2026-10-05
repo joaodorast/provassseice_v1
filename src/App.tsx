@@ -64,7 +64,12 @@ function App() {
       if (event === 'PASSWORD_RECOVERY') {
         setShowPasswordReset(true);
         setLoading(false);
-      } else if (event === 'SIGNED_IN' && session?.user && session?.access_token) {
+      } else if (
+        (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') &&
+        session?.user && session?.access_token
+      ) {
+        // TOKEN_REFRESHED: o Supabase renova o token sozinho (cerca de 1 vez por hora). Sem atualizar
+        // o localStorage aqui, as chamadas à API continuavam com o token antigo e davam 401.
         localStorage.setItem('access_token', session.access_token);
         setUser(session.user as User);
         setLoading(false);
