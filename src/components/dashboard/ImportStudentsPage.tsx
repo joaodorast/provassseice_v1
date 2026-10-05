@@ -33,6 +33,9 @@ import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClasses
 import { apiService } from '../../utils/api';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
+// Valor do filtro de turma para listar só os alunos que ainda não têm turma
+const NO_CLASS_FILTER = '__sem_turma__';
+
 type Student = {
   id: string;
   name: string;
@@ -86,6 +89,8 @@ export function ManageStudentsPage() {
   const [registeredClasses, setRegisteredClasses] = useState<{ id: string; name: string; grade: string }[]>([]);
   // Exclusão: alunos marcados na tabela e a confirmação pendente (alunos ou turma inteira)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  // Turma escolhida no seletor de atribuição em massa
+  const [bulkClassId, setBulkClassId] = useState('');
   const [pendingDelete, setPendingDelete] = useState<
     { kind: 'students'; ids: string[] } | { kind: 'class'; name: string } | null
   >(null);
@@ -279,6 +284,37 @@ export function ManageStudentsPage() {
     }
   };
 
+  // Atribui a turma escolhida a todos os alunos selecionados (só o campo de turma é alterado)
+  const handleAssignClass = async () => {
+    const cls = registeredClasses.find(c => c.id === bulkClassId);
+    if (!cls || selectedFiltered.length === 0) return;
+    const ids = selectedFiltered.map(s => s.id);
+    try {
+      setLoading(true);
+      let failed = 0;
+      for (let i = 0; i < ids.length; i += 10) {
+        const responses = await Promise.all(
+          ids.slice(i, i + 10).map(id => apiService.updateStudent(id, { class: cls.name }))
+        );
+        failed += responses.filter(r => !r?.success).length;
+      }
+      setSelectedIds(new Set());
+      setBulkClassId('');
+      await loadStudents();
+      if (failed > 0) {
+        toast.warning(`${failed} aluno(s) não receberam a turma "${cls.name}". Tente de novo.`);
+      } else {
+        toast.success(`Turma "${cls.name}" atribuída a ${ids.length} aluno(s)`);
+      }
+    } catch (error) {
+      console.error('Error assigning class:', error);
+      await loadStudents();
+      toast.error('Erro ao atribuir turma: ' + ((error as Error)?.message || 'erro desconhecido'));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleDeleteClass = async (className: string) => {
     const classesToDelete = registeredClassesMatching(className);
     const studentIds = deleteClassStudentsToo ? studentsOfClass(className).map(s => s.id) : [];
@@ -427,7 +463,8 @@ export function ManageStudentsPage() {
     const matchesRegistration = !filterRegistration.trim() ||
       normalize(student.registration).includes(normalize(filterRegistration));
     const matchesCourse = filterCourse === 'all' || classBelongsToCourse(student.class, filterCourse);
-    const matchesClass = filterClass === 'all' || normalize(student.class) === normalize(filterClass);
+    const matchesClass = filterClass === 'all'
+      || (filterClass === NO_CLASS_FILTER ? !student.class?.trim() : normalize(student.class) === normalize(filterClass));
     return matchesName && matchesRegistration && matchesCourse && matchesClass;
   });
 
@@ -735,6 +772,9 @@ export function ManageStudentsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas as turmas</SelectItem>
+                  <SelectItem value={NO_CLASS_FILTER}>
+                    Sem turma <span className="text-muted-foreground">({students.filter(s => !s.class?.trim()).length} alunos)</span>
+                  </SelectItem>
                   {classOptions.map(className => (
                     <SelectItem key={className} value={className}>
                       {className} <span className="text-muted-foreground">({studentsInClass(className)} alunos)</span>
@@ -755,7 +795,7 @@ export function ManageStudentsPage() {
             </div>
           </div>
 
-          {hasActiveFilter && (
+          {(hasActiveFilter || selectedFiltered.length > 0) && (
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3 text-sm text-slate-600">
               <span>
                 {filteredStudents.length} aluno(s) encontrado(s)
@@ -773,7 +813,26 @@ export function ManageStudentsPage() {
                     Apagar selecionados ({selectedFiltered.length})
                   </Button>
                 )}
-                {filterClass !== 'all' && (
+                {selectedFiltered.length > 0 && registeredClasses.length > 0 && (
+                  <div className="flex items-center gap-2">
+                    <Select value={bulkClassId} onValueChange={setBulkClassId}>
+                      <SelectTrigger className="h-8 w-56 bg-white">
+                        <SelectValue placeholder="Escolher turma" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {registeredClasses.map(c => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}{c.grade ? ` - ${c.grade}` : ''}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button size="sm" disabled={loading || !bulkClassId} onClick={handleAssignClass}>
+                      Atribuir turma ({selectedFiltered.length})
+                    </Button>
+                  </div>
+                )}
+                {filterClass !== 'all' && filterClass !== NO_CLASS_FILTER && (
                   <Button
                     variant="outline"
                     size="sm"
