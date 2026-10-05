@@ -216,11 +216,13 @@ export function ManageStudentsPage() {
   };
 
   const handleAddStudent = async () => {
-    if (!newStudent.name || !newStudent.email) {
-      toast.error('Nome e email são obrigatórios');
+    // Só o nome é obrigatório; o e-mail é opcional
+    if (!newStudent.name.trim()) {
+      toast.error('O nome do aluno é obrigatório');
       return;
     }
 
+    const nomeCadastrado = newStudent.name;
     try {
       setLoading(true);
       const response = await apiService.createStudents([newStudent]);
@@ -230,7 +232,12 @@ export function ManageStudentsPage() {
       await loadStudents();
       setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
       setShowAddForm(false);
-      toast.success('Aluno adicionado com sucesso!');
+      // Mesmo aviso verde usado no login: título e texto de confirmação do cadastro
+      setImportResult({
+        type: 'success',
+        title: 'Aluno cadastrado com sucesso',
+        message: `${nomeCadastrado} foi cadastrado no sistema.`
+      });
     } catch (error) {
       console.error('Error adding student:', error);
       toast.error('Erro ao adicionar aluno');
@@ -450,7 +457,10 @@ export function ManageStudentsPage() {
             <Download className="w-4 h-4 mr-2" />
             Exportar CSV
           </Button>
-          <Button onClick={() => setShowAddForm(true)}>
+          <Button
+            onClick={() => setShowAddForm(true)}
+            className="bg-amber-500 hover:bg-amber-600 text-zinc-900 font-semibold shadow-md hover:shadow-lg px-5"
+          >
             <Plus className="w-4 h-4 mr-2" />
             Adicionar Aluno
           </Button>
@@ -596,15 +606,19 @@ export function ManageStudentsPage() {
       </div>
 
       {/* Add/Edit Student Form */}
-      {showAddForm && (
-        <Card className="seice-card">
-          <CardHeader>
-            <CardTitle>
+      {/* Formulário em modal largo, em cinza e branco */}
+      <Dialog open={showAddForm} onOpenChange={(open) => { if (!open) handleCancelEdit(); }}>
+        <DialogContent className="sm:max-w-3xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden">
+          <div className="bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700 px-8 py-6">
+            <DialogTitle className="text-xl font-bold text-white">
               {editingStudent ? 'Editar Aluno' : 'Adicionar Novo Aluno'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            </DialogTitle>
+            <DialogDescription className="text-zinc-300 mt-1">
+              Preencha os dados do aluno. Apenas o nome é obrigatório.
+            </DialogDescription>
+          </div>
+          <div className="px-8 py-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl bg-white p-6 shadow-sm border border-zinc-200">
               <div>
                 <Label htmlFor="name">Nome Completo</Label>
                 <Input
@@ -615,7 +629,7 @@ export function ManageStudentsPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">Email <span className="text-zinc-400 font-normal">(opcional)</span></Label>
                 <Input
                   id="email"
                   type="email"
@@ -670,9 +684,9 @@ export function ManageStudentsPage() {
                 Cancelar
               </Button>
             </div>
-          </CardContent>
-        </Card>
-      )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters and Search */}
       <Card className="seice-card">
