@@ -24,26 +24,26 @@ type ConfirmDeleteDialogProps = {
   onCancel: () => void;
 };
 
-// Paleta por tom: exclusão (vermelho forte) ou atenção (âmbar forte)
+// Cada tom tem sua faixa: exclusão com listras vermelhas e ícone tremendo; atenção com listras amarelas
 const TONES = {
   danger: {
-    hero: 'from-red-100 via-red-50 to-white',
-    orb: 'from-rose-500 to-red-700 shadow-red-500/50',
-    glow: 'bg-red-500',
-    accent: 'from-rose-500 via-red-600 to-rose-700',
-    title: 'text-red-900',
-    button: 'from-rose-500 to-red-700 hover:from-rose-600 hover:to-red-800 shadow-red-500/40',
-    itemBox: 'border-l-red-600 bg-red-50',
+    band: 'bg-gradient-to-br from-rose-600 via-red-600 to-red-800',
+    pattern: 'repeating-linear-gradient(135deg, rgba(255,255,255,0.10) 0 12px, transparent 12px 24px)',
+    iconWrap: 'bg-white text-red-600 shadow-red-900/30',
+    iconClass: 'w-10 h-10 seice-shake',
+    detail: 'border-red-200 bg-red-50/70',
+    detailText: 'text-zinc-800',
+    button: 'bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800 shadow-red-600/30',
     spinner: 'Excluindo...'
   },
   warning: {
-    hero: 'from-amber-100 via-amber-50 to-white',
-    orb: 'from-amber-400 to-orange-600 shadow-amber-500/50',
-    glow: 'bg-amber-400',
-    accent: 'from-amber-400 via-orange-500 to-amber-600',
-    title: 'text-amber-900',
-    button: 'from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-500/40',
-    itemBox: 'border-l-amber-500 bg-amber-50',
+    band: 'bg-gradient-to-br from-amber-400 via-amber-500 to-orange-600',
+    pattern: 'repeating-linear-gradient(45deg, rgba(0,0,0,0.08) 0 14px, transparent 14px 28px)',
+    iconWrap: 'bg-white text-amber-600 shadow-amber-900/30',
+    iconClass: 'w-10 h-10 animate-pulse motion-reduce:animate-none',
+    detail: 'border-amber-200 bg-amber-50/80',
+    detailText: 'text-zinc-800',
+    button: 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 shadow-amber-600/30',
     spinner: 'Aguarde...'
   }
 };
@@ -70,27 +70,25 @@ export function ConfirmDeleteDialog({
 
   return (
     <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen && !loading) onCancel(); }}>
-      {/* Entrada e saída lentas de propósito: o usuário precisa de tempo para ler antes de confirmar */}
-      <DialogContent className="sm:max-w-[440px] p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6">
-        <div className={`relative flex flex-col items-center gap-3 overflow-hidden bg-gradient-to-b px-6 pt-10 pb-6 ${t.hero}`}>
-          <span className={`pointer-events-none absolute -top-16 -left-10 h-44 w-44 rounded-full blur-3xl opacity-40 ${t.glow}`} />
-          <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${t.accent}`} />
+      {/* Mais largo que o padrão e em cinza; entrada e saída lentas para o usuário ler antes de confirmar */}
+      <DialogContent className="sm:max-w-lg p-0 gap-0 overflow-hidden border-zinc-200 bg-zinc-50 shadow-2xl rounded-3xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6 before:hidden">
+        <div className={`relative flex flex-col items-center gap-3 overflow-hidden px-8 pt-10 pb-12 ${t.band}`}>
+          <div className="pointer-events-none absolute inset-0 opacity-70" style={{ backgroundImage: t.pattern }} />
           <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
-            <div className={`w-20 h-20 rounded-full bg-gradient-to-br shadow-xl flex items-center justify-center ring-4 ring-white ${t.orb}`}>
-              <Icon className="w-9 h-9 text-white drop-shadow" strokeWidth={2.5} />
+            <div className={`relative w-20 h-20 rounded-full flex items-center justify-center shadow-2xl ring-8 ring-white/30 ${t.iconWrap}`}>
+              <Icon className={t.iconClass} strokeWidth={2.4} />
             </div>
           </div>
-          <div className="space-y-1.5 px-2">
-            <DialogTitle className={`text-xl font-bold tracking-tight ${t.title}`}>{title}</DialogTitle>
-            <DialogDescription className="text-base font-medium text-slate-600">{description}</DialogDescription>
-          </div>
+          <DialogTitle className="relative text-2xl font-bold tracking-tight text-white drop-shadow-sm">{title}</DialogTitle>
         </div>
 
-        <div className="flex flex-col gap-4 bg-white px-6 pb-6 pt-4">
+        <div className="relative -mt-6 mx-5 mb-5 flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white px-6 pb-6 pt-6 shadow-lg">
+          <DialogDescription className="text-base font-medium text-zinc-600">{description}</DialogDescription>
+
           {itemName && (
-            <div className={`w-full rounded-xl border-l-4 px-4 py-3 text-left shadow-sm ${t.itemBox}`}>
-              <p className="font-semibold text-slate-900 break-words">{itemName}</p>
-              {itemDetail && <p className="text-xs font-medium text-slate-600 mt-1">{itemDetail}</p>}
+            <div className={`w-full rounded-xl border px-4 py-3 text-left ${t.detail}`}>
+              <p className="font-semibold text-zinc-900 break-words">{itemName}</p>
+              {itemDetail && <p className="text-xs font-medium text-zinc-600 mt-1">{itemDetail}</p>}
             </div>
           )}
 
@@ -104,13 +102,13 @@ export function ConfirmDeleteDialog({
           {children && <div className="w-full text-left text-sm">{children}</div>}
 
           <div className="w-full grid grid-cols-2 gap-3 pt-1">
-            <Button variant="outline" onClick={onCancel} disabled={loading} autoFocus className="h-11 border-2 font-semibold">
+            <Button variant="outline" onClick={onCancel} disabled={loading} autoFocus className="h-12 border-2 border-zinc-300 font-semibold">
               Cancelar
             </Button>
             <Button
               onClick={onConfirm}
               disabled={loading || confirmDisabled}
-              className={`h-11 font-semibold text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 ${t.button}`}
+              className={`h-12 font-semibold text-white bg-gradient-to-r shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-200 ${t.button}`}
             >
               {isDanger && !loading && <Trash2 className="w-4 h-4 mr-2" />}
               {loading ? t.spinner : confirmLabel}
