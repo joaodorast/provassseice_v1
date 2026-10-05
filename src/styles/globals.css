@@ -408,6 +408,25 @@ html {
   }
 }
 
+/* Animações dos avisos: o ícone de erro treme e o de atenção pulsa (desligadas se o usuário pedir menos movimento) */
+@keyframes seice-shake {
+  0%, 100% { transform: translateX(0); }
+  15% { transform: translateX(-6px) rotate(-4deg); }
+  30% { transform: translateX(6px) rotate(4deg); }
+  45% { transform: translateX(-4px); }
+  60% { transform: translateX(4px); }
+  75% { transform: translateX(-2px); }
+}
+@keyframes seice-ring {
+  0% { transform: scale(0.8); opacity: 0.7; }
+  100% { transform: scale(1.9); opacity: 0; }
+}
+.seice-shake { animation: seice-shake 0.7s ease-in-out 0.5s both; }
+.seice-ring { animation: seice-ring 1.8s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .seice-shake, .seice-ring { animation: none; }
+}
+
 /* Espaço entre o rótulo e o campo logo abaixo dele, em todos os formulários.
    Fica fora de @layer para prevalecer sobre utilitários como mt-1. */
 label + [data-slot="input"],
