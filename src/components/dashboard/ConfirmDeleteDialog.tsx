@@ -84,7 +84,7 @@ export function ConfirmDeleteDialog({
           <DialogTitle className="relative text-2xl font-bold tracking-tight text-white">{title}</DialogTitle>
         </div>
 
-        <div className="relative -mt-6 mx-5 mb-5 flex flex-col gap-4 rounded-2xl border border-zinc-200 bg-white px-6 pb-6 pt-6 shadow-lg">
+        <div className="relative flex flex-col items-stretch gap-4 bg-white px-6 pb-7 pt-6 text-center">
           <DialogDescription className="text-base font-medium text-zinc-600">{description}</DialogDescription>
 
           {itemName && (
