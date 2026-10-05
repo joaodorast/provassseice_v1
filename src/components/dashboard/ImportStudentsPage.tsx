@@ -28,6 +28,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Checkbox } from '../ui/checkbox';
 import { toast } from '../../utils/toast';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
+import { AssignClassDialog } from './AssignClassDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { apiService } from '../../utils/api';
@@ -91,6 +92,9 @@ export function ManageStudentsPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Turma escolhida no seletor de atribuição em massa
   const [bulkClassId, setBulkClassId] = useState('');
+  // Modal para atribuir turma aos alunos sem turma (existente ou nova)
+  const [assignOpen, setAssignOpen] = useState(false);
+  const unassignedCount = students.filter(s => !s.class?.trim()).length;
   const [pendingDelete, setPendingDelete] = useState<
     { kind: 'students'; ids: string[] } | { kind: 'class'; name: string } | null
   >(null);
@@ -490,6 +494,14 @@ export function ManageStudentsPage() {
           </p>
         </div>
         <div className="flex space-x-2">
+          {unassignedCount > 0 && (
+            <Button
+              onClick={() => setAssignOpen(true)}
+              className="bg-amber-500 hover:bg-amber-600 text-zinc-900 font-semibold shadow-md"
+            >
+              Atribuir turma ({unassignedCount} sem turma)
+            </Button>
+          )}
           <Button variant="outline" onClick={exportToCSV}>
             <Download className="w-4 h-4 mr-2" />
             Exportar CSV
@@ -1069,6 +1081,7 @@ export function ManageStudentsPage() {
           </div>
         </DialogContent>
       </Dialog>
+      <AssignClassDialog open={assignOpen} onOpenChange={setAssignOpen} onDone={loadStudents} />
       <ActionResultDialog result={importResult} onClose={() => setImportResult(null)} />
     </div>
   );
