@@ -101,7 +101,7 @@ function AutoCloseBar({ className, durationMs }: { className: string; durationMs
 }
 
 // Modal central de resultado (sucesso / falha / aviso / info) que fecha sozinho
-export function ActionResultDialog({ result, onClose, autoCloseMs = 2000 }: ActionResultDialogProps) {
+export function ActionResultDialog({ result, onClose, autoCloseMs = 5000 }: ActionResultDialogProps) {
   // Com botões de escolha, o modal espera o usuário decidir
   const closeMs = result?.actions?.length ? null : autoCloseMs;
 
@@ -116,19 +116,22 @@ export function ActionResultDialog({ result, onClose, autoCloseMs = 2000 }: Acti
 
   return (
     <Dialog open={!!result} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center">
+      {/* Entrada e saída lentas de propósito: o aviso fica visível o bastante para ser lido */}
+      <DialogContent className="max-w-md p-0 gap-0 overflow-hidden border-0 shadow-2xl rounded-2xl text-center duration-700 data-[state=open]:ease-out data-[state=closed]:duration-600 data-[state=open]:zoom-in-95 data-[state=open]:slide-in-from-bottom-6">
         {result && (
           <>
-            {/* Faixa de topo com o ícone em destaque */}
-            <div className={`relative flex flex-col items-center gap-4 bg-gradient-to-b px-6 pt-9 pb-6 ${v.hero}`}>
+            {/* Cabeçalho com brilho de fundo e o ícone em destaque, que entram em sequência */}
+            <div className={`relative flex flex-col items-center gap-4 overflow-hidden bg-gradient-to-b px-6 pt-10 pb-7 ${v.hero}`}>
+              <span className={`pointer-events-none absolute -top-16 -left-10 h-44 w-44 rounded-full blur-3xl opacity-40 ${v.halo}`} />
+              <span className={`pointer-events-none absolute -bottom-20 -right-10 h-44 w-44 rounded-full blur-3xl opacity-30 ${v.halo}`} />
               <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${v.accent}`} />
-              <div className="relative animate-in zoom-in-50 fade-in duration-500 motion-reduce:animate-none">
+              <div className="relative animate-in zoom-in-50 fade-in duration-700 delay-300 fill-mode-both motion-reduce:animate-none">
                 <span className={`absolute inset-0 rounded-full opacity-30 animate-ping motion-reduce:hidden ${v.halo}`} />
                 <div className={`relative w-20 h-20 rounded-full bg-gradient-to-br shadow-xl flex items-center justify-center ring-4 ring-white ${v.orb}`}>
                   <Icon className="w-10 h-10 text-white drop-shadow" strokeWidth={2.5} />
                 </div>
               </div>
-              <div className="space-y-1.5 px-2">
+              <div className="relative space-y-1.5 px-2 animate-in slide-in-from-bottom-2 fade-in duration-700 delay-500 fill-mode-both motion-reduce:animate-none">
                 <DialogTitle className={`text-xl font-bold tracking-tight ${v.title}`}>
                   {result.title}
                 </DialogTitle>
