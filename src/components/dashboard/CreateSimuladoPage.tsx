@@ -730,14 +730,19 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     return simuladoData.sections.reduce((sum, section) => sum + section.questions.length, 0);
   };
 
-  // Importa um arquivo Word, Excel/CSV ou PDF e converte em seções/questões prontas.
+  // Importa Word, Excel/CSV, PDF ou fotos da prova e converte em seções/questões prontas.
   const [isImportingFile, setIsImportingFile] = useState(false);
-  const handleImportFile = async (file: File | undefined) => {
-    if (!file) return;
+  const [importProgress, setImportProgress] = useState('');
+  const handleImportFile = async (fileList: FileList | null) => {
+    const files = fileList ? Array.from(fileList) : [];
+    if (files.length === 0) return;
     setIsImportingFile(true);
+    setImportProgress('');
     try {
       const { importExamFile } = await import('../../utils/examImport');
-      const result = await importExamFile(file);
+      const result = await importExamFile(files, (done, total) => {
+        setImportProgress(total > 1 ? `Lendo com IA... ${done}/${total}` : 'Lendo com IA...');
+      });
 
       if (result.sections.length === 0) {
         toast.error(result.warnings[0] || 'Não foi possível importar questões desse arquivo.');
@@ -789,6 +794,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
       toast.error('Erro ao importar arquivo');
     } finally {
       setIsImportingFile(false);
+      setImportProgress('');
     }
   };
 
@@ -1244,10 +1250,11 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
               <input
                 type="file"
                 id="import-exam-file"
-                accept=".docx,.xlsx,.xls,.csv,.pdf"
+                accept=".docx,.xlsx,.xls,.csv,.pdf,image/*"
+                multiple
                 className="hidden"
                 onChange={(e) => {
-                  handleImportFile(e.target.files?.[0]);
+                  handleImportFile(e.target.files);
                   e.target.value = '';
                 }}
               />
@@ -1261,7 +1268,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                 ) : (
                   <Upload className="w-4 h-4 mr-2" />
                 )}
-                {isImportingFile ? 'Importando...' : 'Importar Word/Excel/PDF'}
+                {isImportingFile ? (importProgress || 'Importando...') : 'Importar Word/PDF/Foto/Excel'}
               </Button>
               <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
                 <Plus className="w-4 h-4 mr-2" />
@@ -1270,7 +1277,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
             </div>
           </div>
           <p className="text-xs text-slate-500 -mt-4">
-            O arquivo é lido automaticamente e separado em seções e questões (numeração "1)", alternativas "A)" a "E)" e gabarito indicado). Sempre revise o resultado antes de salvar.
+            Word, PDF e fotos da prova (pode escolher várias fotos, na ordem das páginas) são lidos com IA e separados em seções e questões. O gabarito é puxado quando está marcado na prova (em vermelho, circulado ou numa tabela de gabarito). Sempre revise o resultado antes de salvar.
           </p>
 
           {simuladoData.sections.length === 0 ? (
@@ -1292,7 +1299,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                     ) : (
                       <Upload className="w-4 h-4 mr-2" />
                     )}
-                    {isImportingFile ? 'Importando...' : 'Importar Word/Excel/PDF'}
+                    {isImportingFile ? (importProgress || 'Importando...') : 'Importar Word/PDF/Foto/Excel'}
                   </Button>
                   <Button onClick={handleAddSection} className="bg-zinc-800 hover:bg-zinc-900">
                     <Plus className="w-4 h-4 mr-2" />

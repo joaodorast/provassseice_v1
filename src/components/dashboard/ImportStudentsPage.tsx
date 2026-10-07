@@ -22,7 +22,9 @@ import {
   Image as ImageIcon,
   UserCheck,
   School,
-  UserX
+  UserX,
+  UserPlus,
+  UserCog
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Checkbox } from '../ui/checkbox';
@@ -30,6 +32,7 @@ import { toast } from '../../utils/toast';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 import { AssignClassDialog } from './AssignClassDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
+import { PopupHeader, POPUP_BUTTON } from './PopupHeader';
 import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { apiService } from '../../utils/api';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
@@ -657,17 +660,14 @@ export function ManageStudentsPage() {
       {/* Add/Edit Student Form */}
       {/* Formulário em modal largo, em cinza e branco */}
       <Dialog open={showAddForm} onOpenChange={(open) => { if (!open) handleCancelEdit(); }}>
-        <DialogContent className="sm:max-w-3xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden">
-          <div className="bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700 px-8 py-6">
-            <DialogTitle className="text-xl font-bold text-white">
-              {editingStudent ? 'Editar Aluno' : 'Adicionar Novo Aluno'}
-            </DialogTitle>
-            <DialogDescription className="text-zinc-300 mt-1">
-              Preencha os dados do aluno. Apenas o nome é obrigatório.
-            </DialogDescription>
-          </div>
-          <div className="px-8 py-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-2xl bg-white p-6 shadow-sm border border-zinc-200">
+        <DialogContent className="sm:max-w-3xl bg-zinc-50 border-zinc-200/80 p-0 gap-0 overflow-hidden rounded-2xl shadow-[0_24px_60px_-12px_rgba(0,0,0,0.35)] before:hidden">
+          <PopupHeader
+            icon={editingStudent ? <UserCog /> : <UserPlus />}
+            title={editingStudent ? 'Editar Aluno' : 'Adicionar Novo Aluno'}
+            description="Preencha os dados do aluno. Apenas o nome é obrigatório."
+          />
+          <div className="px-6 py-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-xl bg-white p-5 border border-zinc-200">
               <div>
                 <Label htmlFor="name">Nome Completo</Label>
                 <Input
@@ -719,18 +719,19 @@ export function ManageStudentsPage() {
                 />
               </div>
             </div>
-            <div className="flex space-x-2 mt-6">
-              <Button 
-                onClick={editingStudent ? handleUpdateStudent : handleAddStudent} 
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" onClick={handleCancelEdit} className={`${POPUP_BUTTON.cancel} px-5`}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={editingStudent ? handleUpdateStudent : handleAddStudent}
                 disabled={loading}
+                className={`${POPUP_BUTTON.primary} px-5`}
               >
-                {loading 
-                  ? (editingStudent ? 'Atualizando...' : 'Adicionando...') 
+                {loading
+                  ? (editingStudent ? 'Atualizando...' : 'Adicionando...')
                   : (editingStudent ? 'Atualizar Aluno' : 'Adicionar Aluno')
                 }
-              </Button>
-              <Button variant="outline" onClick={handleCancelEdit}>
-                Cancelar
               </Button>
             </div>
           </div>

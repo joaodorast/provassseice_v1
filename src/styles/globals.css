@@ -157,6 +157,23 @@
     @apply bg-background text-foreground;
     margin: 0;
   }
+
+  /* Tailwind v4 deixa botões com cursor padrão; aqui todo clicável mostra a mãozinha */
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [type="button"]:not(:disabled),
+  [type="submit"]:not(:disabled),
+  [type="reset"]:not(:disabled),
+  summary,
+  label[for],
+  select:not(:disabled) {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [role="button"][aria-disabled="true"] {
+    cursor: not-allowed;
+  }
 }
 
 /**
@@ -421,7 +438,7 @@ html {
   0% { transform: scale(0.8); opacity: 0.7; }
   100% { transform: scale(1.9); opacity: 0; }
 }
-.seice-shake { animation: seice-shake 0.7s ease-in-out 0.5s both; }
+.seice-shake { animation: seice-shake 0.45s ease-in-out 0.15s both; }
 .seice-ring { animation: seice-ring 1.8s ease-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .seice-shake, .seice-ring { animation: none; }
@@ -436,4 +453,35 @@ label + input:not([type="checkbox"]):not([type="radio"]),
 label + textarea,
 label + select {
   margin-top: 0.5rem;
+}
+
+/* Todos os pop-ups (DialogContent e AlertDialogContent): entrada curta com leve subida e escala, saída ainda mais rápida.
+   Fora de @layer para prevalecer sobre animate-in/animate-out do DialogContent. */
+@keyframes seice-pop-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes seice-pop-out {
+  from { opacity: 1; transform: translateY(0) scale(1); }
+  to { opacity: 0; transform: translateY(4px) scale(0.98); }
+}
+@keyframes seice-pop-icon {
+  from { opacity: 0; transform: scale(0.6); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes seice-fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes seice-fade-out { from { opacity: 1; } to { opacity: 0; } }
+
+.seice-pop[data-state="open"] { animation: seice-pop-in 220ms cubic-bezier(0.16, 1, 0.3, 1) both; }
+.seice-pop[data-state="closed"] { animation: seice-pop-out 140ms cubic-bezier(0.4, 0, 1, 1) both; }
+[data-slot$="dialog-overlay"]:has(+ .seice-pop[data-state="open"]) { animation: seice-fade-in 200ms ease-out both; }
+[data-slot$="dialog-overlay"]:has(+ .seice-pop[data-state="closed"]) { animation: seice-fade-out 140ms ease-in both; }
+.seice-pop-icon { animation: seice-pop-icon 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 60ms both; }
+.seice-pop-icon.seice-shake {
+  animation: seice-pop-icon 320ms cubic-bezier(0.34, 1.56, 0.64, 1) 60ms both,
+             seice-shake 0.45s ease-in-out 0.35s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .seice-pop[data-state], .seice-pop-icon,
+  [data-slot$="dialog-overlay"]:has(+ .seice-pop) { animation-duration: 1ms; animation-delay: 0ms; }
 }

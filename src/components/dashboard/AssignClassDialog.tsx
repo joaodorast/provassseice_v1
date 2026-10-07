@@ -7,6 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { GraduationCap, Plus, Loader2, UserX } from 'lucide-react';
 import { apiService } from '../../utils/api';
 import { toast } from '../../utils/toast';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
+import { inferSeriesFromClassCode, sortSeries } from '../../utils/series';
+import { PopupHeader, POPUP_BUTTON } from './PopupHeader';
 
 type Student = { id: string; name: string; class?: string; registration?: string };
 type ClassItem = { id: string; name: string; grade?: string; shift?: string };
@@ -44,6 +47,8 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
   const [newName, setNewName] = useState('');
   const [newGrade, setNewGrade] = useState('');
   const [newShift, setNewShift] = useState('Manhã');
+  // Cursos de "Gerenciar Cursos": a turma nova precisa estar em um deles para aparecer em "Criar Simulado"
+  const [courses, setCourses] = useState<string[]>([]);
 
   // Ao abrir, carrega os alunos sem turma e as turmas existentes
   useEffect(() => {
@@ -55,10 +60,17 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
     setNewGrade('');
     setNewShift('Manhã');
     setLoading(true);
-    Promise.all([apiService.getStudents(), apiService.getClasses()])
-      .then(([studentsRes, classesRes]: any[]) => {
+    Promise.all([
+      apiService.getStudents(),
+      apiService.getClasses(),
+      fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
+        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
+      }).then(r => (r.ok ? r.json() : null)).catch(() => null),
+    ])
+      .then(([studentsRes, classesRes, seriesRes]: any[]) => {
         setStudents((studentsRes?.students || []).filter((s: Student) => !s.class?.trim()));
         setClasses((classesRes?.classes || []).filter((c: any) => c?.name));
+        setCourses(sortSeries((seriesRes?.series || []).filter(Boolean).map((c: string) => String(c).trim())));
       })
       .catch(() => toast.error('Não foi possível carregar os alunos e as turmas'))
       .finally(() => setLoading(false));
@@ -78,7 +90,14 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
   const trimmedNewName = newName.trim();
   const targetName = mode === 'existing' ? chosenClass : trimmedNewName;
   const nameAlreadyExists = mode === 'new' && classes.some(c => c.name.trim().toLowerCase() === trimmedNewName.toLowerCase());
-  const canSave = !saving && selected.size > 0 && !!targetName && !nameAlreadyExists;
+  const canSave = !saving && selected.size > 0 && !!targetName && !nameAlreadyExists && (mode === 'existing' || !!newGrade);
+
+  // Ao digitar o código da turma, já sugere o curso (9001 -> 9º Ano) se o professor ainda não escolheu
+  const handleNewNameChange = (value: string) => {
+    setNewName(value);
+    const inferred = inferSeriesFromClassCode(value, courses);
+    if (inferred && (!newGrade || newGrade === inferSeriesFromClassCode(newName, courses))) setNewGrade(inferred);
+  };
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -88,7 +107,7 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
       if (mode === 'new') {
         const created = await apiService.createClass({
           name: trimmedNewName,
-          grade: newGrade.trim() || trimmedNewName,
+          grade: newGrade,
           shift: newShift,
           year: new Date().getFullYear().toString(),
         });
@@ -113,26 +132,17 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!saving) onOpenChange(o); }}>
-      <DialogContent className="sm:max-w-4xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden rounded-3xl before:hidden">
-        <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700 px-7 py-6">
-          <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full bg-amber-400/20 blur-3xl" />
-          <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-amber-500 via-amber-300 to-amber-500" />
-          <div className="relative flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-amber-400 text-zinc-900 shadow-lg">
-              <UserX className="h-5 w-5" />
-            </span>
-            <div>
-              <DialogTitle className="text-xl font-bold text-white">Atribuir turma a alunos sem turma</DialogTitle>
-              <DialogDescription className="text-zinc-300">
-                Marque os alunos e escolha uma turma existente ou crie uma nova.
-              </DialogDescription>
-            </div>
-          </div>
-        </div>
+      <DialogContent className="sm:max-w-4xl bg-zinc-50 border-zinc-200/80 p-0 gap-0 overflow-hidden rounded-2xl shadow-[0_24px_60px_-12px_rgba(0,0,0,0.35)] before:hidden">
+        <PopupHeader
+          tone="warning"
+          icon={<UserX />}
+          title="Atribuir turma a alunos sem turma"
+          description="Marque os alunos e escolha uma turma existente ou crie uma nova."
+        />
 
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
           {/* Lista de alunos sem turma */}
-          <div className="flex min-h-[320px] flex-col rounded-2xl border border-zinc-200 bg-white shadow-sm">
+          <div className="flex min-h-[320px] flex-col rounded-xl border border-zinc-200 bg-white">
             <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
               <span className="text-sm font-semibold text-zinc-800">
                 {loading ? 'Carregando...' : `${students.length} aluno(s) sem turma`}
@@ -216,14 +226,24 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
               <div className="space-y-3">
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700">Nome da turma *</label>
-                  <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Ex: 9001-CE" />
+                  <Input value={newName} onChange={(e) => handleNewNameChange(e.target.value)} placeholder="Ex: 9001-CE" />
                   {nameAlreadyExists && (
                     <p className="text-xs text-red-600">Já existe uma turma com esse nome. Escolha a opção "Turma existente".</p>
                   )}
                 </div>
                 <div className="space-y-1">
-                  <label className="text-sm font-medium text-zinc-700">Curso / série</label>
-                  <Input value={newGrade} onChange={(e) => setNewGrade(e.target.value)} placeholder="Ex: 9º Ano" />
+                  <label className="text-sm font-medium text-zinc-700">Curso *</label>
+                  <Select value={newGrade} onValueChange={setNewGrade}>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder={courses.length ? 'Escolha o curso' : 'Nenhum curso cadastrado'} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {courses.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {courses.length === 0 && !loading && (
+                    <p className="text-xs text-zinc-500">Cadastre os cursos em "Gerenciar Cursos" primeiro.</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-zinc-700">Turno</label>
@@ -242,14 +262,14 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
                 {selected.size} aluno(s) selecionado(s)
                 {targetName ? <> · turma <strong className="text-zinc-900">{targetName}</strong></> : null}
               </p>
-              <div className="grid grid-cols-2 gap-3">
-                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving} className="h-12 border-2 border-zinc-300 font-semibold">
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving} className={POPUP_BUTTON.cancel}>
                   Cancelar
                 </Button>
                 <Button
                   onClick={handleSave}
                   disabled={!canSave}
-                  className="h-12 bg-gradient-to-r from-amber-500 to-zinc-800 font-semibold text-white shadow-lg hover:from-amber-600 hover:to-zinc-900 hover:shadow-xl"
+                  className={POPUP_BUTTON.primary}
                 >
                   {saving ? 'Salvando...' : mode === 'new' ? 'Criar turma e atribuir' : 'Atribuir turma'}
                 </Button>

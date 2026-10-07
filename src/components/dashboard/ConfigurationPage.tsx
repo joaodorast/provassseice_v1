@@ -45,8 +45,9 @@ import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 import { readStudentsFromFile, isStudentSpreadsheet, ensureClassesExist, stripAccents, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 
-// Abas ainda sem efeito real no sistema (as opções são salvas mas nada as usa).
-// Ficam escondidas até serem implementadas; mude para true para exibi-las.
+// Funções ainda sem efeito real no sistema (as opções são salvas mas nada as usa):
+// abas Sistema/Notificações/Segurança, "Restaurar Padrão", importar/exportar configurações
+// e a "Zona de Perigo". Ficam escondidas até serem implementadas; mude para true para exibi-las.
 const SHOW_UNFINISHED_SETTINGS = false;
 
 const DEFAULT_SYSTEM_SETTINGS = {
@@ -989,12 +990,14 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
             Gerencie suas preferências e configurações do sistema
           </p>
         </div>
-        <div className="flex space-x-2">
-          <Button variant="outline" onClick={() => setShowResetDialog(true)} disabled={loading}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Restaurar Padrão
-          </Button>
-        </div>
+        {SHOW_UNFINISHED_SETTINGS && (
+          <div className="flex space-x-2">
+            <Button variant="outline" onClick={() => setShowResetDialog(true)} disabled={loading}>
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Restaurar Padrão
+            </Button>
+          </div>
+        )}
       </div>
 
       <Tabs defaultValue="profile" className="space-y-6">
@@ -1715,14 +1718,18 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                   {importing === 'questions' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
                   {importing === 'questions' ? 'Importando questões...' : 'Importar Questões (JSON)'}
                 </Button>
-                <Button className="w-full" variant="outline" onClick={() => settingsFileRef.current?.click()} disabled={!!importing}>
-                  {importing === 'settings' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
-                  {importing === 'settings' ? 'Importando configurações...' : 'Importar Configurações'}
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Configurações: use a planilha gerada em "Exportar Configurações". Cursos e matérias do arquivo são
-                  acrescentados, nunca apagados.
-                </p>
+                {SHOW_UNFINISHED_SETTINGS && (
+                  <>
+                    <Button className="w-full" variant="outline" onClick={() => settingsFileRef.current?.click()} disabled={!!importing}>
+                      {importing === 'settings' ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Upload className="w-4 h-4 mr-2" />}
+                      {importing === 'settings' ? 'Importando configurações...' : 'Importar Configurações'}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">
+                      Configurações: use a planilha gerada em "Exportar Configurações". Cursos e matérias do arquivo são
+                      acrescentados, nunca apagados.
+                    </p>
+                  </>
+                )}
                 <input ref={studentsFileRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleImportStudents} />
                 <input ref={questionsFileRef} type="file" accept=".json,application/json" className="hidden" onChange={handleImportQuestions} />
                 <input ref={settingsFileRef} type="file" accept=".xlsx,.xls,.json" className="hidden" onChange={handleImportSettings} />
@@ -1748,37 +1755,42 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
                   <Download className="w-4 h-4 mr-2" />
                   Exportar Apenas Resultados
                 </Button>
-                <Button className="w-full" variant="outline" onClick={handleExportSettings}>
-                  <Download className="w-4 h-4 mr-2" />
-                  Exportar Configurações
-                </Button>
+                {SHOW_UNFINISHED_SETTINGS && (
+                  <Button className="w-full" variant="outline" onClick={handleExportSettings}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Exportar Configurações
+                  </Button>
+                )}
               </CardContent>
             </Card>
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center text-red-600">
-                <AlertTriangle className="w-5 h-5 mr-2" />
-                Zona de Perigo
-              </CardTitle>
-              <CardDescription>
-                Ações irreversíveis - use com cuidado
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="p-4 border border-red-200 rounded-lg bg-red-50">
-                <h4 className="font-medium text-red-800 mb-2">Excluir Todos os Dados</h4>
-                <p className="text-sm text-red-600 mb-4">
-                  Esta ação excluirá permanentemente todas as provas, submissões e dados do usuário.
-                  Esta ação não pode ser desfeita.
-                </p>
-                <Button variant="destructive" size="sm">
-                  Excluir Todos os Dados
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Botão ainda sem ação: escondido até a exclusão ser implementada */}
+          {SHOW_UNFINISHED_SETTINGS && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center text-red-600">
+                  <AlertTriangle className="w-5 h-5 mr-2" />
+                  Zona de Perigo
+                </CardTitle>
+                <CardDescription>
+                  Ações irreversíveis - use com cuidado
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="p-4 border border-red-200 rounded-lg bg-red-50">
+                  <h4 className="font-medium text-red-800 mb-2">Excluir Todos os Dados</h4>
+                  <p className="text-sm text-red-600 mb-4">
+                    Esta ação excluirá permanentemente todas as provas, submissões e dados do usuário.
+                    Esta ação não pode ser desfeita.
+                  </p>
+                  <Button variant="destructive" size="sm">
+                    Excluir Todos os Dados
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
       </Tabs>
 

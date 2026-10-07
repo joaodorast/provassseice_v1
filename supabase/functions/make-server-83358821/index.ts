@@ -2629,13 +2629,18 @@ const isTransientClaudeError = (status: number) => status === 429 || status === 
 
 // Chama a API da Claude (Anthropic) forçando o uso de uma "tool" para garantir uma resposta
 // estruturada em JSON (equivalente ao responseSchema usado antes com o Gemini).
-const callClaude = async (content: any[], toolSchema: any) => {
+// opts: rotas novas podem usar outro modelo. O claude-opus-5-5 não aceita tool_choice forçado,
+// então nele a tool vai com strict (resposta sempre no formato do schema) e tool_choice "auto".
+type ClaudeCallOptions = { model?: string; maxTokens?: number; effort?: 'low' | 'medium' | 'high' };
+const callClaude = async (content: any[], toolSchema: any, opts: ClaudeCallOptions = {}) => {
   const apiKey = await getClaudeApiKey();
   if (!apiKey) {
     throw new Error('Claude API key not configured');
   }
 
   const toolName = 'return_result';
+  const model = opts.model || CLAUDE_MODEL;
+  const forcedToolSupported = model === CLAUDE_MODEL;
   const maxAttempts = 5;
   let lastError: Error | null = null;
 
@@ -2646,19 +2651,24 @@ const callClaude = async (content: any[], toolSchema: any) => {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01',
+        ...(forcedToolSupported ? {} : { 'anthropic-beta': 'server-side-fallback-2026-07-01' }),
       },
       body: JSON.stringify({
-        model: CLAUDE_MODEL,
-        max_tokens: 4096,
+        model,
+        max_tokens: opts.maxTokens || 4096,
         messages: [{ role: 'user', content }],
         tools: [
           {
             name: toolName,
             description: 'Retorna o resultado estruturado da análise.',
             input_schema: toolSchema,
+            ...(forcedToolSupported ? {} : { strict: true }),
           },
         ],
-        tool_choice: { type: 'tool', name: toolName },
+        tool_choice: forcedToolSupported ? { type: 'tool', name: toolName } : { type: 'auto' },
+        // Se o modelo recusar por política, a própria API refaz o pedido em outro modelo
+        ...(forcedToolSupported ? {} : { fallbacks: 'default' }),
+        ...(opts.effort ? { output_config: { effort: opts.effort } } : {}),
       }),
     });
 
@@ -2699,6 +2709,12 @@ const callClaude = async (content: any[], toolSchema: any) => {
     }
 
     const result = await response.json();
+    if (result.stop_reason === 'refusal') {
+      throw new Error('A IA recusou processar este conteúdo.');
+    }
+    if (result.stop_reason === 'max_tokens') {
+      throw new Error('Resposta da IA ficou grande demais para este trecho. Envie menos páginas por vez.');
+    }
     const toolUse = result.content?.find((block: any) => block.type === 'tool_use');
     if (!toolUse?.input) {
       throw new Error('Claude returned an empty response');
@@ -2709,6 +2725,113 @@ const callClaude = async (content: any[], toolSchema: any) => {
 
   throw lastError || new Error('Claude request failed after retries');
 };
+
+// Extração de prova (Criar Simulado → importar arquivo): lê um trecho da prova (fotos/páginas
+// como imagem, ou o texto de um Word) e devolve as questões em ordem. O cliente manda a prova em
+// trechos de poucas páginas e junta o resultado (por isso existe "continuesPrevious").
+const EXAM_EXTRACT_MODEL = 'claude-opus-5-5';
+
+const examExtractSchema = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['questions', 'answerKey'],
+  properties: {
+    questions: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['section', 'number', 'continuesPrevious', 'statement', 'type', 'options', 'correctLetter', 'hasFigure'],
+        properties: {
+          section: { type: 'string' },
+          number: { type: 'integer' },
+          continuesPrevious: { type: 'boolean' },
+          statement: { type: 'string' },
+          type: { type: 'string', enum: ['multiple-choice', 'essay'] },
+          options: { type: 'array', items: { type: 'string' } },
+          correctLetter: { type: 'string', enum: ['', 'A', 'B', 'C', 'D', 'E'] },
+          hasFigure: { type: 'boolean' },
+        },
+      },
+    },
+    answerKey: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['section', 'number', 'letter'],
+        properties: {
+          section: { type: 'string' },
+          number: { type: 'integer' },
+          letter: { type: 'string', enum: ['A', 'B', 'C', 'D', 'E'] },
+        },
+      },
+    },
+  },
+};
+
+const examExtractPrompt = (source: 'images' | 'text', partIndex: number, partTotal: number) => `Você vai transcrever uma prova escolar brasileira para um sistema de simulados. ${
+  source === 'images'
+    ? 'O conteúdo está nas imagens acima, na ordem das páginas. Podem ser páginas de PDF ou FOTOS tiradas com celular (tortas, com sombra, inclinadas ou com pouca luz): leia com atenção mesmo assim.'
+    : 'O conteúdo está no texto acima, extraído de um arquivo Word. Marcadores: [TITULO] = parágrafo com estilo de título; [VERMELHO] = trecho em vermelho (no Word, indica a alternativa correta); [LISTA] = item de lista automática do Word (alternativas cuja letra é gerada pela lista); [IMAGEM] = havia uma imagem nesse ponto.'
+}
+Este é o trecho ${partIndex} de ${partTotal} da prova.
+
+Regras:
+1. Transcreva cada questão FIELMENTE, palavra por palavra. Não resuma, não corrija, não invente texto. Use símbolos Unicode para matemática (x², √2, ½, π, ≤, ≥, ×, ÷) e escreva frações como a/b.
+2. Provas em duas colunas: leia a coluna da esquerda de cima a baixo e depois a da direita.
+3. Ignore cabeçalho e rodapé (nome da escola, "Nome:", "Turma:", "Data:", número de página, logotipos) e instruções gerais da prova.
+4. "section" = a matéria/seção a que a questão pertence (ex: "Língua Portuguesa", "Matemática"), escrita como aparece no título, sem traços decorativos. Se nenhum título de matéria aparece antes da questão neste trecho, use "".
+5. Texto de apoio ("Texto I", "Leia o texto para responder às questões 3 e 4", tirinha, poema): coloque o texto de apoio no início do enunciado da PRIMEIRA questão que o usa; nas seguintes, comece o enunciado com "(Use o texto da questão N)". Se o apoio é uma imagem/gráfico/tirinha sem texto legível, descreva em uma linha entre colchetes, ex: "[Imagem: gráfico de barras com vendas por mês]" e marque hasFigure=true.
+6. "options": só o texto de cada alternativa, na ordem A, B, C, D, E, SEM a letra (sem "A)", "(B)", "c." etc). Se a alternativa é uma imagem, escreva uma descrição curta entre colchetes e marque hasFigure=true. Questão sem alternativas = type "essay" e options [].
+7. "correctLetter": preencha SÓ se a prova indica a resposta visualmente (alternativa em vermelho, destacada, circulada, marcada com X, ou "Gabarito: C" junto da questão). NUNCA resolva a questão nem chute: sem indicação, use "".
+8. Se houver um gabarito em tabela ou lista (ex: "1-A 2-C 3-B"), coloque em "answerKey" (com a "section" se o gabarito estiver separado por matéria, senão "").
+9. "continuesPrevious": true SOMENTE no primeiro item, se este trecho começa no meio de uma questão que veio do trecho anterior (resto do enunciado e/ou alternativas sem o número da questão). Nesse item, "number" é o número da questão se souber, senão 0, e "options" deve trazer só as alternativas que aparecem neste trecho, na posição certa (use "" para as que ficaram no trecho anterior).
+10. "number" = o número impresso da questão.
+11. Se o trecho não tem nenhuma questão (capa, folha de redação, gabarito apenas), devolva questions [].
+
+Responda chamando a ferramenta "return_result".`;
+
+app.post('/make-server-83358821/ai/extract-exam', requireAuth, async (c) => {
+  try {
+    const body = await c.req.json();
+    const images: string[] = Array.isArray(body?.images) ? body.images : [];
+    const text: string = typeof body?.text === 'string' ? body.text : '';
+    const partIndex = Number(body?.partIndex) || 1;
+    const partTotal = Number(body?.partTotal) || 1;
+
+    if (images.length === 0 && !text.trim()) {
+      return c.json({ error: 'Envie images ou text' }, 400);
+    }
+    if (images.length > 6) {
+      return c.json({ error: 'Máximo de 6 páginas por pedido' }, 400);
+    }
+
+    const content: any[] = [];
+    for (const dataUrl of images) {
+      const match = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(String(dataUrl));
+      if (!match) return c.json({ error: 'Imagem inválida (use JPEG, PNG, WEBP ou GIF)' }, 400);
+      content.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
+    }
+    if (text.trim()) content.push({ type: 'text', text: text });
+    content.push({ type: 'text', text: examExtractPrompt(images.length > 0 ? 'images' : 'text', partIndex, partTotal) });
+
+    const result = await callClaude(content, examExtractSchema, {
+      model: EXAM_EXTRACT_MODEL,
+      maxTokens: 16000,
+      effort: 'medium',
+    });
+
+    return c.json({
+      success: true,
+      questions: Array.isArray(result?.questions) ? result.questions : [],
+      answerKey: Array.isArray(result?.answerKey) ? result.answerKey : [],
+    });
+  } catch (error) {
+    console.error('Error extracting exam:', error);
+    return c.json({ error: (error as Error)?.message || 'Falha ao ler a prova' }, 500);
+  }
+});
 
 // Detect marked answers on a scanned answer sheet (bubble sheet) using Claude Vision
 app.post('/make-server-83358821/ai/detect-answers', requireAuth, async (c) => {

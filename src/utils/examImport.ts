@@ -1,5 +1,9 @@
-// Importa um simulado pronto a partir de um arquivo Word (.docx), Excel (.xlsx/.xls/.csv)
-// ou PDF, organizando automaticamente em seções e questões.
+// Importa um simulado pronto a partir de um arquivo Word (.docx), Excel (.xlsx/.xls/.csv),
+// PDF ou fotos da prova, organizando automaticamente em seções e questões.
+//
+// PDF, fotos e Word são lidos com IA (rota /ai/extract-exam): as páginas viram imagens (o Word vira
+// texto com marcadores de título/vermelho/imagem) e são enviadas em trechos de poucas páginas,
+// em paralelo. Se a IA falhar, PDF e Word caem na leitura heurística abaixo.
 //
 // Word: o .docx é lido diretamente do XML interno (não só o texto), para capturar formatação
 // que o enunciado usa: título com estilo "Título"/heading do Word ou texto em negrito sozinho
@@ -43,6 +47,8 @@ interface DocLine {
   /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
    * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
   listItem: boolean;
+  /** Parágrafo tem imagem (Word): a IA recebe um marcador [IMAGEM] nesse ponto */
+  hasImage?: boolean;
 }
 
 const LETTER_INDEX: Record<string, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 };
@@ -112,11 +118,12 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     let curHasRed = false;
     let curAllBold = true;
     let curHasText = false;
+    let curHasImage = false;
     let isFirstLineOfParagraph = true;
 
     const flush = () => {
       const text = curText.replace(/\s+/g, ' ').trim();
-      if (text) {
+      if (text || curHasImage) {
         lines.push({
           text,
           // Negrito sozinho no parágrafo NÃO conta como título aqui: o enunciado usa negrito
@@ -125,7 +132,8 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
           // o teste de "tudo em maiúsculas" (looksLikeSectionHeading) cuida do resto mais abaixo.
           heading: isFirstLineOfParagraph && isHeadingStyle,
           redMarked: curHasRed,
-          listItem: isFirstLineOfParagraph && isListItem
+          listItem: isFirstLineOfParagraph && isListItem,
+          hasImage: curHasImage
         });
       }
       isFirstLineOfParagraph = false;
@@ -133,6 +141,7 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
       curHasRed = false;
       curAllBold = true;
       curHasText = false;
+      curHasImage = false;
     };
 
     runs.forEach((r) => {
@@ -173,6 +182,8 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
           curText += ' ';
         } else if (name === 'br' || name === 'cr') {
           flush();
+        } else if (name === 'drawing' || name === 'pict' || name === 'object') {
+          curHasImage = true;
         }
       });
       void curHasText;
@@ -583,9 +594,274 @@ function parseSpreadsheet(buffer: ArrayBuffer): ImportResult {
   return { sections, warnings };
 }
 
+// ---------- Leitura com IA (PDF, fotos e Word) ----------
+
+interface AIQuestion {
+  section: string;
+  number: number;
+  continuesPrevious: boolean;
+  statement: string;
+  type: 'multiple-choice' | 'essay';
+  options: string[];
+  correctLetter: '' | 'A' | 'B' | 'C' | 'D' | 'E';
+  hasFigure: boolean;
+}
+
+interface AIPart {
+  questions: AIQuestion[];
+  answerKey: { section: string; number: number; letter: string }[];
+}
+
+type ProgressFn = (done: number, total: number) => void;
+type AIPartInput = { images: string[] } | { text: string };
+
+const PAGES_PER_REQUEST = 2;
+const PARALLEL_REQUESTS = 3;
+const MAX_IMAGE_SIDE = 2000;
+const IMAGE_EXT_RE = /\.(jpe?g|png|webp|gif|bmp)$/i;
+
+const isImageFile = (f: File) => IMAGE_EXT_RE.test(f.name) || f.type.startsWith('image/');
+
+// Foto do celular: respeita a rotação (EXIF) e reduz para no máximo MAX_IMAGE_SIDE px
+async function imageFileToJpeg(file: File): Promise<string> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.85);
+}
+
+// Cada página do PDF vira uma imagem (funciona também com PDF escaneado, que não tem texto)
+async function pdfToJpegPages(file: File): Promise<string[]> {
+  const pdfjsLib: any = await import('pdfjs-dist');
+  const workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+  const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+
+  const pages: string[] = [];
+  for (let i = 1; i <= pdf.numPages; i++) {
+    const page = await pdf.getPage(i);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(3, MAX_IMAGE_SIDE / Math.max(base.width, base.height)) });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d')!;
+    await page.render({ canvas, canvasContext: ctx, viewport, background: '#ffffff' }).promise;
+    pages.push(canvas.toDataURL('image/jpeg', 0.85));
+    page.cleanup();
+  }
+  return pages;
+}
+
+// Word vira texto com marcadores que a IA entende (título, vermelho = gabarito, lista, imagem)
+function docLinesToText(lines: DocLine[]): string {
+  return lines.map(l => [
+    l.heading ? '[TITULO] ' : '',
+    l.listItem ? '[LISTA] ' : '',
+    l.redMarked ? '[VERMELHO] ' : '',
+    l.text,
+    l.hasImage ? ' [IMAGEM]' : ''
+  ].join('').trim()).filter(Boolean).join('\n');
+}
+
+// Divide o texto do Word em trechos de ~8000 caracteres, cortando sempre antes de uma questão
+function splitTextIntoParts(text: string, maxChars = 8000): string[] {
+  const parts: string[] = [];
+  let current: string[] = [];
+  let size = 0;
+  for (const line of text.split('\n')) {
+    const plain = line.replace(/^(\[[A-Z]+\]\s*)+/, '');
+    if (size > maxChars && QUESTION_RE.test(plain)) {
+      parts.push(current.join('\n'));
+      current = [];
+      size = 0;
+    }
+    current.push(line);
+    size += line.length + 1;
+  }
+  if (current.length) parts.push(current.join('\n'));
+  return parts;
+}
+
+// Roda as tarefas com no máximo `limit` ao mesmo tempo, mantendo a ordem dos resultados
+async function runLimited<T>(tasks: (() => Promise<T>)[], limit: number, onDone: () => void): Promise<T[]> {
+  const results: T[] = new Array(tasks.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < tasks.length) {
+      const i = next++;
+      results[i] = await tasks[i]();
+      onDone();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+  return results;
+}
+
+async function extractPartsWithAI(parts: AIPartInput[], onProgress?: ProgressFn): Promise<AIPart[]> {
+  const { apiService } = await import('./api');
+  let done = 0;
+  onProgress?.(0, parts.length);
+  return runLimited(parts.map((part, i) => async () => {
+    const res: any = await apiService.extractExamAI({ ...part, partIndex: i + 1, partTotal: parts.length });
+    if (!res?.success) throw new Error(res?.error || 'Falha ao ler a prova com IA');
+    return { questions: res.questions || [], answerKey: res.answerKey || [] } as AIPart;
+  }), PARALLEL_REQUESTS, () => onProgress?.(++done, parts.length));
+}
+
+// Junta os trechos lidos pela IA em seções, na ordem da prova
+function mergeAIParts(parts: AIPart[]): ImportResult {
+  type Meta = { q: ImportedQuestion; section: string; number: number; answered: boolean; figure: boolean };
+  const sections: ImportedSection[] = [];
+  const warnings: string[] = [];
+  const metas: Meta[] = [];
+  let current: ImportedSection | null = null;
+  const sameName = (a: string, b: string) => stripAccents(a).toLowerCase().trim() === stripAccents(b).toLowerCase().trim();
+  const letterIndex = (l: string): number | undefined => LETTER_INDEX[(l || '').toLowerCase()];
+
+  for (const part of parts) {
+    part.questions.forEach((aq, i) => {
+      const options = (aq.options || []).slice(0, 5).map(o => String(o || '').trim());
+      const answer = letterIndex(aq.correctLetter);
+      const last = metas[metas.length - 1];
+
+      // Questão que começou no trecho anterior: completa a última questão
+      if (aq.continuesPrevious && i === 0 && last) {
+        const statement = (aq.statement || '').trim();
+        if (statement) last.q.question = `${last.q.question} ${statement}`.trim();
+        options.forEach((o, idx) => {
+          if (o) last.q.options[idx] = last.q.options[idx]?.trim() ? `${last.q.options[idx]} ${o}` : o;
+        });
+        if (answer !== undefined) {
+          last.q.correctAnswer = answer;
+          last.answered = true;
+        }
+        last.figure = last.figure || !!aq.hasFigure;
+        return;
+      }
+
+      const question = (aq.statement || '').trim();
+      if (!question) return;
+
+      const sectionName = (aq.section || '').trim() || current?.name || 'Questões';
+      if (!current || !sameName(current.name, sectionName)) {
+        current = sections.find(s => sameName(s.name, sectionName)) || null;
+        if (!current) {
+          current = { name: sectionName, description: '', questions: [] };
+          sections.push(current);
+        }
+      }
+
+      const q: ImportedQuestion = {
+        question,
+        subject: current.name,
+        type: 'multiple-choice',
+        options,
+        correctAnswer: answer ?? 0,
+        difficulty: 'Médio',
+        points: 1
+      };
+      current.questions.push(q);
+      metas.push({ q, section: current.name, number: aq.number, answered: answer !== undefined, figure: !!aq.hasFigure });
+    });
+  }
+
+  // Gabarito em tabela/lista (normalmente no fim da prova)
+  parts.flatMap(p => p.answerKey).forEach(key => {
+    const idx = letterIndex(key.letter);
+    if (idx === undefined) return;
+    const candidates = metas.filter(m => m.number === key.number && (!key.section || sameName(m.section, key.section)));
+    const target = candidates.find(m => !m.answered) || candidates[0];
+    if (target) {
+      target.q.correctAnswer = idx;
+      target.answered = true;
+    }
+  });
+
+  // Objetiva só com pelo menos 2 alternativas
+  metas.forEach(m => {
+    for (let i = 0; i < 5; i++) m.q.options[i] = m.q.options[i] || '';
+    if (m.q.options.filter(o => o.trim()).length < 2) {
+      m.q.type = 'essay';
+      m.q.options = ['', '', '', '', ''];
+    }
+  });
+
+  const label = (list: Meta[]) => list.map(m => (sections.length > 1 ? `${m.section} ${m.number}` : String(m.number))).join(', ');
+  if (metas.length === 0) {
+    warnings.push('Não encontrei questões no arquivo. Confira se as páginas estão legíveis (foto nítida, sem cortar a folha) e tente de novo.');
+  } else {
+    const noAnswer = metas.filter(m => m.q.type === 'multiple-choice' && !m.answered);
+    if (noAnswer.length > 0) {
+      warnings.push(`A prova não indica o gabarito de ${noAnswer.length} questão(ões) (${label(noAnswer)}): ficou "A" — marque a resposta certa.`);
+    }
+    const figures = metas.filter(m => m.figure);
+    if (figures.length > 0) {
+      warnings.push(`Questão(ões) ${label(figures)} têm imagem/figura: confira o texto e anexe a imagem se precisar.`);
+    }
+  }
+
+  return { sections: sections.filter(s => s.questions.length > 0), warnings };
+}
+
+async function importWithAI(files: File[], onProgress?: ProgressFn): Promise<ImportResult> {
+  let parts: AIPartInput[];
+  if (files[0].name.toLowerCase().endsWith('.docx')) {
+    const text = docLinesToText(await extractLinesFromDocx(files[0]));
+    parts = splitTextIntoParts(text).map(t => ({ text: t }));
+  } else {
+    // PDF e/ou fotos: todas as páginas como imagem, na ordem em que foram escolhidas
+    const pages: string[] = [];
+    for (const f of files) {
+      if (f.name.toLowerCase().endsWith('.pdf')) pages.push(...await pdfToJpegPages(f));
+      else pages.push(await imageFileToJpeg(f));
+    }
+    parts = [];
+    for (let i = 0; i < pages.length; i += PAGES_PER_REQUEST) parts.push({ images: pages.slice(i, i + PAGES_PER_REQUEST) });
+  }
+  return mergeAIParts(await extractPartsWithAI(parts, onProgress));
+}
+
 // ---------- Ponto de entrada ----------
 
-export async function importExamFile(file: File): Promise<ImportResult> {
+export async function importExamFile(input: File | File[], onProgress?: ProgressFn): Promise<ImportResult> {
+  const files = Array.isArray(input) ? input : [input];
+  if (files.length === 0) return { sections: [], warnings: [] };
+  const file = files[0];
+  const name = file.name.toLowerCase();
+
+  if (files.some(f => /\.(heic|heif)$/i.test(f.name))) {
+    return { sections: [], warnings: ['Fotos HEIC (iPhone) não são aceitas. No iPhone, use Ajustes > Câmera > Formatos > "Mais Compatível", ou envie a foto como JPG.'] };
+  }
+
+  const onlyImages = files.every(isImageFile);
+  const pdfOrImages = files.every(f => f.name.toLowerCase().endsWith('.pdf') || isImageFile(f));
+
+  if (name.endsWith('.docx') || pdfOrImages) {
+    try {
+      const result = await importWithAI(name.endsWith('.docx') ? [file] : files, onProgress);
+      if (result.sections.length > 0 || onlyImages) return result;
+    } catch (error) {
+      console.error('Error importing exam with AI:', error);
+      const reason = (error as Error)?.message || 'erro desconhecido';
+      if (onlyImages) return { sections: [], warnings: [`Não foi possível ler as fotos: ${reason}`] };
+      // Sem IA: tenta a leitura heurística do PDF/Word
+      const fallback = await importExamFileHeuristic(file);
+      fallback.warnings.unshift(`A leitura com IA falhou (${reason}); usei a leitura automática simples, que erra mais. Revise com atenção.`);
+      return fallback;
+    }
+  }
+  return importExamFileHeuristic(file);
+}
+
+async function importExamFileHeuristic(file: File): Promise<ImportResult> {
   const name = file.name.toLowerCase();
   try {
     if (name.endsWith('.docx')) {
@@ -600,7 +876,7 @@ export async function importExamFile(file: File): Promise<ImportResult> {
       const buffer = await file.arrayBuffer();
       return parseSpreadsheet(buffer);
     }
-    return { sections: [], warnings: ['Formato não suportado. Envie um arquivo .docx, .xlsx, .xls, .csv ou .pdf.'] };
+    return { sections: [], warnings: ['Formato não suportado. Envie .docx, .pdf, fotos (.jpg/.png), .xlsx, .xls ou .csv.'] };
   } catch (error) {
     console.error('Error importing exam file:', error);
     return { sections: [], warnings: ['Não foi possível ler o arquivo. Verifique se ele não está corrompido ou protegido por senha.'] };

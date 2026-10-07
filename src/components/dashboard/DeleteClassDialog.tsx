@@ -4,6 +4,7 @@ import { Button } from '../ui/button';
 import { Checkbox } from '../ui/checkbox';
 import { Trash2, UserMinus, Users, ListChecks, Loader2, AlertCircle } from 'lucide-react';
 import { apiService } from '../../utils/api';
+import { PopupHeader, POPUP_BUTTON } from './PopupHeader';
 
 export type DeleteClassMode = 'class-only' | 'with-students' | 'selected';
 
@@ -97,27 +98,22 @@ export function DeleteClassDialog({ classItem, loading, onCancel, onConfirm }: P
 
   return (
     <Dialog open={!!classItem} onOpenChange={(open) => { if (!open && !loading) onCancel(); }}>
-      <DialogContent className="sm:max-w-3xl bg-zinc-100 border-zinc-300 p-0 gap-0 overflow-hidden rounded-3xl before:hidden">
-        <div className="relative overflow-hidden bg-gradient-to-br from-zinc-900 via-zinc-800 to-zinc-700 px-7 py-6">
-          <div className="pointer-events-none absolute -top-16 -right-12 h-44 w-44 rounded-full bg-red-500/25 blur-3xl" />
-          <div className="absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-red-700 via-red-500 to-red-700" />
-          <div className="relative flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-red-600 text-white shadow-lg">
-              <Trash2 className="h-5 w-5" />
-            </span>
-            <div>
-              <DialogTitle className="text-xl font-bold text-white">Excluir turma</DialogTitle>
-              <DialogDescription className="text-zinc-300">
-                {classItem.name}
-                {[classItem.grade, classItem.shift, classItem.year].filter(Boolean).length > 0 && (
-                  <> · {[classItem.grade, classItem.shift, classItem.year].filter(Boolean).join(' · ')}</>
-                )}
-              </DialogDescription>
-            </div>
-          </div>
-        </div>
+      <DialogContent className="sm:max-w-3xl bg-zinc-50 border-zinc-200/80 p-0 gap-0 overflow-hidden rounded-2xl shadow-[0_24px_60px_-12px_rgba(0,0,0,0.35)] before:hidden">
+        <PopupHeader
+          tone="danger"
+          icon={<Trash2 />}
+          title="Excluir turma"
+          description={
+            <>
+              {classItem.name}
+              {[classItem.grade, classItem.shift, classItem.year].filter(Boolean).length > 0 && (
+                <> · {[classItem.grade, classItem.shift, classItem.year].filter(Boolean).join(' · ')}</>
+              )}
+            </>
+          }
+        />
 
-        <div className="mx-5 my-5 space-y-4 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm">
+        <div className="mx-5 my-5 space-y-4 rounded-xl border border-zinc-200 bg-white p-5">
           {loadingStudents ? (
             <div className="flex items-center gap-2 py-6 text-zinc-600">
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -173,13 +169,13 @@ export function DeleteClassDialog({ classItem, loading, onCancel, onConfirm }: P
           )}
 
           <div className="grid grid-cols-2 gap-3 pt-1">
-            <Button variant="outline" onClick={onCancel} disabled={loading} className="h-12 border-2 border-zinc-300 font-semibold">
+            <Button variant="outline" onClick={onCancel} disabled={loading} className={POPUP_BUTTON.cancel}>
               Cancelar
             </Button>
             <Button
               onClick={() => onConfirm(mode, chosenIds)}
               disabled={confirmDisabled}
-              className="h-12 bg-gradient-to-r from-red-600 to-zinc-800 font-semibold text-white shadow-lg hover:from-red-700 hover:to-zinc-900 hover:shadow-xl"
+              className={POPUP_BUTTON.danger}
             >
               {loading ? 'Excluindo...' : confirmLabel}
             </Button>
