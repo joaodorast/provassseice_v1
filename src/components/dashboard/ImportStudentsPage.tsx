@@ -24,7 +24,8 @@ import {
   School,
   UserX,
   UserPlus,
-  UserCog
+  UserCog,
+  Eraser
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Checkbox } from '../ui/checkbox';
@@ -99,8 +100,11 @@ export function ManageStudentsPage() {
   const [assignOpen, setAssignOpen] = useState(false);
   const unassignedCount = students.filter(s => !s.class?.trim()).length;
   const [pendingDelete, setPendingDelete] = useState<
-    { kind: 'students'; ids: string[] } | { kind: 'class'; name: string } | null
+    { kind: 'students'; ids: string[] } | { kind: 'classes'; names: string[]; mode: 'clear' | 'delete' } | null
   >(null);
+  // Modal de turmas em lote: limpar (apaga os alunos e mantém a turma) ou excluir (remove a turma)
+  const [bulkClassesOpen, setBulkClassesOpen] = useState(false);
+  const [bulkClassNames, setBulkClassNames] = useState<Set<string>>(new Set());
   const [deleteClassStudentsToo, setDeleteClassStudentsToo] = useState(true);
   const [loading, setLoading] = useState(false);
   const [isDraggingFile, setIsDraggingFile] = useState(false);
@@ -322,9 +326,13 @@ export function ManageStudentsPage() {
     }
   };
 
-  const handleDeleteClass = async (className: string) => {
-    const classesToDelete = registeredClassesMatching(className);
-    const studentIds = deleteClassStudentsToo ? studentsOfClass(className).map(s => s.id) : [];
+  // Limpar: apaga os alunos das turmas e mantém as turmas cadastradas.
+  // Excluir: remove as turmas de Gerenciar Turmas e, se marcado, os alunos delas.
+  const handleBulkClasses = async (names: string[], mode: 'clear' | 'delete') => {
+    const classesToDelete = mode === 'delete' ? names.flatMap(registeredClassesNamed) : [];
+    const removeStudents = mode === 'clear' || deleteClassStudentsToo;
+    const studentIds = removeStudents ? names.flatMap(name => studentsOfClass(name).map(s => s.id)) : [];
+    const label = names.length === 1 ? `Turma "${names[0]}"` : `${names.length} turmas`;
     try {
       setLoading(true);
       // Uma por vez: o servidor reescreve a lista inteira de turmas a cada exclusão
@@ -332,16 +340,23 @@ export function ManageStudentsPage() {
         await apiService.deleteClass(cls.id);
       }
       await deleteStudentsByIds(studentIds);
-      setFilterClass('all');
+      if (names.some(name => normalize(name) === normalize(filterClass))) setFilterClass('all');
       setSelectedIds(new Set());
+      setBulkClassNames(new Set());
+      setBulkClassesOpen(false);
       await Promise.all([loadStudents(), loadCoursesAndClasses()]);
       toast.success(
-        `Turma "${className}" removida` + (studentIds.length ? ` com ${studentIds.length} aluno(s)` : '')
+        mode === 'clear'
+          ? `${label}: ${studentIds.length} aluno(s) removido(s)`
+          : `${label} excluída(s)` + (studentIds.length ? ` com ${studentIds.length} aluno(s)` : '')
       );
     } catch (error) {
-      console.error('Error deleting class:', error);
+      console.error('Error in bulk class action:', error);
       await Promise.all([loadStudents(), loadCoursesAndClasses()]);
-      toast.error('Erro ao remover turma: ' + ((error as Error)?.message || 'erro desconhecido'));
+      toast.error(
+        (mode === 'clear' ? 'Erro ao limpar turmas: ' : 'Erro ao excluir turmas: ') +
+        ((error as Error)?.message || 'erro desconhecido')
+      );
     } finally {
       setLoading(false);
     }
@@ -352,7 +367,7 @@ export function ManageStudentsPage() {
     setPendingDelete(null);
     if (!pending) return;
     if (pending.kind === 'students') await handleDeleteStudents(pending.ids);
-    else await handleDeleteClass(pending.name);
+    else await handleBulkClasses(pending.names, pending.mode);
   };
 
   const handleEditStudent = (student: Student) => {
@@ -444,12 +459,9 @@ export function ManageStudentsPage() {
   const studentsOfClass = (className: string) =>
     students.filter(s => normalize(s.class) === normalize(className));
   const studentsInClass = (className: string) => studentsOfClass(className).length;
-  // Turmas cadastradas com esse nome; com um curso escolhido, só a desse curso
-  const registeredClassesMatching = (className: string) =>
-    registeredClasses.filter(c =>
-      normalize(c.name) === normalize(className) &&
-      (filterCourse === 'all' || normalize(c.grade) === normalize(filterCourse))
-    );
+  // Todas as turmas cadastradas com esse nome (em qualquer curso)
+  const registeredClassesNamed = (className: string) =>
+    registeredClasses.filter(c => normalize(c.name) === normalize(className));
   const studentsInCourse = (course: string) =>
     students.filter(s => classBelongsToCourse(s.class, course)).length;
 
@@ -461,6 +473,21 @@ export function ManageStudentsPage() {
       filterCourse === 'all' || classBelongsToCourse(name, filterCourse)
     )
   )));
+
+  // Lista do modal de turmas em lote: cadastradas e importadas, sem repetir nomes equivalentes
+  const bulkClassList = sortPtBr(Array.from(
+    [...registeredClasses.map(c => c.name), ...uniqueClasses]
+      .reduce((map, name) => (map.has(normalize(name)) ? map : map.set(normalize(name), name)), new Map<string, string>())
+      .values()
+  )).map(name => ({
+    name,
+    count: studentsInClass(name),
+    courses: Array.from(new Set(registeredClassesNamed(name).map(c => c.grade).filter(Boolean))),
+    registered: registeredClassesNamed(name).length > 0
+  }));
+  const bulkSelected = bulkClassList.filter(c => bulkClassNames.has(c.name));
+  const bulkSelectedStudents = bulkSelected.reduce((sum, c) => sum + c.count, 0);
+  const allBulkSelected = bulkClassList.length > 0 && bulkSelected.length === bulkClassList.length;
 
   const hasActiveFilter = !!filterName.trim() || !!filterRegistration.trim() ||
     filterCourse !== 'all' || filterClass !== 'all';
@@ -505,6 +532,14 @@ export function ManageStudentsPage() {
               Atribuir turma ({unassignedCount} sem turma)
             </Button>
           )}
+          <Button
+            variant="outline"
+            onClick={() => { setBulkClassNames(new Set()); setBulkClassesOpen(true); }}
+            disabled={loading}
+          >
+            <Trash2 className="w-4 h-4 mr-2" />
+            Excluir/limpar turmas
+          </Button>
           <Button variant="outline" onClick={exportToCSV}>
             <Download className="w-4 h-4 mr-2" />
             Exportar CSV
@@ -845,21 +880,6 @@ export function ManageStudentsPage() {
                     </Button>
                   </div>
                 )}
-                {filterClass !== 'all' && filterClass !== NO_CLASS_FILTER && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={loading}
-                    className="text-red-600 border-red-300 hover:bg-red-50 hover:text-red-700"
-                    onClick={() => {
-                      setDeleteClassStudentsToo(true);
-                      setPendingDelete({ kind: 'class', name: filterClass });
-                    }}
-                  >
-                    <Trash2 className="w-4 h-4 mr-2" />
-                    Apagar turma
-                  </Button>
-                )}
                 <Button variant="ghost" size="sm" onClick={clearFilters}>Limpar filtros</Button>
               </div>
             </div>
@@ -993,52 +1013,140 @@ export function ManageStudentsPage() {
       <ConfirmDeleteDialog
         open={!!pendingDelete}
         title={
-          pendingDelete?.kind === 'class'
-            ? 'Apagar turma?'
+          pendingDelete?.kind === 'classes'
+            ? `${pendingDelete.mode === 'clear' ? 'Limpar' : 'Excluir'} ${pendingDelete.names.length === 1 ? 'turma' : `${pendingDelete.names.length} turmas`}?`
             : pendingDelete?.ids.length === 1
               ? 'Apagar aluno?'
               : `Apagar ${pendingDelete?.ids.length ?? 0} alunos?`
         }
         itemName={
-          pendingDelete?.kind === 'class'
-            ? pendingDelete.name
+          pendingDelete?.kind === 'classes'
+            ? pendingDelete.names.join(', ')
             : pendingDelete?.ids.length === 1
               ? students.find(s => s.id === pendingDelete.ids[0])?.name
               : undefined
         }
         description={(() => {
-          if (pendingDelete?.kind !== 'class') {
+          if (pendingDelete?.kind !== 'classes') {
             return pendingDelete && pendingDelete.ids.length > 1
               ? 'Os alunos selecionados serão removidos do sistema. Essa ação não pode ser desfeita.'
               : 'O aluno será removido do sistema. Essa ação não pode ser desfeita.';
           }
-          const matching = registeredClassesMatching(pendingDelete.name);
-          return (matching.length === 0
-            ? 'Essa turma não está cadastrada em Gerenciar Turmas; só existe nos alunos importados.'
-            : matching.length === 1
-              ? `A turma será removida de Gerenciar Turmas${matching[0].grade ? ` (curso ${matching[0].grade})` : ''}.`
-              : `${matching.length} turmas com esse nome serão removidas de Gerenciar Turmas (cursos: ${matching.map(c => c.grade).join(', ')}).`
+          const studentCount = pendingDelete.names.reduce((sum, name) => sum + studentsInClass(name), 0);
+          if (pendingDelete.mode === 'clear') {
+            return `${studentCount} aluno(s) serão removidos do sistema. As turmas continuam cadastradas em Gerenciar Turmas. Essa ação não pode ser desfeita.`;
+          }
+          const matching = pendingDelete.names.flatMap(registeredClassesNamed).length;
+          return (matching === 0
+            ? 'Essas turmas não estão cadastradas em Gerenciar Turmas; só existem nos alunos importados.'
+            : `${matching} turma(s) serão removidas de Gerenciar Turmas.`
           ) + ' Essa ação não pode ser desfeita.';
         })()}
-        confirmLabel="Sim, apagar"
+        confirmLabel={pendingDelete?.kind === 'classes' && pendingDelete.mode === 'clear' ? 'Sim, limpar' : 'Sim, apagar'}
         confirmDisabled={
-          pendingDelete?.kind === 'class' &&
-          registeredClassesMatching(pendingDelete.name).length === 0 &&
+          pendingDelete?.kind === 'classes' && pendingDelete.mode === 'delete' &&
+          pendingDelete.names.flatMap(registeredClassesNamed).length === 0 &&
           !deleteClassStudentsToo
         }
         onConfirm={confirmPendingDelete}
         onCancel={() => setPendingDelete(null)}
       >
-        {pendingDelete?.kind === 'class' && studentsInClass(pendingDelete.name) > 0 && (
+        {pendingDelete?.kind === 'classes' && pendingDelete.mode === 'delete' &&
+          pendingDelete.names.some(name => studentsInClass(name) > 0) && (
           <label className="flex items-center gap-2 rounded-lg border border-slate-200 px-3 py-2 text-slate-800 cursor-pointer">
             <Checkbox
               checked={deleteClassStudentsToo}
               onCheckedChange={(checked) => setDeleteClassStudentsToo(checked === true)}
             />
-            Apagar também os {studentsInClass(pendingDelete.name)} aluno(s) dessa turma
+            Apagar também os {pendingDelete.names.reduce((sum, name) => sum + studentsInClass(name), 0)} aluno(s) dessas turmas
           </label>
         )}
       </ConfirmDeleteDialog>
+
+      {/* Turmas em lote: marcar várias e limpar (apagar alunos) ou excluir (remover turmas) */}
+      <Dialog open={bulkClassesOpen} onOpenChange={(open) => { if (!loading) setBulkClassesOpen(open); }}>
+        <DialogContent className="sm:max-w-2xl bg-zinc-50 border-zinc-200/80 p-0 gap-0 overflow-hidden rounded-2xl shadow-[0_24px_60px_-12px_rgba(0,0,0,0.35)] before:hidden">
+          <PopupHeader
+            tone="danger"
+            icon={<Trash2 />}
+            title="Excluir ou limpar turmas"
+            description="Marque as turmas. Limpar apaga os alunos e mantém a turma; excluir remove a turma de Gerenciar Turmas."
+          />
+          <div className="p-5 space-y-4">
+            <div className="flex flex-col rounded-xl border border-zinc-200 bg-white">
+              <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
+                <span className="text-sm font-semibold text-zinc-800">{bulkClassList.length} turma(s)</span>
+                {bulkClassList.length > 0 && (
+                  <button
+                    type="button"
+                    className="text-sm font-semibold text-zinc-800 underline-offset-2 hover:underline"
+                    onClick={() => setBulkClassNames(allBulkSelected ? new Set() : new Set(bulkClassList.map(c => c.name)))}
+                  >
+                    {allBulkSelected ? 'Desmarcar todas' : 'Marcar todas'}
+                  </button>
+                )}
+              </div>
+              {bulkClassList.length === 0 ? (
+                <div className="p-6 text-center text-sm text-zinc-600">Nenhuma turma cadastrada ou importada.</div>
+              ) : (
+                <ul className="max-h-[360px] divide-y divide-zinc-200 overflow-y-auto">
+                  {bulkClassList.map(c => (
+                    <li key={c.name}>
+                      <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 hover:bg-zinc-50">
+                        <Checkbox
+                          checked={bulkClassNames.has(c.name)}
+                          onCheckedChange={(checked) => {
+                            const next = new Set(bulkClassNames);
+                            if (checked === true) next.add(c.name); else next.delete(c.name);
+                            setBulkClassNames(next);
+                          }}
+                        />
+                        <span className="flex-1 min-w-0">
+                          <span className="block text-sm font-medium text-zinc-900 truncate" title={c.name}>{c.name}</span>
+                          <span className="block text-xs text-zinc-500">
+                            {c.courses.length ? c.courses.join(', ') : c.registered ? 'Sem curso' : 'Só nos alunos importados'}
+                          </span>
+                        </span>
+                        <span className="text-xs tabular-nums text-zinc-600">{c.count} aluno(s)</span>
+                      </label>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <p className="text-sm text-zinc-600">
+                {bulkSelected.length} turma(s) selecionada(s) · {bulkSelectedStudents} aluno(s)
+              </p>
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={() => setBulkClassesOpen(false)} disabled={loading} className={POPUP_BUTTON.cancel}>
+                  Cancelar
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={loading || bulkSelectedStudents === 0}
+                  className={POPUP_BUTTON.cancel}
+                  onClick={() => setPendingDelete({ kind: 'classes', names: bulkSelected.map(c => c.name), mode: 'clear' })}
+                >
+                  <Eraser className="w-4 h-4 mr-2" />
+                  Limpar turmas
+                </Button>
+                <Button
+                  disabled={loading || bulkSelected.length === 0}
+                  className={POPUP_BUTTON.danger}
+                  onClick={() => {
+                    setDeleteClassStudentsToo(true);
+                    setPendingDelete({ kind: 'classes', names: bulkSelected.map(c => c.name), mode: 'delete' });
+                  }}
+                >
+                  <Trash2 className="w-4 h-4 mr-2" />
+                  Excluir turmas
+                </Button>
+              </div>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Cartões resposta enviados de um aluno */}
       <Dialog open={!!viewingCardsOf} onOpenChange={(open) => { if (!open) setViewingCardsOf(null); }}>

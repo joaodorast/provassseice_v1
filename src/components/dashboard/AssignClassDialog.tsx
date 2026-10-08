@@ -69,7 +69,7 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
     ])
       .then(([studentsRes, classesRes, seriesRes]: any[]) => {
         setStudents((studentsRes?.students || []).filter((s: Student) => !s.class?.trim()));
-        setClasses((classesRes?.classes || []).filter((c: any) => c?.name));
+        setClasses((classesRes?.classes || []).filter((c: any) => c?.name && c.isActive !== false));
         setCourses(sortSeries((seriesRes?.series || []).filter(Boolean).map((c: string) => String(c).trim())));
       })
       .catch(() => toast.error('Não foi possível carregar os alunos e as turmas'))

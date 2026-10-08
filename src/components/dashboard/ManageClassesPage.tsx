@@ -19,8 +19,10 @@ import {
   CheckCircle2,
   XCircle,
   Wand2,
-  ArrowRight
+  ArrowRight,
+  Power
 } from 'lucide-react';
+import { Switch } from '../ui/switch';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '../ui/select';
 import { toast } from '../../utils/toast';
 import { apiService } from '../../utils/api';
@@ -59,7 +61,11 @@ type Class = {
   year: string;
   studentCount: number;
   createdAt: string;
+  // Turmas antigas não têm o campo: contam como ativas
+  isActive?: boolean;
 };
+
+const isClassActive = (c: { isActive?: boolean }) => c.isActive !== false;
 
 type ActionResult = {
   type: 'success' | 'error';
@@ -368,7 +374,8 @@ export function ManageClassesPage() {
           name: editingClass.name,
           grade: editingClass.grade,
           shift: editingClass.shift,
-          year: editingClass.year
+          year: editingClass.year,
+          isActive: isClassActive(editingClass)
         })
       });
       
@@ -442,6 +449,39 @@ export function ManageClassesPage() {
     }
   };
 
+  const handleToggleActive = async (classItem: Class) => {
+    const nextActive = !isClassActive(classItem);
+    try {
+      setLoading(true);
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/classes/${classItem.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${publicAnonKey}`
+        },
+        body: JSON.stringify({
+          name: classItem.name,
+          grade: classItem.grade,
+          shift: classItem.shift,
+          year: classItem.year,
+          isActive: nextActive
+        })
+      });
+      const result = await readJson(response);
+      if (!response.ok || result.success === false) {
+        toast.error(nextActive ? 'Erro ao ativar turma' : 'Erro ao inativar turma');
+        return;
+      }
+      setClasses(prev => prev.map(c => c.id === classItem.id ? { ...c, isActive: nextActive } : c));
+      toast.success(nextActive ? 'Turma ativada!' : 'Turma inativada!', { description: classItem.name });
+    } catch (error) {
+      console.error('Error toggling class:', error);
+      toast.error(NETWORK_FAILURE);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const filteredClasses = classes
     .filter(c =>
       c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -479,6 +519,11 @@ export function ManageClassesPage() {
               <div>
                 <p className="text-sm text-slate-600">Total de Turmas</p>
                 <h3 className="text-2xl font-bold text-slate-800 mt-1">{classes.length}</h3>
+                {classes.some(c => !isClassActive(c)) && (
+                  <p className="text-xs text-slate-500 mt-1">
+                    {classes.filter(c => !isClassActive(c)).length} inativa(s)
+                  </p>
+                )}
               </div>
               <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
                 <GraduationCap className="w-6 h-6 text-zinc-800" />
@@ -701,6 +746,21 @@ export function ManageClassesPage() {
                   })}
                 </div>
               </div>
+              {editingClass && (
+                <div className="sm:col-span-2 flex items-center justify-between gap-3 rounded-lg border border-slate-200 p-3">
+                  <div>
+                    <Label htmlFor="classActive">Turma ativa</Label>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Turmas inativas continuam com seus alunos e resultados, mas ficam marcadas como inativas na lista.
+                    </p>
+                  </div>
+                  <Switch
+                    id="classActive"
+                    checked={isClassActive(editingClass)}
+                    onCheckedChange={(checked) => setEditingClass({ ...editingClass, isActive: checked })}
+                  />
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2 pt-4 border-t">
               <Button
@@ -846,8 +906,13 @@ export function ManageClassesPage() {
                         </TableCell>
                       </TableRow>
                     )}
-                    <TableRow>
-                      <TableCell className="font-medium pl-8">{classItem.name}</TableCell>
+                    <TableRow className={isClassActive(classItem) ? '' : 'opacity-60'}>
+                      <TableCell className="font-medium pl-8">
+                        {classItem.name}
+                        {!isClassActive(classItem) && (
+                          <Badge variant="outline" className="ml-2 bg-slate-100 border-slate-300 text-slate-600">Inativa</Badge>
+                        )}
+                      </TableCell>
                       <TableCell>
                         {isRegisteredCourse(classItem) ? (
                           <Badge variant="outline" className="bg-yellow-400 border-yellow-500 text-zinc-900">{course}</Badge>
@@ -872,6 +937,16 @@ export function ManageClassesPage() {
                             onClick={() => setEditingClass({ ...classItem, shift: normalizeShift(classItem.shift) })}
                           >
                             <Edit className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            disabled={loading}
+                            onClick={() => handleToggleActive(classItem)}
+                            title={isClassActive(classItem) ? 'Inativar turma' : 'Ativar turma'}
+                            aria-label={isClassActive(classItem) ? 'Inativar turma' : 'Ativar turma'}
+                          >
+                            <Power className={`w-4 h-4 ${isClassActive(classItem) ? '' : 'text-green-600'}`} />
                           </Button>
                           <Button 
                             variant="outline" 

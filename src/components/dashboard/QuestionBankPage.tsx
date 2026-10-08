@@ -621,15 +621,16 @@ export function QuestionBankPage({ arrivalResult = null, onArrivalResultClose }:
                 <label className="block text-sm font-medium text-slate-700 mb-2">Peso da Nota</label>
                 <Input 
                   type="number"
-                  min="0.1"
+                  min="0.25"
                   max="10"
-                  step="0.1"
+                  step="0.25"
                   placeholder="1.0"
                   value={newQuestion.weight}
                   onChange={(e) => setNewQuestion(prev => ({ ...prev, weight: parseFloat(e.target.value) || 1.0 }))}
+                  onBlur={() => setNewQuestion(prev => ({ ...prev, weight: Math.max(0.25, prev.weight) }))}
                   className="text-sm"
                 />
-                <p className="text-xs text-slate-500 mt-1">Valor padrão: 1.0</p>
+                <p className="text-xs text-slate-500 mt-1">Valor padrão: 1.0 · mínimo: 0,25</p>
               </div>
             </div>
             

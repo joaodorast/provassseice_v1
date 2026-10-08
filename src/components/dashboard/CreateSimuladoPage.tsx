@@ -272,8 +272,9 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
         Array.from(new Set(courses)).sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
       );
 
+      // Turmas inativas não aparecem para novos simulados
       const classes: ClassOption[] = (classesResponse?.classes || [])
-        .filter((c: any) => c?.name)
+        .filter((c: any) => c?.name && c.isActive !== false)
         .map((c: any) => ({ name: String(c.name).trim(), grade: String(c.grade || '').trim() }));
       setAvailableClasses(classes.sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true })));
     } catch (error) {

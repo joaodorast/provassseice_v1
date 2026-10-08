@@ -225,22 +225,43 @@ export function ManageSeriesPage() {
     );
   };
 
-  const renderGroupHeader = (key: string, label: string, count: number, color: string, Icon: React.ElementType, level = 0) => {
+  const renderGroupHeader = (key: string, label: string, count: number, color: string, Icon: React.ElementType, level = 0, preview: string[] = []) => {
     const c = COLOR_CLASSES[color];
+    const isOpen = !!openGroups[key];
+    const previewText = preview.length > 4 ? `${preview.slice(0, 4).join(', ')} e mais ${preview.length - 4}` : preview.join(', ');
     return (
       <button
         type="button"
         onClick={() => toggleGroup(key)}
-        className={`w-full flex items-center justify-between gap-3 rounded-lg px-3 py-2.5 text-left hover:bg-slate-50 transition-colors ${level > 0 ? 'py-2' : ''}`}
+        aria-expanded={isOpen}
+        className={`group/header w-full flex items-center justify-between gap-3 rounded-lg px-3 text-left transition-colors ${level > 0 ? 'py-2' : 'py-2.5'} ${isOpen ? c.soft : 'hover:bg-slate-50'}`}
       >
-        <div className="flex items-center gap-3">
-          <div className={`${level > 0 ? 'w-8 h-8' : 'w-10 h-10'} rounded-full ${c.bg} flex items-center justify-center`}>
+        <div className="flex items-center gap-3 min-w-0">
+          <div className={`${level > 0 ? 'w-8 h-8' : 'w-10 h-10'} shrink-0 rounded-full ${isOpen ? 'bg-white' : c.bg} flex items-center justify-center`}>
             <Icon className={`${level > 0 ? 'w-4 h-4' : 'w-5 h-5'} ${c.text}`} />
           </div>
-          <span className={`${level > 0 ? 'text-sm' : ''} font-semibold text-slate-800`}>{label}</span>
-          <Badge variant="outline" className="text-xs bg-white">{count}</Badge>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className={`${level > 0 ? 'text-sm' : ''} font-semibold text-slate-800`}>{label}</span>
+              <Badge variant="outline" className="text-xs bg-white">{count}</Badge>
+            </div>
+            {!isOpen && (
+              <p className="text-xs text-slate-500 truncate mt-0.5">
+                {previewText || 'Nenhum curso nesta etapa'}
+              </p>
+            )}
+          </div>
         </div>
-        <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${openGroups[key] ? 'rotate-180' : ''}`} />
+        <span
+          className={`shrink-0 flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+            isOpen
+              ? `bg-white ${c.text} border-current`
+              : 'bg-white text-slate-600 border-slate-200 group-hover/header:border-slate-300 group-hover/header:text-slate-800'
+          }`}
+        >
+          {isOpen ? 'Ocultar' : 'Ver cursos'}
+          <ChevronDown className={`w-4 h-4 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`} />
+        </span>
       </button>
     );
   };
@@ -498,9 +519,9 @@ export function ManageSeriesPage() {
                   const items = sortSeries(grouped[key]);
                   return (
                     <div key={key} className="p-2">
-                      {renderGroupHeader(key, s.label, items.length, s.color, s.icon)}
+                      {renderGroupHeader(key, s.label, items.length, s.color, s.icon, 0, items)}
                       {openGroups[key] && (
-                        <div className="flex flex-wrap gap-2 px-3 pb-3 pt-1">
+                        <div className={`flex flex-wrap gap-2 mx-3 mt-2 mb-2 pl-4 border-l-2 ${COLOR_CLASSES[s.color].ring.split(' ')[1]}`}>
                           {items.length > 0
                             ? items.map(name => renderSeriesChip(name, name, s.color))
                             : <p className="text-sm text-slate-400">Nenhum curso nesta etapa.</p>}
@@ -512,12 +533,15 @@ export function ManageSeriesPage() {
 
                 {/* Ensino Médio */}
                 <div className="p-2">
-                  {renderGroupHeader('em', 'Ensino Médio', emCount, 'violet', GraduationCap)}
+                  {renderGroupHeader('em', 'Ensino Médio', emCount, 'violet', GraduationCap, 0, [
+                    ...(grouped.emVestibular.length ? [`Vestibular (${grouped.emVestibular.length})`] : []),
+                    ...Object.keys(techByCourse).sort((a, b) => a.localeCompare(b, 'pt-BR')).map(course => `Técnico em ${course} (${techByCourse[course].length})`)
+                  ])}
                   {openGroups.em && (
-                    <div className="ml-5 pl-4 border-l-2 border-slate-100 space-y-1 pb-2">
+                    <div className="ml-5 mt-2 pl-4 border-l-2 border-violet-200 space-y-1 pb-2">
                       {/* Vestibular */}
                       <div>
-                        {renderGroupHeader('emVestibular', 'EM Vestibular', grouped.emVestibular.length, 'violet', Target, 1)}
+                        {renderGroupHeader('emVestibular', 'EM Vestibular', grouped.emVestibular.length, 'violet', Target, 1, sortSeries(grouped.emVestibular))}
                         {openGroups.emVestibular && (
                           <div className="flex flex-wrap gap-2 px-3 pb-2 pt-1">
                             {grouped.emVestibular.length > 0
@@ -529,7 +553,7 @@ export function ManageSeriesPage() {
 
                       {/* Técnico */}
                       <div>
-                        {renderGroupHeader('emTecnico', 'EM Técnico', grouped.emTecnico.length, 'amber', Wrench, 1)}
+                        {renderGroupHeader('emTecnico', 'EM Técnico', grouped.emTecnico.length, 'amber', Wrench, 1, Object.keys(techByCourse).sort((a, b) => a.localeCompare(b, 'pt-BR')))}
                         {openGroups.emTecnico && (
                           <div className="px-3 pb-2 pt-1 space-y-3">
                             {Object.keys(techByCourse).length === 0 && (
@@ -557,7 +581,7 @@ export function ManageSeriesPage() {
                 {/* Não identificados */}
                 {grouped.outros.length > 0 && (
                   <div className="p-2">
-                    {renderGroupHeader('outros', 'Outros', grouped.outros.length, 'slate', BookOpen)}
+                    {renderGroupHeader('outros', 'Outros', grouped.outros.length, 'slate', BookOpen, 0, sortSeries(grouped.outros))}
                     {openGroups.outros && (
                       <div className="flex flex-wrap gap-2 px-3 pb-3 pt-1">
                         {sortSeries(grouped.outros).map(name => renderSeriesChip(name, name, 'slate'))}

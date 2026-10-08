@@ -414,7 +414,7 @@ export function OverviewPage({ onNavigate }: OverviewPageProps) {
                 </thead>
                 <tbody className="bg-white divide-y divide-slate-100">
                   {recentSubmissions.map((submission, index) => (
-                    <tr key={index} className="hover:bg-amber-50/40 transition-colors duration-150">
+                    <tr key={index} className="even:bg-slate-100 hover:bg-amber-50/40 transition-colors duration-150">
                       <td className="px-3 lg:px-6 py-4">
                         <div className="flex items-center">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-zinc-100 text-zinc-800">

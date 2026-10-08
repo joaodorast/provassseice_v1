@@ -58,6 +58,8 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
       data-slot="table-row"
       className={cn(
         "hover:bg-muted/50 data-[state=selected]:bg-muted border-b transition-colors",
+        // Linhas alternadas em cinza claro, exceto quando a linha ja tem cor propria
+        !/(^|\s)bg-/.test(className ?? "") && "[tbody_&]:even:bg-slate-100",
         className,
       )}
       {...props}

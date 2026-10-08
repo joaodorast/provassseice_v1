@@ -5,6 +5,7 @@ import { MainDashboard } from './components/MainDashboard';
 import { LoadingProvider } from './components/LoadingProvider';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ActionResultHost } from './components/dashboard/ActionResultDialog';
+import { WelcomeOverlay } from './components/WelcomeOverlay';
 import { supabase } from './utils/supabase-client';
 
 export type User = {
@@ -55,6 +56,8 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [showPasswordReset, setShowPasswordReset] = useState(false);
+  // Tela animada de boas-vindas (login) ou despedida (logout)
+  const [welcome, setWelcome] = useState<{ mode: 'login' | 'logout'; name: string } | null>(null);
 
   useEffect(() => {
     initializeAuth();
@@ -152,22 +155,36 @@ function App() {
     }
   };
 
+  const firstName = (u: User) =>
+    (u.user_metadata?.name || u.email.split('@')[0]).trim().split(/\s+/)[0];
+
   const handleLogin = async (user: User) => {
+    setWelcome({ mode: 'login', name: firstName(user) });
     setUser(user);
     console.log('User logged in:', user.email);
   };
 
-  const handleLogout = async () => {
+  // A despedida cobre a tela; o logout acontece por trás dela e, ao sumir, já mostra o login
+  const handleLogout = () => {
+    if (!user) return;
+    setWelcome({ mode: 'logout', name: firstName(user) });
+    setTimeout(doLogout, 500);
+  };
+
+  const handleWelcomeDone = () => setWelcome(null);
+
+  const welcomeOverlay = welcome && (
+    <WelcomeOverlay mode={welcome.mode} name={welcome.name} onDone={handleWelcomeDone} />
+  );
+
+  const doLogout = async () => {
     try {
-      setLoading(true);
       await supabase.auth.signOut();
       localStorage.removeItem('access_token');
       setUser(null);
       console.log('User logged out successfully');
     } catch (error) {
       console.error('Error during logout:', error);
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -202,6 +219,7 @@ function App() {
       <ErrorBoundary>
         <LoadingProvider>
           <LoginPage onLogin={handleLogin} />
+          {welcomeOverlay}
           <ActionResultHost />
         </LoadingProvider>
       </ErrorBoundary>
@@ -217,6 +235,7 @@ function App() {
             onLogout={handleLogout}
           />
         </div>
+        {welcomeOverlay}
         <ActionResultHost />
       </LoadingProvider>
     </ErrorBoundary>
