@@ -2736,8 +2736,22 @@ const EXAM_EXTRACT_MODEL = 'claude-opus-5-5';
 const examExtractSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['questions', 'answerKey'],
+  required: ['questions', 'answerKey', 'sectionHeadings'],
   properties: {
+    // Títulos de matéria na ordem em que aparecem, com o número da questão logo abaixo de cada um:
+    // é isso que divide as seções (mais confiável que o rótulo de cada questão)
+    sectionHeadings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'firstQuestionNumber'],
+        properties: {
+          name: { type: 'string' },
+          firstQuestionNumber: { type: 'integer' },
+        },
+      },
+    },
     questions: {
       type: 'array',
       items: {
@@ -2788,6 +2802,7 @@ Regras:
 2. Provas em duas colunas: leia a coluna da esquerda de cima a baixo e depois a da direita.
 3. Ignore cabeçalho e rodapé (nome da escola, "Nome:", "Turma:", "Data:", número de página, logotipos) e instruções gerais da prova.
 4. "section" = a matéria/seção a que a questão pertence (ex: "Língua Portuguesa", "Matemática"), escrita como aparece no título, sem traços decorativos. Se nenhum título de matéria aparece antes da questão neste trecho, use "".
+4a. "sectionHeadings": TODO título de matéria/seção que aparece neste trecho (ex: "LÍNGUA PORTUGUESA", "MATEMÁTICA", "HISTÓRIA", em faixa, caixa ou entre traços), na ordem de leitura (coluna esquerda inteira, depois a direita). "name" = o nome sem traços decorativos; "firstQuestionNumber" = o número impresso da PRIMEIRA questão que vem logo depois desse título na ordem de leitura (ex: título "HISTÓRIA" no fim da coluna direita, seguido da questão 21 → 21). Se o título é a última coisa do trecho e a questão seguinte não aparece aqui, use 0. Atenção: o título pode estar no MEIO de uma coluna, depois de questões da matéria anterior; as questões acima dele continuam na matéria anterior. Não inclua o título do cabeçalho da página (nome do simulado, série).
 5. Texto de apoio ("Texto I", "Leia o texto para responder às questões 3 e 4", tirinha, poema): coloque o texto de apoio no início do enunciado da PRIMEIRA questão que o usa; nas seguintes, comece o enunciado com "(Use o texto da questão N)". Se o apoio é uma imagem/gráfico/tirinha sem texto legível, descreva em uma linha entre colchetes, ex: "[Imagem: gráfico de barras com vendas por mês]" e marque hasFigure=true.
 6. "options": só o texto de cada alternativa, na ordem A, B, C, D, E, SEM a letra (sem "A)", "(B)", "c." etc). Questão sem alternativas = type "essay" e options [].
 6a. Alternativa (ou trecho do enunciado) que está como IMAGEM mas mostra texto, número, fórmula, equação, medida ou expressão (ex: uma imagem com "√68 m", "√6,57 m", "x² + 1", "3/4", "R$ 12,50"): TRANSCREVA o conteúdo como texto, exatamente como aparece (ex: "√68 m"). Isso NÃO é figura: não use colchetes e não marque hasFigure por causa disso. Raiz: escreva "√" seguido do radicando inteiro (√6,57 m, √(x+1)). É muito comum em Matemática as alternativas serem equações coladas como imagem: leia cada uma com cuidado.
@@ -2840,6 +2855,7 @@ app.post('/make-server-83358821/ai/extract-exam', requireAuth, async (c) => {
       success: true,
       questions: Array.isArray(result?.questions) ? result.questions : [],
       answerKey: Array.isArray(result?.answerKey) ? result.answerKey : [],
+      sectionHeadings: Array.isArray(result?.sectionHeadings) ? result.sectionHeadings : [],
     });
   } catch (error) {
     console.error('Error extracting exam:', error);

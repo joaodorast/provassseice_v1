@@ -631,6 +631,8 @@ interface AIQuestion {
 interface AIPart {
   questions: AIQuestion[];
   answerKey: { section: string; number: number; letter: string }[];
+  /** Títulos de matéria do trecho, com o número da primeira questão logo abaixo de cada um */
+  sectionHeadings: { name: string; firstQuestionNumber: number }[];
 }
 
 type ProgressFn = (done: number, total: number) => void;
@@ -803,7 +805,7 @@ async function extractPartsWithAI(parts: AIPartInput[], onProgress?: ProgressFn)
   return runLimited(parts.map((part, i) => async () => {
     const res: any = await apiService.extractExamAI({ ...part, partIndex: i + 1, partTotal: parts.length });
     if (!res?.success) throw new Error(res?.error || 'Falha ao ler a prova com IA');
-    return { questions: res.questions || [], answerKey: res.answerKey || [] } as AIPart;
+    return { questions: res.questions || [], answerKey: res.answerKey || [], sectionHeadings: res.sectionHeadings || [] } as AIPart;
   }), PARALLEL_REQUESTS, () => onProgress?.(++done, parts.length));
 }
 
@@ -817,7 +819,18 @@ function mergeAIParts(parts: AIPart[]): ImportResult {
   const sameName = (a: string, b: string) => stripAccents(a).toLowerCase().trim() === stripAccents(b).toLowerCase().trim();
   const letterIndex = (l: string): number | undefined => LETTER_INDEX[(l || '').toLowerCase()];
 
+  // A divisão das seções segue os títulos de matéria ("HISTÓRIA" logo antes da questão 21):
+  // a questão logo abaixo do título abre a seção e as seguintes ficam nela até o próximo título.
+  // O rótulo de matéria de cada questão só é usado se a IA não achou título nenhum.
+  const useHeadings = parts.some(p => p.sectionHeadings?.length);
+  // Título no fim de um trecho, cuja primeira questão só aparece no trecho seguinte
+  let pendingHeading: string | null = null;
+
   for (const part of parts) {
+    const headings = (part.sectionHeadings || [])
+      .map(h => ({ name: cleanHeadingText(String(h.name || '')), number: Number(h.firstQuestionNumber) || 0 }))
+      .filter(h => h.name);
+
     part.questions.forEach((aq, i) => {
       const options = (aq.options || []).slice(0, 5).map(o => String(o || '').trim());
       const answer = letterIndex(aq.correctLetter);
@@ -841,7 +854,22 @@ function mergeAIParts(parts: AIPart[]): ImportResult {
       const question = (aq.statement || '').trim();
       if (!question) return;
 
-      const sectionName = (aq.section || '').trim() || current?.name || 'Questões';
+      let sectionName: string;
+      if (useHeadings) {
+        const idx = headings.findIndex(h => h.number > 0 && h.number === aq.number);
+        if (idx >= 0) {
+          sectionName = headings[idx].name;
+          headings.splice(0, idx + 1);
+          pendingHeading = null;
+        } else if (pendingHeading) {
+          sectionName = pendingHeading;
+          pendingHeading = null;
+        } else {
+          sectionName = current?.name || (aq.section || '').trim() || 'Questões';
+        }
+      } else {
+        sectionName = (aq.section || '').trim() || current?.name || 'Questões';
+      }
       if (!current || !sameName(current.name, sectionName)) {
         current = sections.find(s => sameName(s.name, sectionName)) || null;
         if (!current) {
@@ -862,6 +890,8 @@ function mergeAIParts(parts: AIPart[]): ImportResult {
       current.questions.push(q);
       metas.push({ q, section: current.name, number: aq.number, answered: answer !== undefined, figure: !!aq.hasFigure });
     });
+    // Título que sobrou no trecho (sem a questão dele aqui) vale para a próxima questão nova
+    if (headings.length) pendingHeading = headings[headings.length - 1].name;
   }
 
   // Gabarito em tabela/lista (normalmente no fim da prova)
