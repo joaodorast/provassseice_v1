@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Switch } from '@/components/ui/switch';
+import { Progress } from '@/components/ui/progress';
 import {
   Plus,
   Save,
@@ -733,16 +734,38 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   // Importa Word, Excel/CSV, PDF ou fotos da prova e converte em seções/questões prontas.
   const [isImportingFile, setIsImportingFile] = useState(false);
   const [importProgress, setImportProgress] = useState('');
+  // Partes da prova já lidas pela IA (null = ainda preparando o arquivo) e a porcentagem mostrada na barra
+  const [importStep, setImportStep] = useState<{ done: number; total: number } | null>(null);
+  const [importPercent, setImportPercent] = useState(0);
+
+  // Cada parte leva dezenas de segundos na IA: a barra avança devagar dentro da parte atual
+  // (sem passar do fim dela) para não parecer travada, e salta quando a parte termina.
+  useEffect(() => {
+    if (!isImportingFile) return;
+    const timer = setInterval(() => {
+      setImportPercent(p => {
+        const floor = importStep ? 10 + 85 * (importStep.done / importStep.total) : 0;
+        const cap = importStep ? 10 + 85 * ((importStep.done + 0.9) / importStep.total) : 9;
+        return Math.max(floor, p + (cap - p) * 0.04);
+      });
+    }, 400);
+    return () => clearInterval(timer);
+  }, [isImportingFile, importStep]);
+
   const handleImportFile = async (fileList: FileList | null) => {
     const files = fileList ? Array.from(fileList) : [];
     if (files.length === 0) return;
     setIsImportingFile(true);
     setImportProgress('');
+    setImportStep(null);
+    setImportPercent(0);
     try {
       const { importExamFile } = await import('../../utils/examImport');
       const result = await importExamFile(files, (done, total) => {
         setImportProgress(total > 1 ? `Lendo com IA... ${done}/${total}` : 'Lendo com IA...');
+        setImportStep({ done, total });
       });
+      setImportPercent(100);
 
       if (result.sections.length === 0) {
         toast.error(result.warnings[0] || 'Não foi possível importar questões desse arquivo.');
@@ -795,6 +818,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     } finally {
       setIsImportingFile(false);
       setImportProgress('');
+      setImportStep(null);
     }
   };
 
@@ -1279,6 +1303,28 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
           <p className="text-xs text-slate-500 -mt-4">
             Word, PDF e fotos da prova (pode escolher várias fotos, na ordem das páginas) são lidos com IA e separados em seções e questões. O gabarito é puxado quando está marcado na prova (em vermelho, circulado ou numa tabela de gabarito). Sempre revise o resultado antes de salvar.
           </p>
+
+          {isImportingFile && (
+            <Card className="border-2">
+              <CardContent className="p-4 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="flex items-center font-medium text-slate-800">
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    {!importStep
+                      ? 'Preparando o arquivo...'
+                      : importStep.done < importStep.total
+                        ? `Lendo a prova com IA — ${importStep.done} de ${importStep.total} partes prontas`
+                        : 'Organizando seções e questões...'}
+                  </span>
+                  <span className="text-slate-600 tabular-nums">{Math.round(importPercent)}%</span>
+                </div>
+                <Progress value={importPercent} />
+                <p className="text-xs text-slate-500">
+                  Pode levar alguns minutos em provas grandes. Não feche nem recarregue a página.
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           {simuladoData.sections.length === 0 ? (
             <Card>
