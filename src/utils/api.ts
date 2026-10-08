@@ -444,7 +444,8 @@ class ApiService {
 
   // AI-powered correction (Claude)
   // Lê um trecho da prova (páginas como imagem ou texto do Word) com IA e devolve as questões
-  async extractExamAI(part: { images?: string[]; text?: string; partIndex: number; partTotal: number }) {
+  // imageLabels: no Word, o nome de cada imagem ("IMAGEM 3") que o texto referencia como [IMAGEM 3]
+  async extractExamAI(part: { images?: string[]; imageLabels?: string[]; text?: string; partIndex: number; partTotal: number }) {
     return this.request('/ai/extract-exam', {
       method: 'POST',
       body: JSON.stringify(part),

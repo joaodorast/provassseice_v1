@@ -397,7 +397,7 @@ app.put('/make-server-83358821/classes/:id', requireAuth, async (c) => {
   try {
     const id = c.req.param('id');
     const body = await c.req.json();
-    const { name, grade, shift, year } = body;
+    const { name, grade, shift, year, isActive } = body;
     
     const classes = await kv.get(classesKey(c)) || [];
     const classIndex = classes.findIndex((cls: any) => cls.id === id);
@@ -412,6 +412,8 @@ app.put('/make-server-83358821/classes/:id', requireAuth, async (c) => {
       grade,
       shift,
       year,
+      // Só muda quando enviado: quem edita a turma sem mandar o campo não reativa/inativa sem querer
+      ...(typeof isActive === 'boolean' ? { isActive } : {}),
       updatedAt: new Date().toISOString()
     };
     
@@ -2770,10 +2772,14 @@ const examExtractSchema = {
   },
 };
 
-const examExtractPrompt = (source: 'images' | 'text', partIndex: number, partTotal: number) => `Você vai transcrever uma prova escolar brasileira para um sistema de simulados. ${
+const examExtractPrompt = (source: 'images' | 'text', partIndex: number, partTotal: number, hasWordImages: boolean) => `Você vai transcrever uma prova escolar brasileira para um sistema de simulados. ${
   source === 'images'
     ? 'O conteúdo está nas imagens acima, na ordem das páginas. Podem ser páginas de PDF ou FOTOS tiradas com celular (tortas, com sombra, inclinadas ou com pouca luz): leia com atenção mesmo assim.'
-    : 'O conteúdo está no texto acima, extraído de um arquivo Word. Marcadores: [TITULO] = parágrafo com estilo de título; [VERMELHO] = trecho em vermelho (no Word, indica a alternativa correta); [LISTA] = item de lista automática do Word (alternativas cuja letra é gerada pela lista); [IMAGEM] = havia uma imagem nesse ponto.'
+    : `O conteúdo está no texto acima, extraído de um arquivo Word. Marcadores: [TITULO] = parágrafo com estilo de título; [VERMELHO] = trecho em vermelho (no Word, indica a alternativa correta); [LISTA] = item de lista automática do Word (alternativas cuja letra é gerada pela lista); [IMAGEM n] = imagem nesse ponto do texto.${
+        hasWordImages
+          ? ' As imagens do Word foram enviadas acima, cada uma precedida do seu nome ("IMAGEM n"): o [IMAGEM n] no texto é exatamente aquela imagem. Leia o conteúdo dela e use-o no lugar do marcador (ex: "C) [IMAGEM 7]" com a imagem mostrando √55 m vira a alternativa "√55 m").'
+          : ''
+      } Um [IMAGEM n] sem imagem correspondente enviada não pôde ser lido: trate como figura não legível.`
 }
 Este é o trecho ${partIndex} de ${partTotal} da prova.
 
@@ -2783,7 +2789,10 @@ Regras:
 3. Ignore cabeçalho e rodapé (nome da escola, "Nome:", "Turma:", "Data:", número de página, logotipos) e instruções gerais da prova.
 4. "section" = a matéria/seção a que a questão pertence (ex: "Língua Portuguesa", "Matemática"), escrita como aparece no título, sem traços decorativos. Se nenhum título de matéria aparece antes da questão neste trecho, use "".
 5. Texto de apoio ("Texto I", "Leia o texto para responder às questões 3 e 4", tirinha, poema): coloque o texto de apoio no início do enunciado da PRIMEIRA questão que o usa; nas seguintes, comece o enunciado com "(Use o texto da questão N)". Se o apoio é uma imagem/gráfico/tirinha sem texto legível, descreva em uma linha entre colchetes, ex: "[Imagem: gráfico de barras com vendas por mês]" e marque hasFigure=true.
-6. "options": só o texto de cada alternativa, na ordem A, B, C, D, E, SEM a letra (sem "A)", "(B)", "c." etc). Se a alternativa é uma imagem, escreva uma descrição curta entre colchetes e marque hasFigure=true. Questão sem alternativas = type "essay" e options [].
+6. "options": só o texto de cada alternativa, na ordem A, B, C, D, E, SEM a letra (sem "A)", "(B)", "c." etc). Questão sem alternativas = type "essay" e options [].
+6a. Alternativa (ou trecho do enunciado) que está como IMAGEM mas mostra texto, número, fórmula, equação, medida ou expressão (ex: uma imagem com "√68 m", "√6,57 m", "x² + 1", "3/4", "R$ 12,50"): TRANSCREVA o conteúdo como texto, exatamente como aparece (ex: "√68 m"). Isso NÃO é figura: não use colchetes e não marque hasFigure por causa disso. Raiz: escreva "√" seguido do radicando inteiro (√6,57 m, √(x+1)). É muito comum em Matemática as alternativas serem equações coladas como imagem: leia cada uma com cuidado.
+6b. Só descreva entre colchetes (e marque hasFigure=true) quando a alternativa é um desenho/foto/gráfico de verdade, sem texto que a represente. Nesse caso inclua na descrição todo número ou rótulo visível.
+6c. Figura no enunciado com medidas ou dados (triângulo, escada, gangorra, plano cartesiano, tabela em imagem): descreva entre colchetes incluindo TODAS as medidas, rótulos e o que está sendo pedido, para a questão poder ser resolvida sem a imagem (ex: "[Figura: triângulo retângulo com altura 6 cm relativa à hipotenusa, projeções n e 8 cm]"). Tabela em imagem: transcreva o conteúdo.
 7. "correctLetter": preencha SÓ se a prova indica a resposta visualmente (alternativa em vermelho, destacada, circulada, marcada com X, ou "Gabarito: C" junto da questão). NUNCA resolva a questão nem chute: sem indicação, use "".
 8. Se houver um gabarito em tabela ou lista (ex: "1-A 2-C 3-B"), coloque em "answerKey" (com a "section" se o gabarito estiver separado por matéria, senão "").
 9. "continuesPrevious": true SOMENTE no primeiro item, se este trecho começa no meio de uma questão que veio do trecho anterior (resto do enunciado e/ou alternativas sem o número da questão). Nesse item, "number" é o número da questão se souber, senão 0, e "options" deve trazer só as alternativas que aparecem neste trecho, na posição certa (use "" para as que ficaram no trecho anterior).
@@ -2799,22 +2808,27 @@ app.post('/make-server-83358821/ai/extract-exam', requireAuth, async (c) => {
     const text: string = typeof body?.text === 'string' ? body.text : '';
     const partIndex = Number(body?.partIndex) || 1;
     const partTotal = Number(body?.partTotal) || 1;
+    // Word: imagens embutidas no documento, cada uma com o nome que o texto usa ([IMAGEM n])
+    const imageLabels: string[] = Array.isArray(body?.imageLabels) ? body.imageLabels.map(String) : [];
+    const isWord = text.trim().length > 0;
 
-    if (images.length === 0 && !text.trim()) {
+    if (images.length === 0 && !isWord) {
       return c.json({ error: 'Envie images ou text' }, 400);
     }
-    if (images.length > 6) {
-      return c.json({ error: 'Máximo de 6 páginas por pedido' }, 400);
+    // Páginas inteiras: até 6. Imagens do Word (equações, figuras pequenas): até 20
+    if (images.length > (isWord ? 20 : 6)) {
+      return c.json({ error: isWord ? 'Máximo de 20 imagens por pedido' : 'Máximo de 6 páginas por pedido' }, 400);
     }
 
     const content: any[] = [];
-    for (const dataUrl of images) {
-      const match = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(String(dataUrl));
+    for (let i = 0; i < images.length; i++) {
+      const match = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(String(images[i]));
       if (!match) return c.json({ error: 'Imagem inválida (use JPEG, PNG, WEBP ou GIF)' }, 400);
+      if (isWord) content.push({ type: 'text', text: imageLabels[i] || `IMAGEM ${i + 1}` });
       content.push({ type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } });
     }
-    if (text.trim()) content.push({ type: 'text', text: text });
-    content.push({ type: 'text', text: examExtractPrompt(images.length > 0 ? 'images' : 'text', partIndex, partTotal) });
+    if (isWord) content.push({ type: 'text', text: text });
+    content.push({ type: 'text', text: examExtractPrompt(isWord ? 'text' : 'images', partIndex, partTotal, isWord && images.length > 0) });
 
     const result = await callClaude(content, examExtractSchema, {
       model: EXAM_EXTRACT_MODEL,

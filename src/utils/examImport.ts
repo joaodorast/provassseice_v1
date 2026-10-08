@@ -3,7 +3,8 @@
 //
 // PDF, fotos e Word são lidos com IA (rota /ai/extract-exam): as páginas viram imagens (o Word vira
 // texto com marcadores de título/vermelho/imagem) e são enviadas em trechos de poucas páginas,
-// em paralelo. Se a IA falhar, PDF e Word caem na leitura heurística abaixo.
+// em paralelo. As imagens embutidas no Word (ex: alternativas que são equações) vão junto com o texto.
+// Se a IA falhar, PDF e Word caem na leitura heurística abaixo.
 //
 // Word: o .docx é lido diretamente do XML interno (não só o texto), para capturar formatação
 // que o enunciado usa: título com estilo "Título"/heading do Word ou texto em negrito sozinho
@@ -47,8 +48,10 @@ interface DocLine {
   /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
    * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
   listItem: boolean;
-  /** Parágrafo tem imagem (Word): a IA recebe um marcador [IMAGEM] nesse ponto */
+  /** Parágrafo tem imagem (Word): a IA recebe um marcador [IMAGEM n] nesse ponto */
   hasImage?: boolean;
+  /** Ids de relacionamento (rId) das imagens da linha, na ordem: usados para mandar a imagem à IA */
+  imageIds?: string[];
 }
 
 const LETTER_INDEX: Record<string, number> = { a: 0, b: 1, c: 2, d: 3, e: 4 };
@@ -81,6 +84,18 @@ function mathToText(math: Element): string {
     else if (name === 't') out += el.textContent || '';
   });
   return out.replace(/\s+/g, ' ').trim();
+}
+
+// rIds das imagens dentro de um desenho do Word. Imagem moderna: <a:blip r:embed>; imagem antiga
+// ou prévia de equação (MathType/OLE): <v:imagedata r:id>. Em <mc:AlternateContent> as duas formas
+// apontam para a mesma imagem, então a moderna tem prioridade.
+function imageIdsIn(node: Element): string[] {
+  const attr = (el: Element, name: string) => Array.from(el.attributes).find(a => a.localName === name)?.value;
+  const all = Array.from(node.getElementsByTagName('*'));
+  const blips = all.filter(el => localName(el) === 'blip').map(el => attr(el, 'embed')).filter((v): v is string => !!v);
+  if (blips.length) return [...new Set(blips)];
+  const vml = all.filter(el => localName(el) === 'imagedata').map(el => attr(el, 'id')).filter((v): v is string => !!v);
+  return [...new Set(vml)];
 }
 
 async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
@@ -119,6 +134,7 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     let curAllBold = true;
     let curHasText = false;
     let curHasImage = false;
+    let curImageIds: string[] = [];
     let isFirstLineOfParagraph = true;
 
     const flush = () => {
@@ -133,7 +149,8 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
           heading: isFirstLineOfParagraph && isHeadingStyle,
           redMarked: curHasRed,
           listItem: isFirstLineOfParagraph && isListItem,
-          hasImage: curHasImage
+          hasImage: curHasImage,
+          imageIds: curImageIds
         });
       }
       isFirstLineOfParagraph = false;
@@ -142,6 +159,7 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
       curAllBold = true;
       curHasText = false;
       curHasImage = false;
+      curImageIds = [];
     };
 
     runs.forEach((r) => {
@@ -182,8 +200,11 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
           curText += ' ';
         } else if (name === 'br' || name === 'cr') {
           flush();
-        } else if (name === 'drawing' || name === 'pict' || name === 'object') {
-          curHasImage = true;
+        } else if (name === 'drawing' || name === 'pict' || name === 'object' || name === 'AlternateContent') {
+          // Desenho com caixa de texto (sem imagem) tem seus parágrafos lidos à parte como w:p
+          const ids = imageIdsIn(node);
+          if (ids.length || name !== 'AlternateContent') curHasImage = true;
+          curImageIds.push(...ids);
         }
       });
       void curHasText;
@@ -585,7 +606,7 @@ function parseSpreadsheet(buffer: ArrayBuffer): ImportResult {
       options: filledOptions >= 2 ? options : ['', '', '', '', ''],
       correctAnswer,
       difficulty: cDifficulty >= 0 && row[cDifficulty] ? String(row[cDifficulty]).trim() : 'Médio',
-      points: cPoints >= 0 && Number(row[cPoints]) > 0 ? Number(row[cPoints]) : 1
+      points: cPoints >= 0 && Number(row[cPoints]) > 0 ? Math.max(0.25, Number(row[cPoints])) : 1
     });
   }
 
@@ -613,7 +634,7 @@ interface AIPart {
 }
 
 type ProgressFn = (done: number, total: number) => void;
-type AIPartInput = { images: string[] } | { text: string };
+type AIPartInput = { images: string[] } | { text: string; images: string[]; imageLabels: string[] };
 
 const PAGES_PER_REQUEST = 2;
 const PARALLEL_REQUESTS = 3;
@@ -660,34 +681,104 @@ async function pdfToJpegPages(file: File): Promise<string[]> {
   return pages;
 }
 
-// Word vira texto com marcadores que a IA entende (título, vermelho = gabarito, lista, imagem)
-function docLinesToText(lines: DocLine[]): string {
-  return lines.map(l => [
-    l.heading ? '[TITULO] ' : '',
-    l.listItem ? '[LISTA] ' : '',
-    l.redMarked ? '[VERMELHO] ' : '',
-    l.text,
-    l.hasImage ? ' [IMAGEM]' : ''
-  ].join('').trim()).filter(Boolean).join('\n');
+// Word vira texto com marcadores que a IA entende (título, vermelho = gabarito, lista, imagem).
+// Cada imagem recebe um número ([IMAGEM 3]) na ordem do documento; `imageIds[n - 1]` é o rId dela.
+function docLinesToText(lines: DocLine[]): { text: string; imageIds: (string | null)[] } {
+  const imageIds: (string | null)[] = [];
+  const text = lines.map(l => {
+    let markers = '';
+    if (l.hasImage) {
+      const ids: (string | null)[] = l.imageIds?.length ? l.imageIds : [null];
+      markers = ids.map(id => { imageIds.push(id); return ` [IMAGEM ${imageIds.length}]`; }).join('');
+    }
+    return [
+      l.heading ? '[TITULO] ' : '',
+      l.listItem ? '[LISTA] ' : '',
+      l.redMarked ? '[VERMELHO] ' : '',
+      l.text,
+      markers
+    ].join('').trim();
+  }).filter(Boolean).join('\n');
+  return { text, imageIds };
 }
 
-// Divide o texto do Word em trechos de ~8000 caracteres, cortando sempre antes de uma questão
+const IMAGE_MARKER_RE = /\[IMAGEM (\d+)\]/g;
+const MAX_WORD_IMAGES_PER_PART = 15;
+
+// Divide o texto do Word em trechos de ~8000 caracteres (ou poucas imagens), cortando sempre antes de uma questão
 function splitTextIntoParts(text: string, maxChars = 8000): string[] {
   const parts: string[] = [];
   let current: string[] = [];
   let size = 0;
+  let images = 0;
   for (const line of text.split('\n')) {
     const plain = line.replace(/^(\[[A-Z]+\]\s*)+/, '');
-    if (size > maxChars && QUESTION_RE.test(plain)) {
+    if ((size > maxChars || images >= MAX_WORD_IMAGES_PER_PART) && QUESTION_RE.test(plain)) {
       parts.push(current.join('\n'));
       current = [];
       size = 0;
+      images = 0;
     }
     current.push(line);
     size += line.length + 1;
+    images += (line.match(IMAGE_MARKER_RE) || []).length;
   }
   if (current.length) parts.push(current.join('\n'));
   return parts;
+}
+
+const WORD_IMAGE_TYPES: Record<string, string> = {
+  png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', bmp: 'image/bmp', webp: 'image/webp'
+};
+
+// Lê as imagens embutidas no Word (word/media) e converte para JPEG. Formatos que o navegador
+// não desenha (EMF/WMF, usados por equações do MathType, ou TIFF) ficam como null.
+async function loadDocxImages(file: File, ids: (string | null)[]): Promise<(string | null)[]> {
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(file);
+  const relsXml = await zip.file('word/_rels/document.xml.rels')?.async('text');
+  const targets = new Map<string, string>();
+  if (relsXml) {
+    const rels = new DOMParser().parseFromString(relsXml, 'application/xml');
+    Array.from(rels.getElementsByTagName('*')).forEach(el => {
+      const id = el.getAttribute('Id');
+      const target = el.getAttribute('Target');
+      if (id && target && el.getAttribute('TargetMode') !== 'External') targets.set(id, target);
+    });
+  }
+
+  const cache = new Map<string, Promise<string | null>>();
+  const load = async (target: string): Promise<string | null> => {
+    const path = target.startsWith('/') ? target.slice(1) : `word/${target.replace(/^\.\//, '')}`;
+    const ext = path.split('.').pop()!.toLowerCase();
+    const type = WORD_IMAGE_TYPES[ext];
+    const entry = zip.file(path);
+    if (!type || !entry) return null;
+    try {
+      const blob = new Blob([await entry.async('arraybuffer')], { type });
+      const bitmap = await createImageBitmap(blob);
+      // Equações coladas como imagem costumam ser minúsculas: amplia um pouco para a IA ler melhor
+      const scale = Math.min(1200 / Math.max(bitmap.width, bitmap.height), Math.max(1, 48 / Math.min(bitmap.width, bitmap.height)));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+      canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+      const ctx = canvas.getContext('2d')!;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      bitmap.close();
+      return canvas.toDataURL('image/jpeg', 0.85);
+    } catch {
+      return null;
+    }
+  };
+
+  return Promise.all(ids.map(id => {
+    const target = id ? targets.get(id) : undefined;
+    if (!target) return Promise.resolve(null);
+    if (!cache.has(target)) cache.set(target, load(target));
+    return cache.get(target)!;
+  }));
 }
 
 // Roda as tarefas com no máximo `limit` ao mesmo tempo, mantendo a ordem dos resultados
@@ -813,9 +904,20 @@ function mergeAIParts(parts: AIPart[]): ImportResult {
 
 async function importWithAI(files: File[], onProgress?: ProgressFn): Promise<ImportResult> {
   let parts: AIPartInput[];
+  const extraWarnings: string[] = [];
   if (files[0].name.toLowerCase().endsWith('.docx')) {
-    const text = docLinesToText(await extractLinesFromDocx(files[0]));
-    parts = splitTextIntoParts(text).map(t => ({ text: t }));
+    const { text, imageIds } = docLinesToText(await extractLinesFromDocx(files[0]));
+    const images = await loadDocxImages(files[0], imageIds);
+    // Cada trecho leva junto as imagens que ele menciona (ex: alternativas que são equações em imagem)
+    parts = splitTextIntoParts(text).map(t => {
+      const numbers = [...new Set([...t.matchAll(IMAGE_MARKER_RE)].map(m => Number(m[1])))]
+        .filter(n => images[n - 1]);
+      return { text: t, images: numbers.map(n => images[n - 1]!), imageLabels: numbers.map(n => `IMAGEM ${n}`) };
+    });
+    const unreadable = images.filter(img => !img).length;
+    if (unreadable > 0) {
+      extraWarnings.push(`${unreadable} imagem(ns) do Word estão em um formato que o navegador não consegue ler (ex: equações do MathType). Se alguma alternativa ou figura ficou vazia, salve o Word como PDF e importe o PDF.`);
+    }
   } else {
     // PDF e/ou fotos: todas as páginas como imagem, na ordem em que foram escolhidas
     const pages: string[] = [];
@@ -826,7 +928,9 @@ async function importWithAI(files: File[], onProgress?: ProgressFn): Promise<Imp
     parts = [];
     for (let i = 0; i < pages.length; i += PAGES_PER_REQUEST) parts.push({ images: pages.slice(i, i + PAGES_PER_REQUEST) });
   }
-  return mergeAIParts(await extractPartsWithAI(parts, onProgress));
+  const result = mergeAIParts(await extractPartsWithAI(parts, onProgress));
+  result.warnings.push(...extraWarnings);
+  return result;
 }
 
 // ---------- Ponto de entrada ----------
