@@ -340,6 +340,10 @@ export function SendImagesPage() {
       optionsPerQuestion
     );
     const reviewCount = Object.keys(flags).length;
+    // Só conta como problema de FOTO quando a linha nem foi encontrada na imagem.
+    // Os outros motivos (marca fraca do aluno, leituras divergentes por causa da sobreposição
+    // entre recortes, linha lida uma vez só) não são culpa da foto e não devem acusá-la.
+    const unreadCount = Object.values(flags).filter((reason) => reason === 'linha não lida').length;
 
     let correctCount = 0;
     const results = examData.questions.map((question, index) => {
@@ -412,8 +416,9 @@ export function SendImagesPage() {
       // também contam como erradas e ficam só sinalizadas (conferir é opcional).
       gradingStatus: 'graded',
       reviewCount,
-      // Muitas questões duvidosas = foto/scan ruim; nesse caso pode haver marcas fracas que a IA nem viu
-      lowQuality: reviewCount / examData.questions.length >= 0.1,
+      // Baixa qualidade de IMAGEM é só quando uma boa parte das linhas nem foi encontrada na foto
+      // (página cortada, embaçada, torta). Leitura incerta por outros motivos não entra aqui.
+      lowQuality: examData.questions.length > 0 && unreadCount / examData.questions.length >= 0.15,
       correctionType,
       questionWeights: examData.questions.map((q, idx) => ({
         questionIndex: idx,
