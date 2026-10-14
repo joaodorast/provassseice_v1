@@ -223,6 +223,8 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const [editingSection, setEditingSection] = useState<Section | null>(null);
   const [sectionName, setSectionName] = useState('');
   const [sectionDescription, setSectionDescription] = useState('');
+  // Valor a aplicar em TODAS as questões da seção de uma vez (vazio = não mexe no que já está definido)
+  const [sectionPointsEach, setSectionPointsEach] = useState('');
   
   // Question management
   const [showQuestionDialog, setShowQuestionDialog] = useState(false);
@@ -420,6 +422,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const handleAddSection = () => {
     setSectionName('');
     setSectionDescription('');
+    setSectionPointsEach('');
     setEditingSection(null);
     setShowSectionDialog(true);
   };
@@ -427,6 +430,8 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const handleEditSection = (section: Section) => {
     setSectionName(section.name);
     setSectionDescription(section.description);
+    // Em branco por padrão: só mexe nos pontos das questões se o usuário digitar um valor
+    setSectionPointsEach('');
     setEditingSection(section);
     setShowSectionDialog(true);
   };
@@ -438,15 +443,30 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     }
 
     if (editingSection) {
+      const trimmedPoints = sectionPointsEach.trim();
+      const applyPoints = trimmedPoints !== '';
+      const normalizedEach = applyPoints ? normalizePoints(parseFloat(trimmedPoints.replace(',', '.')) || 0) : null;
+
       setSimuladoData(prev => ({
         ...prev,
-        sections: prev.sections.map(s => 
-          s.id === editingSection.id 
-            ? { ...s, name: sectionName, description: sectionDescription }
+        sections: prev.sections.map(s =>
+          s.id === editingSection.id
+            ? {
+                ...s,
+                name: sectionName,
+                description: sectionDescription,
+                questions: applyPoints
+                  ? s.questions.map(q => ({ ...q, points: normalizedEach as number }))
+                  : s.questions
+              }
             : s
         )
       }));
-      toast.success('Seção atualizada!');
+      toast.success(
+        applyPoints
+          ? `Seção atualizada! As ${editingSection.questions.length} questões passaram a valer ${formatPoints(normalizedEach ?? 0)} pt(s) cada uma.`
+          : 'Seção atualizada!'
+      );
     } else {
       const newSection: Section = {
         id: `section_${Date.now()}`,
@@ -464,6 +484,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     setShowSectionDialog(false);
     setSectionName('');
     setSectionDescription('');
+    setSectionPointsEach('');
     setEditingSection(null);
   };
 
@@ -1619,6 +1640,56 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                 rows={3}
               />
             </div>
+
+            {editingSection && editingSection.questions.length > 0 && (
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Valor de cada questão desta seção (opcional)
+                </label>
+                <p className="text-xs text-slate-500 mb-2">
+                  Preencha para dar o mesmo valor às {editingSection.questions.length} questões de "{editingSection.name}" de uma vez.
+                  Deixe em branco para manter o valor de cada uma como está.
+                </p>
+                <Input
+                  type="number"
+                  min={MIN_POINTS}
+                  step="any"
+                  placeholder="Ex: 0,5"
+                  value={sectionPointsEach}
+                  onChange={(e) => setSectionPointsEach(e.target.value)}
+                  onBlur={() => {
+                    if (sectionPointsEach.trim() === '') return;
+                    const normalized = normalizePoints(parseFloat(sectionPointsEach.replace(',', '.')) || 0);
+                    setSectionPointsEach(String(normalized));
+                  }}
+                />
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {POINTS_PRESETS.map(value => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => setSectionPointsEach(String(value))}
+                      className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors ${
+                        sectionPointsEach === String(value)
+                          ? 'bg-zinc-800 text-white border-zinc-800'
+                          : 'bg-white text-slate-700 border-slate-300 hover:border-zinc-500'
+                      }`}
+                    >
+                      {formatPoints(value)}
+                    </button>
+                  ))}
+                  {sectionPointsEach !== '' && (
+                    <button
+                      type="button"
+                      onClick={() => setSectionPointsEach('')}
+                      className="px-2.5 py-1 rounded-md text-xs font-medium border border-slate-300 bg-white text-slate-500 hover:border-zinc-500"
+                    >
+                      Limpar
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className="flex justify-end space-x-2 pt-4 border-t">
               <Button variant="outline" onClick={() => setShowSectionDialog(false)}>
