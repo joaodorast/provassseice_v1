@@ -27,6 +27,7 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { toast } from '../../utils/toast';
 import { apiService } from '../../utils/api';
 import { DeleteClassDialog, DeleteClassMode } from './DeleteClassDialog';
+import { AssignClassDialog } from './AssignClassDialog';
 
 // Executa uma ação em cada item, em lotes de 10 para não sobrecarregar a API.
 // Devolve quantos falharam (erro de rede ou resposta sem sucesso).
@@ -140,6 +141,10 @@ function missingFields(data: { name: string; grade: string; shift: string }): st
 
 export function ManageClassesPage() {
   const [classes, setClasses] = useState<Class[]>([]);
+  // Nomes de turma que existem em alunos mas não em nenhuma turma cadastrada (sobra de uma
+  // renomeação ou importação antiga). Mostrados num aviso, com um jeito de recuperar os alunos.
+  const [orphanClasses, setOrphanClasses] = useState<{ name: string; count: number }[]>([]);
+  const [recoveringClass, setRecoveringClass] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [editingClass, setEditingClass] = useState<Class | null>(null);
@@ -278,15 +283,29 @@ export function ManageClassesPage() {
         const result = await response.json();
         if (result.success) {
           // Conta os alunos de cada turma pelo nome (o studentCount salvo no servidor não é atualizado)
-          const counts = new Map<string, number>();
+          const counts = new Map<string, { count: number; sample: string }>();
           (studentsResponse?.students || []).forEach((s: any) => {
-            const key = String(s.class || '').trim().toLowerCase();
-            if (key) counts.set(key, (counts.get(key) || 0) + 1);
+            const raw = String(s.class || '').trim();
+            if (!raw) return;
+            const key = raw.toLowerCase();
+            const entry = counts.get(key) || { count: 0, sample: raw };
+            entry.count++;
+            counts.set(key, entry);
           });
-          setClasses((result.classes || []).map((cls: Class) => ({
+          const classList: Class[] = result.classes || [];
+          setClasses(classList.map((cls: Class) => ({
             ...cls,
-            studentCount: counts.get(String(cls.name || '').trim().toLowerCase()) || 0
+            studentCount: counts.get(String(cls.name || '').trim().toLowerCase())?.count || 0
           })));
+
+          // Nomes de turma que têm alunos mas não existem na lista de turmas cadastradas
+          const knownNames = new Set(classList.map(c => String(c.name || '').trim().toLowerCase()));
+          setOrphanClasses(
+            Array.from(counts.entries())
+              .filter(([key]) => !knownNames.has(key))
+              .map(([, v]) => ({ name: v.sample, count: v.count }))
+              .sort((a, b) => b.count - a.count)
+          );
         }
       }
     } catch (error) {
@@ -624,6 +643,47 @@ export function ManageClassesPage() {
                   <span className="font-medium text-slate-800">Turma {fix.name}</span>
                   <Badge variant="outline" className="bg-yellow-400 border-yellow-500 text-zinc-900">{fix.grade}</Badge>
                   <span className="text-xs text-slate-400 ml-auto">{fix.reason}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Turmas antigas: têm alunos, mas o nome não existe mais na lista de turmas cadastradas
+          (sobra de uma renomeação ou importação anterior) */}
+      {orphanClasses.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50">
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-amber-100 flex items-center justify-center flex-shrink-0">
+                <Users className="w-5 h-5 text-amber-700" />
+              </div>
+              <div>
+                <p className="font-semibold text-amber-900">
+                  {orphanClasses.length} turma{orphanClasses.length !== 1 ? 's antigas têm' : ' antiga tem'} alunos fora da lista
+                </p>
+                <p className="text-sm text-amber-800">
+                  Esses nomes de turma não existem mais aqui (geralmente depois de renomear uma turma antes dessa
+                  correção), mas os alunos continuam cadastrados com o nome antigo. Escolha a turma certa para cada um.
+                </p>
+              </div>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-white divide-y divide-amber-100 text-sm">
+              {orphanClasses.map(orphan => (
+                <div key={orphan.name} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <span className="font-medium text-slate-800">"{orphan.name}"</span>
+                  <Badge variant="outline" className="bg-amber-100 border-amber-300 text-amber-900">
+                    {orphan.count} aluno{orphan.count !== 1 ? 's' : ''}
+                  </Badge>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="ml-auto border-amber-400 text-amber-800 hover:bg-amber-100"
+                    onClick={() => setRecoveringClass(orphan.name)}
+                  >
+                    Recuperar alunos
+                  </Button>
                 </div>
               ))}
             </div>
@@ -995,6 +1055,12 @@ export function ManageClassesPage() {
         loading={deleteLoading}
         onConfirm={handleDeleteClass}
         onCancel={() => setDeletingClass(null)}
+      />
+      <AssignClassDialog
+        open={!!recoveringClass}
+        sourceClassName={recoveringClass || undefined}
+        onOpenChange={(open) => { if (!open) setRecoveringClass(null); }}
+        onDone={loadClasses}
       />
     </div>
   );
