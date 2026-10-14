@@ -19,9 +19,13 @@ type Props = {
   onOpenChange: (open: boolean) => void;
   // Chamado depois que os alunos são atribuídos, para a tela recarregar a lista
   onDone: () => void;
+  // Quando informado, em vez de listar alunos SEM turma, lista quem está com esse nome de turma
+  // antigo (que não existe mais em "Gerenciar Turmas", geralmente por uma renomeação anterior)
+  sourceClassName?: string;
 };
 
 const SHIFTS = ['Manhã', 'Tarde', 'Noite'];
+const sameClassName = (a?: string, b?: string) => (a || '').trim().toLowerCase() === (b || '').trim().toLowerCase();
 
 // Lote para não sobrecarregar a API ao atualizar muitos alunos
 async function updateInBatches(ids: string[], className: string): Promise<number> {
@@ -35,7 +39,7 @@ async function updateInBatches(ids: string[], className: string): Promise<number
   return failed;
 }
 
-export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
+export function AssignClassDialog({ open, onOpenChange, onDone, sourceClassName }: Props) {
   const [students, setStudents] = useState<Student[]>([]);
   const [classes, setClasses] = useState<ClassItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -68,13 +72,15 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
       }).then(r => (r.ok ? r.json() : null)).catch(() => null),
     ])
       .then(([studentsRes, classesRes, seriesRes]: any[]) => {
-        setStudents((studentsRes?.students || []).filter((s: Student) => !s.class?.trim()));
+        setStudents((studentsRes?.students || []).filter((s: Student) =>
+          sourceClassName ? sameClassName(s.class, sourceClassName) : !s.class?.trim()
+        ));
         setClasses((classesRes?.classes || []).filter((c: any) => c?.name && c.isActive !== false));
         setCourses(sortSeries((seriesRes?.series || []).filter(Boolean).map((c: string) => String(c).trim())));
       })
       .catch(() => toast.error('Não foi possível carregar os alunos e as turmas'))
       .finally(() => setLoading(false));
-  }, [open]);
+  }, [open, sourceClassName]);
 
   const allIds = students.map(s => s.id);
   const allSelected = allIds.length > 0 && selected.size === allIds.length;
@@ -136,8 +142,10 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
         <PopupHeader
           tone="warning"
           icon={<UserX />}
-          title="Atribuir turma a alunos sem turma"
-          description="Marque os alunos e escolha uma turma existente ou crie uma nova."
+          title={sourceClassName ? `Recuperar alunos da turma antiga "${sourceClassName}"` : 'Atribuir turma a alunos sem turma'}
+          description={sourceClassName
+            ? 'Esses alunos ficaram com esse nome depois de uma renomeação ou importação anterior. Marque-os e escolha a turma certa.'
+            : 'Marque os alunos e escolha uma turma existente ou crie uma nova.'}
         />
 
         <div className="grid grid-cols-1 gap-4 p-5 md:grid-cols-2">
@@ -145,7 +153,7 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
           <div className="flex min-h-[320px] flex-col rounded-xl border border-zinc-200 bg-white">
             <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3">
               <span className="text-sm font-semibold text-zinc-800">
-                {loading ? 'Carregando...' : `${students.length} aluno(s) sem turma`}
+                {loading ? 'Carregando...' : `${students.length} aluno(s) ${sourceClassName ? `em "${sourceClassName}"` : 'sem turma'}`}
               </span>
               {students.length > 0 && (
                 <button
@@ -163,7 +171,7 @@ export function AssignClassDialog({ open, onOpenChange, onDone }: Props) {
               </div>
             ) : students.length === 0 ? (
               <div className="flex flex-1 items-center justify-center p-6 text-center text-zinc-600">
-                Todos os alunos já têm turma.
+                {sourceClassName ? 'Não sobrou nenhum aluno com esse nome de turma.' : 'Todos os alunos já têm turma.'}
               </div>
             ) : (
               <ul className="max-h-[360px] flex-1 divide-y divide-zinc-200 overflow-y-auto">
