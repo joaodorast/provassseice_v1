@@ -362,6 +362,11 @@ export function ManageClassesPage() {
       return;
     }
 
+    // Nome antes da edição: se mudar, os alunos vinculados a ele precisam ser atualizados junto,
+    // senão ficam "presos" no nome antigo e a turma renomeada parece vazia (mesmo com os alunos todos lá)
+    const previousName = classes.find(cls => cls.id === editingClass.id)?.name?.trim() || '';
+    const newName = editingClass.name.trim();
+
     try {
       setLoading(true);
       const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/classes/${editingClass.id}`, {
@@ -378,7 +383,7 @@ export function ManageClassesPage() {
           isActive: isClassActive(editingClass)
         })
       });
-      
+
       const result = await readJson(response);
 
       if (!response.ok || result.success === false) {
@@ -390,10 +395,27 @@ export function ManageClassesPage() {
         return;
       }
 
+      // Turma renomeada: move para o nome novo quem ainda está com o nome antigo salvo
+      let movedStudents = 0;
+      if (previousName && newName && previousName.toLowerCase() !== newName.toLowerCase()) {
+        const studentsRes = await apiService.getStudents();
+        const idsToMove = (studentsRes?.students || [])
+          .filter((s: any) => (s.class || '').trim().toLowerCase() === previousName.toLowerCase())
+          .map((s: any) => s.id);
+        if (idsToMove.length > 0) {
+          const failed = await runInBatches(idsToMove, (sid) => apiService.updateStudent(sid, { class: newName }));
+          movedStudents = idsToMove.length - failed;
+          if (failed > 0) {
+            toast.warning(`${failed} aluno(s) não puderam ser atualizados para o nome novo da turma. Confira em Gerenciar Alunos.`);
+          }
+        }
+      }
+
       setActionResult({
         type: 'success',
         title: 'Turma atualizada com sucesso!',
-        message: `As alterações da turma "${editingClass.name}" foram salvas.`
+        message: `As alterações da turma "${newName}" foram salvas.`
+          + (movedStudents > 0 ? ` ${movedStudents} aluno(s) foram movidos do nome antigo para o novo.` : '')
       });
       setEditingClass(null);
       await loadClasses();
