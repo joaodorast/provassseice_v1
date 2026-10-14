@@ -385,8 +385,9 @@ export function ManageStudentsPage() {
   const handleUpdateStudent = async () => {
     if (!editingStudent) return;
     
-    if (!newStudent.name || !newStudent.email) {
-      toast.error('Nome e email são obrigatórios');
+    // Só o nome é obrigatório; o e-mail é opcional (igual ao cadastro de um aluno novo)
+    if (!newStudent.name.trim()) {
+      toast.error('O nome do aluno é obrigatório');
       return;
     }
 
@@ -430,20 +431,23 @@ export function ManageStudentsPage() {
 
   const uniqueClasses = Array.from(new Set(students.map(s => s.class))).filter(Boolean);
 
-  // Números do card de estatísticas
-  const activeCount = students.filter(s => s.status === 'active').length;
-  const withoutClassCount = students.filter(s => !s.class?.trim()).length;
-  const activePercent = students.length ? Math.round((activeCount / students.length) * 100) : 0;
-  const studentsPerClass = uniqueClasses
-    .map(name => ({ name, count: students.filter(s => s.class === name).length }))
-    .sort((a, b) => b.count - a.count);
-  const topClasses = studentsPerClass.slice(0, 5);
-  const maxClassCount = topClasses[0]?.count || 1;
-
   // Ignora acento, maiúsculas, "º"/"°"/"ª" e espaços repetidos ("5º Ano" == "5 ano")
   const normalize = (text: string) =>
     stripAccents(String(text || '')).toLowerCase().replace(/[º°ª]/g, '').replace(/\s+/g, ' ').trim();
   const sortPtBr = (list: string[]) => list.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+
+  // Números do card de estatísticas
+  const activeCount = students.filter(s => s.status === 'active').length;
+  const withoutClassCount = students.filter(s => !s.class?.trim()).length;
+  const activePercent = students.length ? Math.round((activeCount / students.length) * 100) : 0;
+  // Junta grafias diferentes do mesmo nome de turma antes de contar (ex: "5001-CE" e "5001-ce")
+  const studentsPerClass = Array.from(
+    uniqueClasses.reduce((map, name) => (map.has(normalize(name)) ? map : map.set(normalize(name), name)), new Map<string, string>()).values()
+  )
+    .map(name => ({ name, count: students.filter(s => normalize(s.class) === normalize(name)).length }))
+    .sort((a, b) => b.count - a.count);
+  const topClasses = studentsPerClass.slice(0, 5);
+  const maxClassCount = topClasses[0]?.count || 1;
 
   // Uma turma pertence a um curso se estiver cadastrada nele em "Gerenciar Turmas" ou, para
   // turmas importadas com nome longo (ex: "- (2025) - 5º ano (5002) Ensino Fundamental - Tarde"),
@@ -468,11 +472,15 @@ export function ManageStudentsPage() {
   const courseOptions = sortPtBr(Array.from(new Set(
     [...registeredCourses, ...registeredClasses.map(c => c.grade)].filter(Boolean)
   )));
-  const classOptions = sortPtBr(Array.from(new Set(
-    [...registeredClasses.map(c => c.name), ...uniqueClasses].filter(name =>
-      filterCourse === 'all' || classBelongsToCourse(name, filterCourse)
-    )
-  )));
+  // Junta grafias diferentes do mesmo nome (ex: "5001-CE" e "5001-ce", de uma importação ou
+  // renomeação antiga) numa única opção, do mesmo jeito que a lista de turmas em lote já faz.
+  // studentsInClass soma os alunos de todas as grafias, então a contagem ao lado fica certa.
+  const classOptions = sortPtBr(Array.from(
+    [...registeredClasses.map(c => c.name), ...uniqueClasses]
+      .filter(name => filterCourse === 'all' || classBelongsToCourse(name, filterCourse))
+      .reduce((map, name) => (map.has(normalize(name)) ? map : map.set(normalize(name), name)), new Map<string, string>())
+      .values()
+  ));
 
   // Lista do modal de turmas em lote: cadastradas e importadas, sem repetir nomes equivalentes
   const bulkClassList = sortPtBr(Array.from(
