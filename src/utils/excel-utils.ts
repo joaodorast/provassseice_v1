@@ -203,7 +203,7 @@ export class ExcelExporter {
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
         cell.alignment = {
           horizontal: column.type === 'number' || column.type === 'percentage' ? 'right' : column.type === 'date' ? 'center' : 'left',
-          vertical: 'top',
+          vertical: 'middle',
           wrapText: shouldWrap,
         };
         cell.border = {
@@ -250,7 +250,11 @@ export class ExcelExporter {
             const max = Math.max(...values);
             const min = Math.min(...values);
             const cell = sheet.getCell(`A${statsRow}`);
-            cell.value = `${column.header} — Média: ${avg.toFixed(2)} | Máximo: ${max} | Mínimo: ${min}`;
+            // Números no formato brasileiro (vírgula decimal); percentuais com "%"
+            const fmt = (n: number) =>
+              n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) +
+              (column.type === 'percentage' ? '%' : '');
+            cell.value = `${column.header} — Média: ${fmt(avg)} | Máximo: ${fmt(max)} | Mínimo: ${fmt(min)}`;
             cell.font = { name: 'Calibri', size: 10, color: { argb: SEICE_XLSX_COLORS.textMuted } };
             statsRow++;
           }
