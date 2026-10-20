@@ -22,6 +22,7 @@ import { toast } from '../../utils/toast';
 import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+import { buildGradeReportSheets } from '../../utils/grade-report';
 
 const IMAGE_CORRECTION_TYPES = ['manual-image', 'manual-image-batch', 'auto-image-individual', 'auto-image-batch'];
 
@@ -93,6 +94,8 @@ export function GradeExamsPage() {
         studentClass: sub.studentClass,
         studentGrade: sub.studentGrade,
         answers: sub.answers || [],
+        // Resultado de cada questão (já com revisões manuais): usado no cálculo das notas em pontos
+        results: sub.results || [],
         correctAnswers,
         score: sub.score || 0,
         totalQuestions: sub.totalQuestions || correctAnswers.length,
@@ -261,37 +264,6 @@ export function GradeExamsPage() {
 
   const stats = getGradingStats();
 
-  const buildSubjectBreakdown = (validSubmissions) => {
-    const bySubject: Record<string, any[]> = {};
-
-    validSubmissions.forEach(submission => {
-      submission.subjectPerformances.forEach(subj => {
-        if (!bySubject[subj.subject]) {
-          bySubject[subj.subject] = [];
-        }
-        bySubject[subj.subject].push({
-          aluno: submission.studentName,
-          turma: submission.studentClass,
-          acertos: subj.correctAnswers,
-          total: subj.totalQuestions,
-          percentual: subj.percentage,
-          notaGeral: submission.percentage
-        });
-      });
-    });
-
-    return bySubject;
-  };
-
-  const SUBJECT_SHEET_COLUMNS: ExcelColumn[] = [
-    { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
-    { header: 'Turma', key: 'turma', width: 15, type: 'text' },
-    { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
-    { header: 'Total', key: 'total', width: 12, type: 'number' },
-    { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
-    { header: 'Nota Geral', key: 'notaGeral', width: 14, type: 'percentage' },
-  ];
-
   const getUniqueSubjects = (submissionsList) => {
     const subjects = new Set();
     submissionsList.forEach(sub => {
@@ -318,59 +290,28 @@ export function GradeExamsPage() {
     const prefix = filenamePrefix || 'Relatorio_Geral';
 
     try {
+      const examsById = Object.fromEntries(exams.map(e => [e.id, e]));
+      const sheets = buildGradeReportSheets({
+        title: 'Relatório Geral de Correções',
+        submissions: validSubmissions,
+        examsById,
+        correctionTypeLabel: (sub) =>
+          sub.correctionType === 'manual-image' ? 'Cartão Individual' :
+          sub.correctionType === 'manual-image-batch' ? 'Cartão Lote' :
+          IMAGE_CORRECTION_TYPES.includes(sub.correctionType) ? 'Cartão (automática)' : 'Online'
+      });
+
       if (type === 'all') {
-        const bySubject = buildSubjectBreakdown(validSubmissions);
-
-        const resumoSheet = {
-          title: 'Relatório Geral de Correções',
-          subtitle: `Total de alunos: ${validSubmissions.length}`,
-          sheetName: 'Resumo Geral',
-          includeStats: true,
-          columns: [
-            { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
-            { header: 'Turma', key: 'turma', width: 15, type: 'text' },
-            { header: 'Simulado', key: 'simulado', width: 30, type: 'text' },
-            { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
-            { header: 'Total Questões', key: 'totalQuestoes', width: 14, type: 'number' },
-            { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
-            { header: 'Tipo de Correção', key: 'tipoCorrecao', width: 20, type: 'text' },
-          ] as ExcelColumn[],
-          data: validSubmissions.map(sub => ({
-            aluno: sub.studentName,
-            turma: sub.studentClass,
-            simulado: sub.examTitle,
-            acertos: sub.score,
-            totalQuestoes: sub.totalQuestions,
-            percentual: sub.percentage,
-            tipoCorrecao: sub.correctionType === 'manual-image' ? 'Cartão Individual' :
-              sub.correctionType === 'manual-image-batch' ? 'Cartão Lote' : 'Online',
-          })),
-        };
-
-        const subjectSheets = Object.entries(bySubject).map(([subjectName, data]) => ({
-          title: `Detalhamento — ${subjectName}`,
-          sheetName: subjectName,
-          includeStats: true,
-          columns: SUBJECT_SHEET_COLUMNS,
-          data,
-        }));
-
-        await exporter.exportMultiSheet([resumoSheet, ...subjectSheets], `${prefix}_${timestamp}`);
+        await exporter.exportMultiSheet(sheets, `${prefix}_${timestamp}`);
       } else if (type === 'subject' && subject) {
-        const bySubject = buildSubjectBreakdown(validSubmissions);
-        const data = bySubject[subject];
-
-        if (!data) {
+        const sheet = sheets.find(sh => sh.sheetName === subject);
+        if (!sheet) {
           toast.error(`Matéria "${subject}" não encontrada`);
           return;
         }
-
         await exporter.export({
+          ...sheet,
           title: `Correções — ${subject}`,
-          subtitle: `Total de alunos: ${data.length}`,
-          includeStats: true,
-          columns: SUBJECT_SHEET_COLUMNS,
-          data,
           filename: filenamePrefix ? `${filenamePrefix}_${subject.replace(/\s/g, '_')}_${timestamp}` : `${subject.replace(/\s/g, '_')}_${timestamp}`,
         });
       }
