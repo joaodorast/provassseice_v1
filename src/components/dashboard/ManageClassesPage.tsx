@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { Label } from '../ui/label';
@@ -928,7 +928,7 @@ export function ManageClassesPage() {
       <Card className="seice-card">
         <CardHeader>
           <CardTitle>Lista de Turmas</CardTitle>
-          <CardDescription>
+          <div className="text-sm text-muted-foreground">
             <div className="flex items-center space-x-2 mt-2">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
@@ -940,7 +940,7 @@ export function ManageClassesPage() {
                 />
               </div>
             </div>
-          </CardDescription>
+          </div>
         </CardHeader>
         <CardContent>
           <div className="border rounded-lg overflow-x-auto">

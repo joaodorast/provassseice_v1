@@ -135,28 +135,13 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       
       console.log('ManageExamsPage: Classes extracted from students:', classesList);
       
-      // Carregar questões completas para cada exame
-      console.log('Carregando questões completas para cada simulado...');
-      const examsWithQuestions = await Promise.all(
-        examsList.map(async (exam) => {
-          try {
-            const fullExamResponse = await apiService.getExam(exam.id);
-            const fullExam = fullExamResponse?.exam || exam;
-            const questionsCount = fullExam.questions?.length || 0;
-            
-            console.log(`  ${exam.title}: ${questionsCount} questões`);
-            
-            return {
-              ...exam,
-              questions: fullExam.questions || [],
-              questionCount: questionsCount
-            };
-          } catch (error) {
-            console.error(`  Erro ao carregar questões do exame ${exam.id}:`, error);
-            return exam;
-          }
-        })
-      );
+      // A lista de /exams já traz as questões completas de cada simulado
+      // (não existe GET /exams/:id no servidor; buscar um a um só gerava 404)
+      const examsWithQuestions = examsList.map((exam: any) => ({
+        ...exam,
+        questions: exam.questions || [],
+        questionCount: exam.questions?.length || 0
+      }));
       
       console.log(`ManageExamsPage: Loaded ${examsWithQuestions.length} exams, ${submissionsList.length} submissions, ${studentsList.length} students, ${classesList.length} classes`);
       

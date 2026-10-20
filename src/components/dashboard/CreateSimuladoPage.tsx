@@ -980,8 +980,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     <div className="space-y-6">
       <ActionResultDialog result={saveResult} onClose={() => setSaveResult(null)} />
 
-      {/* Cabeçalho fixo no topo: o botão de voltar fica sempre à mão, mesmo rolando a página */}
-      <div className="sticky top-0 z-20 -mx-2 px-2 py-3 bg-white/95 backdrop-blur border-b border-slate-200 flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
           <Button
             variant="outline"

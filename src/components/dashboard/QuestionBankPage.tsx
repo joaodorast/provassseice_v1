@@ -22,6 +22,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { apiService } from '../../utils/api';
+import { projectId, publicAnonKey } from '../../utils/supabase/info';
 import { toast } from '../../utils/toast';
 import { confirmAction } from '../../utils/confirm';
 import { ExcelExportDialog } from '../ExcelExportDialog';
@@ -68,8 +69,8 @@ export function QuestionBankPage({ arrivalResult = null, onArrivalResultClose }:
 
   const loadSubjectsAndSeries = async () => {
     try {
-      const response = await fetch(`https://${import.meta.env.VITE_SUPABASE_PROJECT_ID || 'your-project-id'}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
-        headers: { 'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key'}` }
+      const response = await fetch(`https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`, {
+        headers: { 'Authorization': `Bearer ${publicAnonKey}` }
       });
       
       if (response.ok) {
