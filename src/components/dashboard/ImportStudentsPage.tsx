@@ -25,7 +25,9 @@ import {
   UserX,
   UserPlus,
   UserCog,
-  Eraser
+  Eraser,
+  School as SchoolIcon,
+  Sparkles
 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '../ui/dialog';
 import { Checkbox } from '../ui/checkbox';
@@ -34,6 +36,8 @@ import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 import { AssignClassDialog } from './AssignClassDialog';
 import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { PopupHeader, POPUP_BUTTON } from './PopupHeader';
+import { SearchPickerDialog, PickerField, PickerItem } from './SearchPicker';
+import { confirmAction } from '../../utils/confirm';
 import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { apiService } from '../../utils/api';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
@@ -91,7 +95,11 @@ export function ManageStudentsPage() {
   const [filterRegistration, setFilterRegistration] = useState('');
   // Cursos vêm de "Gerenciar Cursos"; turmas de "Gerenciar Turmas" (cada turma pertence a um curso)
   const [registeredCourses, setRegisteredCourses] = useState<string[]>([]);
-  const [registeredClasses, setRegisteredClasses] = useState<{ id: string; name: string; grade: string }[]>([]);
+  const [registeredClasses, setRegisteredClasses] = useState<{ id: string; name: string; grade: string; shift: string }[]>([]);
+  // Turma do formulário de aluno: escolhida numa lista das turmas existentes, ou criada de forma
+  // explícita (nunca texto livre, para não nascer "5002-jp" ao lado de "5002-JP")
+  const [classPickerOpen, setClassPickerOpen] = useState(false);
+  const [newClassCourse, setNewClassCourse] = useState('');
   // Exclusão: alunos marcados na tabela e a confirmação pendente (alunos ou turma inteira)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   // Turma escolhida no seletor de atribuição em massa
@@ -130,7 +138,7 @@ export function ManageStudentsPage() {
       setRegisteredClasses(
         (classesResponse?.classes || [])
           .filter((c: any) => c?.name)
-          .map((c: any) => ({ id: String(c.id), name: String(c.name).trim(), grade: String(c.grade || '').trim() }))
+          .map((c: any) => ({ id: String(c.id), name: String(c.name).trim(), grade: String(c.grade || '').trim(), shift: String(c.shift || '').trim() }))
       );
     } catch (error) {
       console.error('Error loading courses/classes:', error);
@@ -238,25 +246,70 @@ export function ManageStudentsPage() {
       return;
     }
 
+    if (!newStudent.class.trim()) {
+      toast.error('Escolha a turma do aluno (uma existente ou crie uma nova)');
+      return;
+    }
+    if (isNewClass && !newClassCourse) {
+      toast.error('Escolha o curso da turma nova');
+      return;
+    }
+
+    // Evita cadastrar o mesmo aluno duas vezes
+    const registration = newStudent.registration.trim();
+    const sameRegistration = registration && students.find(s => String(s.registration || '').trim() === registration);
+    if (sameRegistration) {
+      setImportResult({
+        type: 'error',
+        title: 'Matrícula já cadastrada',
+        message: `A matrícula ${registration} já pertence a ${sameRegistration.name}${sameRegistration.class ? ` (turma ${sameRegistration.class})` : ''}.`
+      });
+      return;
+    }
+    const sameName = students.find(s =>
+      normalize(s.name) === normalize(newStudent.name) && classKey(s.class) === classKey(newStudent.class));
+    if (sameName && !(await confirmAction({
+      title: 'Aluno com o mesmo nome nesta turma',
+      itemName: sameName.name,
+      itemDetail: `Turma ${sameName.class}${sameName.registration ? ` · Matrícula ${sameName.registration}` : ''}`,
+      description: 'Já existe um aluno com esse nome nesta turma. Deseja cadastrar mesmo assim?',
+      confirmLabel: 'Cadastrar mesmo assim',
+      tone: 'warning'
+    }))) return;
+
     const nomeCadastrado = newStudent.name;
+    const turmaCadastrada = newStudent.class.trim();
+    const criouTurma = isNewClass;
     try {
       setLoading(true);
-      const response = await apiService.createStudents([newStudent]);
+      // Turma nova: cadastra em Gerenciar Turmas antes, com o curso e o turno escolhidos
+      if (isNewClass) {
+        const created = await apiService.createClass({
+          name: turmaCadastrada,
+          grade: newClassCourse,
+          shift: newStudent.grade || 'Manhã',
+          year: new Date().getFullYear().toString()
+        });
+        if (created?.success === false) throw new Error(created.error || 'Não foi possível criar a turma');
+      }
+      const response = await apiService.createStudents([{ ...newStudent, class: turmaCadastrada }]);
       if (!response?.success) throw new Error(response?.error || 'O servidor não confirmou o cadastro');
-      const createdClasses = await ensureClassesExist([newStudent]);
-      if (createdClasses > 0) toast.success('Turma cadastrada automaticamente em Gerenciar Turmas');
-      await loadStudents();
+      await Promise.all([loadStudents(), loadCoursesAndClasses()]);
       setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
+      setNewClassCourse('');
       setShowAddForm(false);
       // Mesmo aviso verde usado no login: título e texto de confirmação do cadastro
       setImportResult({
         type: 'success',
         title: 'Aluno cadastrado com sucesso',
-        message: `${nomeCadastrado} foi cadastrado no sistema.`
+        message: criouTurma
+          ? `${nomeCadastrado} foi cadastrado na turma nova ${turmaCadastrada}, que já aparece em Gerenciar Turmas.`
+          : `${nomeCadastrado} foi cadastrado na turma ${turmaCadastrada}.`
       });
     } catch (error) {
       console.error('Error adding student:', error);
-      toast.error('Erro ao adicionar aluno');
+      toast.error('Erro ao adicionar aluno: ' + ((error as Error)?.message || 'erro desconhecido'));
+      await loadCoursesAndClasses();
     } finally {
       setLoading(false);
     }
@@ -391,10 +444,25 @@ export function ManageStudentsPage() {
       return;
     }
 
+    if (isNewClass && !newClassCourse) {
+      toast.error('Escolha o curso da turma nova');
+      return;
+    }
+
     try {
       setLoading(true);
-      await apiService.updateStudent(editingStudent.id, newStudent);
-      await loadStudents();
+      if (isNewClass) {
+        const created = await apiService.createClass({
+          name: newStudent.class.trim(),
+          grade: newClassCourse,
+          shift: newStudent.grade || 'Manhã',
+          year: new Date().getFullYear().toString()
+        });
+        if (created?.success === false) throw new Error(created.error || 'Não foi possível criar a turma');
+      }
+      await apiService.updateStudent(editingStudent.id, { ...newStudent, class: newStudent.class.trim() });
+      await Promise.all([loadStudents(), loadCoursesAndClasses()]);
+      setNewClassCourse('');
       setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
       setEditingStudent(null);
       setShowAddForm(false);
@@ -409,6 +477,7 @@ export function ManageStudentsPage() {
 
   const handleCancelEdit = () => {
     setEditingStudent(null);
+    setNewClassCourse('');
     setNewStudent({ name: '', email: '', class: '', grade: '', registration: '' });
     setShowAddForm(false);
   };
@@ -435,6 +504,70 @@ export function ManageStudentsPage() {
   const normalize = (text: string) =>
     stripAccents(String(text || '')).toLowerCase().replace(/[º°ª]/g, '').replace(/\s+/g, ' ').trim();
   const sortPtBr = (list: string[]) => list.sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+  // Chave de turma ainda mais tolerante: ignora também espaços, hífens e pontos
+  // ("5002 jp", "5002-JP" e "5002JP" são a mesma turma)
+  const classKey = (text: string) => normalize(text).replace(/[^a-z0-9]/g, '');
+  // Turno salvo em turmas antigas como Matutino/Vespertino/Noturno
+  const toShift = (shift: string) =>
+    ({ matutino: 'Manhã', vespertino: 'Tarde', noturno: 'Noite' } as Record<string, string>)[normalize(shift)] || shift;
+
+  // Turmas que o formulário de aluno oferece: cadastradas em Gerenciar Turmas + as que só existem
+  // nos alunos, sem repetir grafias da mesma turma
+  const classPickerItems: PickerItem[] = Array.from(
+    [...registeredClasses.map(c => c.name), ...uniqueClasses]
+      .reduce((map, name) => (map.has(classKey(name)) ? map : map.set(classKey(name), name)), new Map<string, string>())
+      .values()
+  )
+    .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+    .map(name => {
+      const reg = registeredClasses.find(c => classKey(c.name) === classKey(name));
+      const count = students.filter(s => classKey(s.class) === classKey(name)).length;
+      return {
+        id: name,
+        title: name,
+        subtitle: [reg?.grade, reg?.shift && toShift(reg.shift)].filter(Boolean).join(' · ') || 'Turma vinda da importação de alunos',
+        meta: `${count} aluno${count === 1 ? '' : 's'}`,
+        leading: <SchoolIcon />,
+        keywords: [reg?.grade || ''].filter(Boolean)
+      };
+    });
+  const chosenClassItem = classPickerItems.find(i => classKey(i.title) === classKey(newStudent.class)) || null;
+  // Turma digitada que ainda não existe: vai ser criada ao salvar
+  const isNewClass = !!newStudent.class.trim() && !chosenClassItem;
+
+  const pickClass = (name: string) => {
+    const reg = registeredClasses.find(c => classKey(c.name) === classKey(name));
+    setNewClassCourse('');
+    setNewStudent(prev => ({
+      ...prev,
+      class: name,
+      // Preenche o turno com o da turma, se o usuário ainda não escolheu
+      grade: prev.grade || (reg?.shift ? toShift(reg.shift) : prev.grade)
+    }));
+  };
+
+  const createClassFromSearch = (typed: string) => {
+    const name = typed.trim().replace(/\s+/g, ' ');
+    const existing = classPickerItems.find(i => classKey(i.title) === classKey(name));
+    if (existing) {
+      // Já existe com outra grafia: usa a existente em vez de criar uma duplicada
+      pickClass(existing.title);
+      toast.info(`A turma "${existing.title}" já existe, o aluno vai para ela.`);
+      return;
+    }
+    setNewStudent(prev => ({ ...prev, class: name }));
+    setNewClassCourse('');
+  };
+
+  const openAddStudent = () => {
+    setEditingStudent(null);
+    setNewClassCourse('');
+    // Se a lista está filtrada por uma turma, o aluno novo já vem nela
+    const prefill = filterClass !== 'all' && filterClass !== NO_CLASS_FILTER ? filterClass : '';
+    const reg = prefill ? registeredClasses.find(c => classKey(c.name) === classKey(prefill)) : undefined;
+    setNewStudent({ name: '', email: '', class: prefill, grade: reg?.shift ? toShift(reg.shift) : '', registration: '' });
+    setShowAddForm(true);
+  };
 
   // Números do card de estatísticas
   const activeCount = students.filter(s => s.status === 'active').length;
@@ -553,7 +686,7 @@ export function ManageStudentsPage() {
             Exportar CSV
           </Button>
           <Button
-            onClick={() => setShowAddForm(true)}
+            onClick={openAddStudent}
             className="bg-amber-500 hover:bg-amber-600 text-zinc-900 font-semibold shadow-md hover:shadow-lg px-5"
           >
             <Plus className="w-4 h-4 mr-2" />
@@ -707,12 +840,12 @@ export function ManageStudentsPage() {
           <PopupHeader
             icon={editingStudent ? <UserCog /> : <UserPlus />}
             title={editingStudent ? 'Editar Aluno' : 'Adicionar Novo Aluno'}
-            description="Preencha os dados do aluno. Apenas o nome é obrigatório."
+            description={editingStudent ? "Altere os dados do aluno. Nome e turma são obrigatórios." : "Preencha os dados do aluno. Nome e turma são obrigatórios; o resto é opcional."}
           />
           <div className="px-6 py-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-xl bg-white p-5 border border-zinc-200">
               <div>
-                <Label htmlFor="name">Nome Completo</Label>
+                <Label htmlFor="name">Nome Completo <span className="text-red-500">*</span></Label>
                 <Input
                   id="name"
                   value={newStudent.name}
@@ -731,12 +864,11 @@ export function ManageStudentsPage() {
                 />
               </div>
               <div>
-                <Label htmlFor="class">Turma</Label>
-                <Input
-                  id="class"
-                  value={newStudent.class}
-                  onChange={(e) => setNewStudent(prev => ({ ...prev, class: e.target.value }))}
-                  placeholder="Turma A"
+                <Label>Turma <span className="text-red-500">*</span></Label>
+                <PickerField
+                  value={chosenClassItem || (isNewClass ? { id: 'nova', title: newStudent.class, subtitle: 'Turma nova, será criada ao salvar' } : null)}
+                  placeholder="Escolha ou crie uma turma"
+                  onClick={() => setClassPickerOpen(true)}
                 />
               </div>
               <div>
@@ -762,6 +894,59 @@ export function ManageStudentsPage() {
                 />
               </div>
             </div>
+
+            {isNewClass && (
+              <div className="mt-4 rounded-xl border border-amber-300 bg-amber-50 p-4">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+                    <Sparkles className="h-4 w-4" />
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-zinc-900">Turma nova: {newStudent.class}</p>
+                    <p className="text-xs text-zinc-600">
+                      Ela será cadastrada em Gerenciar Turmas ao salvar. Escolha o curso dela
+                      {newStudent.grade ? ` (turno ${newStudent.grade})` : ' e o turno acima'}.
+                    </p>
+                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2">
+                      <Select value={newClassCourse} onValueChange={setNewClassCourse}>
+                        <SelectTrigger className={`bg-white ${!newClassCourse ? 'border-amber-400' : ''}`}>
+                          <SelectValue placeholder="Curso da turma (ex: 5º Ano)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {courseOptions.length === 0 ? (
+                            <div className="p-3 text-sm text-zinc-500">Nenhum curso cadastrado em Gerenciar Cursos</div>
+                          ) : courseOptions.map(course => (
+                            <SelectItem key={course} value={course}>{course}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Button type="button" variant="outline" className="bg-white" onClick={() => setClassPickerOpen(true)}>
+                        Usar turma existente
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <SearchPickerDialog
+              open={classPickerOpen}
+              onOpenChange={setClassPickerOpen}
+              icon={<SchoolIcon />}
+              title="Turma do aluno"
+              description="Escolha uma turma que já existe. Se for uma turma nova, digite o nome e clique em criar."
+              items={classPickerItems}
+              selectedId={chosenClassItem?.id}
+              onSelect={(item) => pickClass(item.title)}
+              searchPlaceholder="Pesquisar turma (ex: 5002, JP, 5º ano...)"
+              emptyText="Nenhuma turma com esse nome"
+              itemLabel={{ one: 'turma', many: 'turmas' }}
+              onCreate={createClassFromSearch}
+              createLabel={(q) => `Criar turma nova “${q}”`}
+              // "5002 jp" já é a 5002-JP (aparece na lista): não oferece criar outra
+              canCreate={(q) => !classPickerItems.some(i => classKey(i.title) === classKey(q))}
+              footerHint={<>Não achou a turma? <strong className="font-medium text-zinc-700">Digite o nome dela na busca</strong> e clique em “Criar turma nova”.</>}
+            />
             <div className="mt-5 flex justify-end gap-2">
               <Button variant="outline" onClick={handleCancelEdit} className={`${POPUP_BUTTON.cancel} px-5`}>
                 Cancelar
