@@ -18,6 +18,7 @@ import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
 import { readAnswerSheet } from '../../utils/omr';
 import { readCardIdentity } from '../../utils/cardIdentity';
+import { SearchPickerDialog, PickerField, PickerItem } from './SearchPicker';
 
 export function SendImagesPage() {
   const [selectedExam, setSelectedExam] = useState('');
@@ -61,6 +62,9 @@ export function SendImagesPage() {
   const [reviewFilter, setReviewFilter] = useState('all');
   const [reviewHasChanges, setReviewHasChanges] = useState(false);
   const [isSavingReview, setIsSavingReview] = useState(false);
+  // Seletores com busca (simulado e aluno individual)
+  const [examPickerOpen, setExamPickerOpen] = useState(false);
+  const [studentPickerOpen, setStudentPickerOpen] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -88,7 +92,9 @@ export function SendImagesPage() {
     if (selectedExam) {
       const exam = exams.find(e => e.id === selectedExam);
       if (exam && exam.selectedClass) {
-        const filteredStudents = students.filter(s => (s.class || s.className) === exam.selectedClass);
+        // Sem diferenciar maiúsculas/espaços: "5001-ce" e "5001-CE" são a mesma turma
+        const examClass = String(exam.selectedClass).trim().toLowerCase();
+        const filteredStudents = students.filter(s => String(s.class || s.className || '').trim().toLowerCase() === examClass);
         setAvailableStudents(filteredStudents);
         console.log(`Filtered ${filteredStudents.length} students from class: ${exam.selectedClass}`);
       } else {
@@ -1433,6 +1439,44 @@ export function SendImagesPage() {
     );
   }
 
+  // Itens dos seletores com busca. Simulados mais recentes primeiro.
+  const examPickerItems: PickerItem[] = [...exams]
+    .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')))
+    .map((exam) => {
+      const created = exam.createdAt ? new Date(exam.createdAt).toLocaleDateString('pt-BR') : '';
+      const sentCount = images.filter((img) => img.examId === exam.id).length;
+      return {
+        id: exam.id,
+        title: exam.title,
+        subtitle: [exam.selectedClass ? `Turma ${exam.selectedClass}` : 'Sem turma', `${exam.questions?.length || 0} questões`, created && `criado em ${created}`]
+          .filter(Boolean).join(' · '),
+        meta: sentCount > 0 ? `${sentCount} ${sentCount === 1 ? 'cartão enviado' : 'cartões enviados'}` : undefined,
+        badge: exam.answerSheetsGeneratedAt ? { label: 'Aplicado', tone: 'green' as const } : undefined,
+        leading: <FileText />,
+        keywords: [exam.selectedClass, exam.description].filter(Boolean)
+      };
+    });
+
+  // Alunos que já tiveram cartão enviado neste simulado
+  const studentsWithCard = new Set(
+    images.filter((img) => img.examId === selectedExam && img.studentId).map((img) => img.studentId)
+  );
+  const initialsOf = (name: string) =>
+    String(name || '').trim().split(/\s+/).filter(Boolean).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
+  const studentPickerItems: PickerItem[] = [...availableStudents]
+    .sort((a, b) => String(a.name).localeCompare(String(b.name), 'pt-BR'))
+    .map((student) => ({
+      id: student.id,
+      title: student.name,
+      subtitle: [student.class && `Turma ${student.class}`, student.registration && `Matrícula ${student.registration}`]
+        .filter(Boolean).join(' · '),
+      badge: studentsWithCard.has(student.id) ? { label: 'Cartão já enviado', tone: 'amber' as const } : undefined,
+      leading: initialsOf(student.name),
+      keywords: [student.registration, student.email, student.class].filter(Boolean)
+    }));
+  const selectedExamItem = examPickerItems.find((i) => i.id === selectedExam) || null;
+  const selectedStudentItem = studentPickerItems.find((i) => i.id === selectedStudent) || null;
+
   return (
     <div className="space-y-6">
       <div>
@@ -1494,24 +1538,11 @@ export function SendImagesPage() {
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Selecione o Simulado *
               </label>
-              <Select value={selectedExam} onValueChange={setSelectedExam}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Escolha o simulado..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {exams.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-slate-500">
-                      Nenhum simulado disponível
-                    </div>
-                  ) : (
-                    exams.map(exam => (
-                      <SelectItem key={exam.id} value={exam.id}>
-                        {exam.title} ({exam.questions?.length || 0} questões)
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              <PickerField
+                value={selectedExamItem}
+                placeholder="Clique para escolher ou pesquisar o simulado..."
+                onClick={() => setExamPickerOpen(true)}
+              />
             </div>
           </div>
 
@@ -1520,40 +1551,49 @@ export function SendImagesPage() {
               <label className="block text-sm font-medium text-slate-700 mb-2">
                 Selecione o Aluno *
               </label>
-              <Select 
-                value={selectedStudent} 
-                onValueChange={setSelectedStudent}
+              <PickerField
+                value={selectedStudentItem}
+                placeholder="Clique para escolher ou pesquisar o aluno..."
+                onClick={() => setStudentPickerOpen(true)}
                 disabled={!selectedExam}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder={
-                    !selectedExam 
-                      ? "Selecione um simulado primeiro" 
-                      : "Escolha o aluno..."
-                  } />
-                </SelectTrigger>
-                <SelectContent>
-                  {availableStudents.length === 0 ? (
-                    <div className="p-4 text-center text-sm text-slate-500">
-                      {selectedExam 
-                        ? "Nenhum aluno encontrado"
-                        : "Selecione um simulado primeiro"
-                      }
-                    </div>
-                  ) : (
-                    availableStudents.map(student => (
-                      <SelectItem key={student.id} value={student.id}>
-                        <div className="flex items-center">
-                          <User className="w-4 h-4 mr-2" />
-                          {student.name} - {student.class}
-                        </div>
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+                disabledHint="Selecione um simulado primeiro"
+              />
+              {selectedExam && (
+                <p className="mt-1.5 text-xs text-slate-500">
+                  {availableStudents.length} aluno{availableStudents.length === 1 ? '' : 's'} na turma deste simulado
+                  {studentsWithCard.size > 0 && ` · ${studentsWithCard.size} já com cartão enviado`}
+                </p>
+              )}
             </div>
           )}
+
+          <SearchPickerDialog
+            open={examPickerOpen}
+            onOpenChange={setExamPickerOpen}
+            icon={<FileText />}
+            title="Selecionar simulado"
+            description="Pesquise pelo nome, turma ou data. Os mais recentes aparecem primeiro."
+            items={examPickerItems}
+            selectedId={selectedExam}
+            onSelect={(item) => setSelectedExam(item.id)}
+            searchPlaceholder="Pesquisar simulado (ex: 5º ano 5002, bimestre...)"
+            emptyText="Nenhum simulado encontrado"
+            itemLabel={{ one: 'simulado', many: 'simulados' }}
+          />
+
+          <SearchPickerDialog
+            open={studentPickerOpen}
+            onOpenChange={setStudentPickerOpen}
+            icon={<User />}
+            title="Selecionar aluno"
+            description={selectedExamItem ? `Alunos da turma de “${selectedExamItem.title}”. Pesquise pelo nome ou matrícula.` : 'Pesquise pelo nome ou matrícula.'}
+            items={studentPickerItems}
+            selectedId={selectedStudent}
+            onSelect={(item) => setSelectedStudent(item.id)}
+            searchPlaceholder="Pesquisar aluno pelo nome ou matrícula..."
+            emptyText="Nenhum aluno encontrado nesta turma"
+            itemLabel={{ one: 'aluno', many: 'alunos' }}
+          />
 
           <div className="border-2 border-dashed border-slate-300 rounded-lg p-8 text-center hover:border-slate-400 transition-colors">
             <div className="space-y-4">
