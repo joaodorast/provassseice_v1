@@ -7,52 +7,25 @@ const SEICE_XLSX_COLORS = {
   charcoal: 'FF18181B',
   slateDark: 'FF27272A',
   slateMedium: 'FF52525B',
-  border: 'FFE4E4E7',
-  borderStrong: 'FFD4D4D8',
-  zebra: 'FFFAFAFA',
-  panel: 'FFF4F4F5',
+  border: 'FFD4D4D8',
+  zebra: 'FFF4F4F5',
   white: 'FFFFFFFF',
   gold: 'FFF59E0B',
   goldBright: 'FFFACC15',
   goldSoft: 'FFFEF3C7',
-  goldPale: 'FFFFFBEB',
   success: 'FF16A34A',
   warning: 'FFCA8A04',
   danger: 'FFDC2626',
   textDark: 'FF18181B',
   textMuted: 'FF71717A',
-  textOnDark: 'FFD4D4D8',
-};
-
-// Faixas de desempenho usadas para colorir notas e percentuais
-const SCORE_TONES = {
-  good: { font: 'FF15803D', fill: 'FFF0FDF4' },
-  mid: { font: 'FFB45309', fill: 'FFFFFBEB' },
-  low: { font: 'FFB91C1C', fill: 'FFFEF2F2' },
 };
 
 export interface ExcelColumn {
-  // Use "\n" para quebrar o título em duas linhas (ex: "Nota Geral\n(de 40,0)")
   header: string;
   key: string;
   width?: number;
   type?: 'text' | 'number' | 'date' | 'percentage';
   format?: string;
-  // Colunas vizinhas com o mesmo grupo ganham uma faixa em cima (ex: "NOTAS POR MATÉRIA")
-  group?: string;
-  // Colore a célula pelo desempenho: percentual (0–100) ou valor / row[maxKey]
-  scoreTone?: boolean;
-  maxKey?: string;
-  // Texto em negrito (colunas principais, como a nota)
-  bold?: boolean;
-  // Não calcula Média/Maior/Menor no rodapé (ex: total de questões, igual para todos)
-  noStats?: boolean;
-}
-
-export interface ExcelHighlight {
-  label: string;
-  value: string;
-  hint?: string;
 }
 
 export interface ExcelExportOptions {
@@ -62,44 +35,32 @@ export interface ExcelExportOptions {
   data: any[];
   filename: string;
   includeFilters?: boolean;
-  // Linhas de Média / Maior / Menor no rodapé da tabela (com 2 ou mais linhas de dados)
   includeStats?: boolean;
   includeTimestamp?: boolean;
   logoText?: string;
   sheetName?: string;
-  // Cartões de resumo entre o título e a tabela
-  highlights?: ExcelHighlight[];
-  // Quadro explicativo abaixo da tabela (ex: "Como a nota é calculada")
-  notes?: { title: string; lines: { label: string; value: string; strong?: boolean }[] };
 }
 
-const headerLines = (header: string) => String(header || '').split('\n');
-
 function estimateColumnWidth(column: ExcelColumn, data: any[]): number {
-  // Título: a maior linha + espaço do botão de filtro
-  const headerWidth = Math.max(...headerLines(column.header).map(l => l.length)) + 4;
-  let dataWidth = 0;
+  if (column.width) return column.width;
+
+  let maxLen = column.header.length;
   data.forEach((row) => {
     const value = row[column.key];
     const str = value === null || value === undefined ? '' : String(value);
-    if (str.length > dataWidth) dataWidth = str.length;
+    if (str.length > maxLen) maxLen = str.length;
   });
-  dataWidth += 3;
+
   // Colunas de texto livre (perguntas, descrições) recebem um teto maior
   // com quebra de linha em vez de crescer indefinidamente.
-  const ceiling = column.type === 'text' ? 45 : 24;
-  const auto = Math.min(ceiling, Math.max(9, headerWidth, dataWidth));
-  return column.width ? Math.max(column.width, Math.min(headerWidth, 28)) : auto;
+  const ceiling = column.type === 'text' ? 45 : 30;
+  return Math.min(ceiling, Math.max(10, maxLen + 3));
 }
 
 function estimateWrappedLines(text: string, columnWidthChars: number): number {
   if (!text) return 1;
-  const charsPerLine = Math.max(8, columnWidthChars * 1.1);
+  const charsPerLine = Math.max(8, columnWidthChars * 1.8);
   return Math.max(1, Math.ceil(text.length / charsPerLine));
-}
-
-function defaultNumFmt(column: ExcelColumn, num: number) {
-  return column.format || (Number.isInteger(num) ? '#,##0' : '#,##0.0#');
 }
 
 function formatCellValue(column: ExcelColumn, rawValue: any): { value: any; numFmt?: string } {
@@ -116,7 +77,7 @@ function formatCellValue(column: ExcelColumn, rawValue: any): { value: any; numF
     case 'number': {
       const num = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
       if (isNaN(num)) return { value: String(rawValue) };
-      return { value: num, numFmt: defaultNumFmt(column, num) };
+      return { value: num, numFmt: column.format || (Number.isInteger(num) ? '#,##0' : '#,##0.00') };
     }
     case 'percentage': {
       const num = typeof rawValue === 'number' ? rawValue : parseFloat(rawValue);
@@ -128,24 +89,10 @@ function formatCellValue(column: ExcelColumn, rawValue: any): { value: any; numF
   }
 }
 
-// Desempenho (0–1) da célula, para colorir: percentual direto ou valor / máximo da linha
-function scoreRatio(column: ExcelColumn, row: any): number | null {
-  if (!column.scoreTone) return null;
-  const value = parseFloat(row[column.key]);
-  if (isNaN(value)) return null;
-  if (column.type === 'percentage') return value / 100;
-  const max = parseFloat(column.maxKey ? row[column.maxKey] : NaN);
-  return max > 0 ? value / max : null;
-}
-
-const toneFor = (ratio: number) => (ratio >= 0.7 ? SCORE_TONES.good : ratio >= 0.5 ? SCORE_TONES.mid : SCORE_TONES.low);
-
-const isNumeric = (column: ExcelColumn) => column.type === 'number' || column.type === 'percentage';
-
 /**
- * Exportador de Excel (.xlsx) com a identidade visual do SEICE: faixa de marca,
- * cartões de resumo, cabeçalho em duas linhas, notas coloridas por desempenho,
- * rodapé com média/maior/menor, sem linhas de grade, autofiltro e painéis congelados.
+ * Exportador de Excel (.xlsx) com a identidade visual do SEICE:
+ * cabeçalho de marca, colunas com destaque preto/dourado, zebra striping,
+ * largura automática, autofiltro e cabeçalho congelado.
  */
 export class ExcelExporter {
   private workbook: ExcelJS.Workbook;
@@ -167,12 +114,6 @@ export class ExcelExporter {
     await this.downloadWorkbook(filename);
   }
 
-  /** Monta as abas e devolve o arquivo em memória (sem baixar). */
-  async buildBuffer(sheets: ExcelExportOptions[]): Promise<ArrayBuffer> {
-    sheets.forEach((sheetOptions) => this.buildSheet(sheetOptions));
-    return this.workbook.xlsx.writeBuffer() as Promise<ArrayBuffer>;
-  }
-
   private buildSheet(options: ExcelExportOptions): void {
     const {
       title,
@@ -182,154 +123,71 @@ export class ExcelExporter {
       logoText = 'SEICE',
       includeTimestamp = true,
       includeStats = false,
-      highlights = [],
     } = options;
-    const C = SEICE_XLSX_COLORS;
 
     const sheet = this.workbook.addWorksheet(this.uniqueSheetName(options.sheetName || options.title), {
-      views: [{ showGridLines: false }],
-      pageSetup: {
-        orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9,
-        margins: { left: 0.4, right: 0.4, top: 0.5, bottom: 0.5, header: 0.2, footer: 0.2 },
-      },
+      views: [{ state: 'frozen', ySplit: 0 }],
+      pageSetup: { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
     });
-    sheet.properties.defaultRowHeight = 20;
 
-    const columnCount = Math.max(columns.length, 1);
-    const colLetter = (n: number) => sheet.getColumn(n).letter;
-    const lastColLetter = colLetter(columnCount);
+    const columnCount = columns.length;
+    const lastColLetter = sheet.getColumn(columnCount).letter;
 
+    // Faixa de marca (linha 1): "SEICE" em dourado sobre preto
+    sheet.mergeCells(`A1:${lastColLetter}1`);
+    const brandCell = sheet.getCell('A1');
+    brandCell.value = `${logoText}  •  ${title}`;
+    brandCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: SEICE_XLSX_COLORS.gold } };
+    brandCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SEICE_XLSX_COLORS.black } };
+    brandCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+    sheet.getRow(1).height = 30;
+
+    let currentRow = 2;
+
+    if (subtitle || includeTimestamp) {
+      sheet.mergeCells(`A${currentRow}:${lastColLetter}${currentRow}`);
+      const infoCell = sheet.getCell(`A${currentRow}`);
+      const timestamp = new Date().toLocaleString('pt-BR');
+      const parts = [subtitle, includeTimestamp ? `Gerado em: ${timestamp}` : null].filter(Boolean);
+      infoCell.value = parts.join('   |   ');
+      infoCell.font = { name: 'Calibri', size: 10, italic: true, color: { argb: SEICE_XLSX_COLORS.white } };
+      infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SEICE_XLSX_COLORS.charcoal } };
+      infoCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
+      sheet.getRow(currentRow).height = 20;
+      currentRow++;
+    }
+
+    currentRow++; // linha em branco separando a marca dos dados
+
+    const headerRowNumber = currentRow;
+    const headerRow = sheet.getRow(headerRowNumber);
+    columns.forEach((column, index) => {
+      const cell = headerRow.getCell(index + 1);
+      cell.value = column.header;
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: SEICE_XLSX_COLORS.white } };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: SEICE_XLSX_COLORS.charcoal } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+      cell.border = {
+        top: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.gold } },
+        bottom: { style: 'medium', color: { argb: SEICE_XLSX_COLORS.gold } },
+        left: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.slateDark } },
+        right: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.slateDark } },
+      };
+    });
+    headerRow.height = 24;
+
+    // Larguras de coluna calculadas a partir do conteúdo
     columns.forEach((column, index) => {
       sheet.getColumn(index + 1).width = estimateColumnWidth(column, data);
     });
 
-    // Linha 1: faixa de marca — "SEICE" em dourado e o título em branco
-    sheet.mergeCells(`A1:${lastColLetter}1`);
-    const brandCell = sheet.getCell('A1');
-    brandCell.value = {
-      richText: [
-        { text: `${logoText}   `, font: { name: 'Calibri', size: 18, bold: true, color: { argb: C.gold } } },
-        { text: title, font: { name: 'Calibri', size: 16, bold: true, color: { argb: C.white } } },
-      ],
-    };
-    brandCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.black } };
-    brandCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    sheet.getRow(1).height = 38;
-
-    // Linha 2: informações (total, data de geração)
-    sheet.mergeCells(`A2:${lastColLetter}2`);
-    const infoCell = sheet.getCell('A2');
-    const parts = [subtitle, includeTimestamp ? `Gerado em ${new Date().toLocaleString('pt-BR')}` : null].filter(Boolean);
-    infoCell.value = parts.join('    •    ');
-    infoCell.font = { name: 'Calibri', size: 10, color: { argb: C.textOnDark } };
-    infoCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.charcoal } };
-    infoCell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-    infoCell.border = { bottom: { style: 'medium', color: { argb: C.gold } } };
-    sheet.getRow(2).height = 22;
-
-    let currentRow = 3;
-    sheet.getRow(currentRow).height = 10;
-    currentRow++;
-
-    // Cartões de resumo: cada um ocupa um bloco de colunas
-    if (highlights.length > 0) {
-      // Divide as colunas entre os cartões: os primeiros ganham as que sobrarem
-      const cards = highlights.slice(0, columnCount);
-      const base = Math.floor(columnCount / cards.length);
-      const extra = columnCount % cards.length;
-      const spans = cards.map((_, i) => base + (i < extra ? 1 : 0));
-      const labelRow = currentRow;
-      const valueRow = currentRow + 1;
-      cards.forEach((h, i) => {
-        const startCol = 1 + spans.slice(0, i).reduce((a, b) => a + b, 0);
-        const endCol = startCol + spans[i] - 1;
-        const from = colLetter(startCol);
-        const to = colLetter(endCol);
-        if (endCol > startCol) {
-          sheet.mergeCells(`${from}${labelRow}:${to}${labelRow}`);
-          sheet.mergeCells(`${from}${valueRow}:${to}${valueRow}`);
-        }
-        const label = sheet.getCell(`${from}${labelRow}`);
-        label.value = h.label.toUpperCase();
-        label.font = { name: 'Calibri', size: 9, bold: true, color: { argb: C.textMuted } };
-        const value = sheet.getCell(`${from}${valueRow}`);
-        value.value = h.hint
-          ? { richText: [
-              { text: h.value, font: { name: 'Calibri', size: 16, bold: true, color: { argb: C.textDark } } },
-              { text: `  ${h.hint}`, font: { name: 'Calibri', size: 10, color: { argb: C.textMuted } } },
-            ] }
-          : h.value;
-        if (!h.hint) value.font = { name: 'Calibri', size: 16, bold: true, color: { argb: C.textDark } };
-        [label, value].forEach((cell, k) => {
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.panel } };
-          cell.alignment = { horizontal: 'left', vertical: k === 0 ? 'bottom' : 'middle', indent: 1 };
-          cell.border = {
-            left: { style: 'medium', color: { argb: C.gold } },
-            right: { style: 'thin', color: { argb: C.white } },
-          };
-        });
-      });
-      sheet.getRow(labelRow).height = 18;
-      sheet.getRow(valueRow).height = 28;
-      currentRow += 2;
-      sheet.getRow(currentRow).height = 12;
-      currentRow++;
-    }
-
-    // Faixa de grupos acima do cabeçalho (ex: "NOTAS POR MATÉRIA")
-    const hasGroups = columns.some(c => c.group);
-    if (hasGroups) {
-      let i = 0;
-      while (i < columns.length) {
-        const group = columns[i].group;
-        let j = i;
-        while (j + 1 < columns.length && columns[j + 1].group === group) j++;
-        if (group) {
-          if (j > i) sheet.mergeCells(`${colLetter(i + 1)}${currentRow}:${colLetter(j + 1)}${currentRow}`);
-          const cell = sheet.getCell(`${colLetter(i + 1)}${currentRow}`);
-          cell.value = group;
-          cell.font = { name: 'Calibri', size: 9, bold: true, color: { argb: C.black } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.gold } };
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        }
-        i = j + 1;
-      }
-      sheet.getRow(currentRow).height = 18;
-      currentRow++;
-    }
-
-    // Cabeçalho das colunas (até duas linhas)
-    const headerRowNumber = currentRow;
-    const headerRow = sheet.getRow(headerRowNumber);
-    const twoLines = columns.some(c => headerLines(c.header).length > 1);
-    columns.forEach((column, index) => {
-      const cell = headerRow.getCell(index + 1);
-      const [main, ...rest] = headerLines(column.header);
-      cell.value = rest.length
-        ? { richText: [
-            { text: main, font: { name: 'Calibri', size: 10, bold: true, color: { argb: C.white } } },
-            { text: `\n${rest.join(' ')}`, font: { name: 'Calibri', size: 9, color: { argb: C.goldBright } } },
-          ] }
-        : main;
-      if (!rest.length) cell.font = { name: 'Calibri', size: 10, bold: true, color: { argb: C.white } };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.charcoal } };
-      cell.alignment = {
-        horizontal: isNumeric(column) ? 'center' : 'left',
-        vertical: 'middle',
-        wrapText: true,
-        indent: isNumeric(column) ? 0 : 1,
-      };
-      cell.border = {
-        bottom: { style: 'medium', color: { argb: C.gold } },
-        right: { style: 'thin', color: { argb: C.slateDark } },
-      };
-    });
-    headerRow.height = twoLines ? 36 : 26;
-
-    // Linhas de dados: zebra suave, só divisórias horizontais, números centralizados
+    // Linhas de dados com zebra striping e formatação por tipo
     data.forEach((row, rowIndex) => {
-      const excelRow = sheet.getRow(headerRowNumber + 1 + rowIndex);
-      const bgColor = rowIndex % 2 === 0 ? C.white : C.zebra;
+      const excelRowNumber = headerRowNumber + 1 + rowIndex;
+      const excelRow = sheet.getRow(excelRowNumber);
+      const isEvenRow = rowIndex % 2 === 0;
+      const bgColor = isEvenRow ? SEICE_XLSX_COLORS.white : SEICE_XLSX_COLORS.zebra;
+
       let maxLines = 1;
 
       columns.forEach((column, colIndex) => {
@@ -338,118 +196,78 @@ export class ExcelExporter {
         cell.value = value;
         if (numFmt) cell.numFmt = numFmt;
 
-        const width = sheet.getColumn(colIndex + 1).width || 10;
-        const shouldWrap = !isNumeric(column) && column.type !== 'date' && width >= 30;
-        const ratio = scoreRatio(column, row);
-        const tone = ratio === null ? null : toneFor(ratio);
+        const isTextColumn = column.type === 'text' || column.type === undefined;
+        const shouldWrap = isTextColumn && sheet.getColumn(colIndex + 1).width! >= 25;
 
-        cell.font = {
-          name: 'Calibri',
-          size: 10.5,
-          bold: !!column.bold || !!tone,
-          color: { argb: tone ? tone.font : C.textDark },
-        };
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tone ? tone.fill : bgColor } };
+        cell.font = { name: 'Calibri', size: 10, color: { argb: SEICE_XLSX_COLORS.textDark } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: bgColor } };
         cell.alignment = {
-          horizontal: isNumeric(column) || column.type === 'date' ? 'center' : 'left',
+          horizontal: column.type === 'number' || column.type === 'percentage' ? 'right' : column.type === 'date' ? 'center' : 'left',
           vertical: 'middle',
           wrapText: shouldWrap,
-          indent: isNumeric(column) ? 0 : 1,
         };
-        cell.border = { bottom: { style: 'thin', color: { argb: C.border } } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.border } },
+          bottom: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.border } },
+          left: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.border } },
+          right: { style: 'thin', color: { argb: SEICE_XLSX_COLORS.border } },
+        };
 
         if (shouldWrap && typeof value === 'string') {
-          maxLines = Math.max(maxLines, estimateWrappedLines(value, width));
+          const lines = estimateWrappedLines(value, sheet.getColumn(colIndex + 1).width!);
+          if (lines > maxLines) maxLines = lines;
         }
       });
 
-      excelRow.height = maxLines > 1 ? Math.min(120, 15 * maxLines + 6) : 22;
+      if (maxLines > 1) {
+        excelRow.height = Math.min(120, 15 * maxLines);
+      }
     });
 
     const lastDataRow = headerRowNumber + data.length;
 
-    // Rodapé com Média / Maior / Menor alinhados embaixo de cada coluna numérica
-    if (includeStats && data.length >= 2) {
-      const footer: { label: string; calc: (v: number[]) => number }[] = [
-        { label: 'Média', calc: (v) => v.reduce((a, b) => a + b, 0) / v.length },
-        { label: 'Maior', calc: (v) => Math.max(...v) },
-        { label: 'Menor', calc: (v) => Math.min(...v) },
-      ];
-      footer.forEach((f, k) => {
-        const excelRow = sheet.getRow(lastDataRow + 1 + k);
-        excelRow.height = 22;
-        columns.forEach((column, colIndex) => {
-          const cell = excelRow.getCell(colIndex + 1);
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: k === 0 ? C.goldSoft : C.goldPale } };
-          cell.border = {
-            top: k === 0 ? { style: 'medium', color: { argb: C.gold } } : undefined,
-            bottom: { style: 'thin', color: { argb: C.border } },
-          };
-          cell.font = { name: 'Calibri', size: 10.5, bold: true, color: { argb: C.textDark } };
-          if (colIndex === 0) {
-            cell.value = f.label;
-            cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-            return;
+    if (includeStats && data.length > 0) {
+      let statsRow = lastDataRow + 2;
+
+      const statsTitleCell = sheet.getCell(`A${statsRow}`);
+      statsTitleCell.value = 'Estatísticas';
+      statsTitleCell.font = { name: 'Calibri', size: 13, bold: true, color: { argb: SEICE_XLSX_COLORS.black } };
+      statsTitleCell.border = { top: { style: 'medium', color: { argb: SEICE_XLSX_COLORS.gold } } };
+      statsRow++;
+
+      const totalCell = sheet.getCell(`A${statsRow}`);
+      totalCell.value = `Total de registros: ${data.length}`;
+      totalCell.font = { name: 'Calibri', size: 10, color: { argb: SEICE_XLSX_COLORS.textMuted } };
+      statsRow++;
+
+      columns.forEach((column) => {
+        if (column.type === 'number' || column.type === 'percentage') {
+          const values = data
+            .map((row) => parseFloat(row[column.key]))
+            .filter((val) => !isNaN(val));
+          if (values.length > 0) {
+            const avg = values.reduce((a, b) => a + b, 0) / values.length;
+            const max = Math.max(...values);
+            const min = Math.min(...values);
+            const cell = sheet.getCell(`A${statsRow}`);
+            // Números no formato brasileiro (vírgula decimal); percentuais com "%"
+            const fmt = (n: number) =>
+              n.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) +
+              (column.type === 'percentage' ? '%' : '');
+            cell.value = `${column.header} — Média: ${fmt(avg)} | Máximo: ${fmt(max)} | Mínimo: ${fmt(min)}`;
+            cell.font = { name: 'Calibri', size: 10, color: { argb: SEICE_XLSX_COLORS.textMuted } };
+            statsRow++;
           }
-          if (!isNumeric(column) || column.noStats) return;
-          const values = data.map((r) => parseFloat(r[column.key])).filter((v) => !isNaN(v));
-          if (values.length === 0) return;
-          const result = Math.round(f.calc(values) * 100) / 100;
-          cell.value = result;
-          cell.numFmt = column.type === 'percentage'
-            ? '0.0"%"'
-            : column.format || (Number.isInteger(result) && k > 0 ? '#,##0' : '#,##0.0#');
-          cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        });
+        }
       });
     }
 
-    // Quadro explicativo abaixo da tabela: título dourado e uma linha por item (rótulo | valor)
-    if (options.notes && options.notes.lines.length > 0) {
-      const statsRows = includeStats && data.length >= 2 ? 3 : 0;
-      let r = lastDataRow + statsRows + 2;
-      const labelEnd = Math.max(1, Math.min(columnCount - 1, 2));
-      const valueStart = labelEnd + 1;
-      const valueEnd = Math.min(columnCount, valueStart + 2);
-      const titleEnd = Math.max(valueEnd, labelEnd);
-      if (titleEnd > 1) sheet.mergeCells(`A${r}:${colLetter(titleEnd)}${r}`);
-      const t = sheet.getCell(`A${r}`);
-      t.value = options.notes.title;
-      t.font = { name: 'Calibri', size: 11, bold: true, color: { argb: C.black } };
-      t.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: C.gold } };
-      t.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-      sheet.getRow(r).height = 22;
-      r++;
-      options.notes.lines.forEach((line, i) => {
-        if (labelEnd > 1) sheet.mergeCells(`A${r}:${colLetter(labelEnd)}${r}`);
-        if (valueEnd > valueStart) sheet.mergeCells(`${colLetter(valueStart)}${r}:${colLetter(valueEnd)}${r}`);
-        const a = sheet.getCell(`A${r}`);
-        const b = sheet.getCell(`${colLetter(valueStart)}${r}`);
-        a.value = line.label;
-        b.value = line.value;
-        [a, b].forEach((cell) => {
-          cell.font = { name: 'Calibri', size: 10.5, bold: !!line.strong, color: { argb: C.textDark } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: line.strong ? C.goldSoft : (i % 2 === 0 ? C.white : C.zebra) } };
-          cell.alignment = { horizontal: 'left', vertical: 'middle', indent: 1 };
-          cell.border = {
-            bottom: { style: 'thin', color: { argb: C.border } },
-            top: line.strong ? { style: 'medium', color: { argb: C.gold } } : undefined,
-          };
-        });
-        sheet.getRow(r).height = 20;
-        r++;
-      });
-    }
-
-    // Autofiltro, cabeçalho e primeira coluna congelados, título repetido na impressão
-    if (options.includeFilters !== false && data.length > 0) {
-      sheet.autoFilter = {
-        from: { row: headerRowNumber, column: 1 },
-        to: { row: headerRowNumber, column: columnCount },
-      };
-    }
-    sheet.views = [{ state: 'frozen', xSplit: 1, ySplit: headerRowNumber, showGridLines: false }];
-    sheet.pageSetup.printTitlesRow = `${headerRowNumber}:${headerRowNumber}`;
+    // Autofiltro e cabeçalho congelado a partir da linha de cabeçalhos
+    sheet.autoFilter = {
+      from: { row: headerRowNumber, column: 1 },
+      to: { row: headerRowNumber, column: columnCount },
+    };
+    sheet.views = [{ state: 'frozen', ySplit: headerRowNumber }];
   }
 
   private uniqueSheetName(rawName: string): string {
