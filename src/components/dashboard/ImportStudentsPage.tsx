@@ -1013,9 +1013,12 @@ export function ManageStudentsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas as turmas</SelectItem>
-                  <SelectItem value={NO_CLASS_FILTER}>
-                    Sem turma <span className="text-muted-foreground">({students.filter(s => !s.class?.trim()).length} alunos)</span>
-                  </SelectItem>
+                  {/* Só aparece quando há alunos sem turma (com 0, a opção só confundia) */}
+                  {withoutClassCount > 0 && (
+                    <SelectItem value={NO_CLASS_FILTER}>
+                      Sem turma <span className="text-muted-foreground">({withoutClassCount} aluno{withoutClassCount === 1 ? '' : 's'})</span>
+                    </SelectItem>
+                  )}
                   {classOptions.map(className => (
                     <SelectItem key={className} value={className}>
                       {className} <span className="text-muted-foreground">({studentsInClass(className)} alunos)</span>
