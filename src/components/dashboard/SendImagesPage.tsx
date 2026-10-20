@@ -16,6 +16,7 @@ import { toast } from '../../utils/toast';
 import { confirmAction } from '../../utils/confirm';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
+import { buildGradeReportSheets } from '../../utils/grade-report';
 import { readAnswerSheet } from '../../utils/omr';
 import { readCardIdentity } from '../../utils/cardIdentity';
 import { SearchPickerDialog, PickerField, PickerItem } from './SearchPicker';
@@ -1024,35 +1025,6 @@ export function SendImagesPage() {
     }
   };
 
-  const buildCorrectionSubjectBreakdown = (corrections) => {
-    const bySubject: Record<string, any[]> = {};
-
-    corrections.forEach(correction => {
-      correction.subjectPerformances.forEach(subj => {
-        if (!bySubject[subj.subject]) {
-          bySubject[subj.subject] = [];
-        }
-        bySubject[subj.subject].push({
-          aluno: correction.studentName,
-          turma: correction.studentClass,
-          acertos: subj.correctAnswers,
-          total: subj.totalQuestions,
-          percentual: subj.percentage
-        });
-      });
-    });
-
-    return bySubject;
-  };
-
-  const CORRECTION_SUBJECT_COLUMNS: ExcelColumn[] = [
-    { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
-    { header: 'Turma', key: 'turma', width: 15, type: 'text' },
-    { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
-    { header: 'Total', key: 'total', width: 12, type: 'number' },
-    { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
-  ];
-
   const handleBatchCorrection = async () => {
     if (!selectedImage || currentBatchIndex >= batchImages.length) return;
 
@@ -1350,47 +1322,24 @@ export function SendImagesPage() {
     const exporter = new ExcelExporter();
 
     try {
+      // Mesmo relatório da página de Correção: notas em pontos pelo valor de cada questão
+      const sheets = buildGradeReportSheets({
+        title: `Relatório Geral — ${examData.title}`,
+        submissions: completedCorrections.map((corr: any) => ({ ...corr, examId: corr.examId || examData.id })),
+        examsById: { [examData.id]: examData }
+      });
+
       if (type === 'general') {
-        const bySubject = buildCorrectionSubjectBreakdown(completedCorrections);
-
-        const resumoSheet = {
-          title: `Relatório Geral — ${examData.title}`,
-          subtitle: `Total de alunos: ${completedCorrections.length}`,
-          sheetName: 'Resumo Geral',
-          includeStats: true,
-          columns: [
-            { header: 'Aluno', key: 'aluno', width: 28, type: 'text' },
-            { header: 'Turma', key: 'turma', width: 15, type: 'text' },
-            { header: 'Nota', key: 'nota', width: 14, type: 'text' },
-            { header: 'Percentual', key: 'percentual', width: 14, type: 'percentage' },
-          ] as ExcelColumn[],
-          data: completedCorrections.map((corr: any) => ({
-            aluno: corr.studentName,
-            turma: corr.studentClass,
-            nota: `${corr.score}/${corr.totalQuestions}`,
-            percentual: corr.percentage,
-          })),
-        };
-
-        const subjectSheets = Object.entries(bySubject).map(([subjectName, data]) => ({
-          title: `Detalhamento — ${subjectName}`,
-          sheetName: subjectName,
-          includeStats: true,
-          columns: CORRECTION_SUBJECT_COLUMNS,
-          data,
-        }));
-
-        await exporter.exportMultiSheet([resumoSheet, ...subjectSheets], `Relatorio_Geral_${examData.title}_${timestamp}`);
+        await exporter.exportMultiSheet(sheets, `Relatorio_Geral_${examData.title}_${timestamp}`);
       } else {
-        const bySubject = buildCorrectionSubjectBreakdown(completedCorrections);
-        const data = bySubject[subject] || [];
-
+        const sheet = sheets.find(sh => sh.sheetName === subject);
+        if (!sheet) {
+          toast.error(`Matéria "${subject}" não encontrada`);
+          return;
+        }
         await exporter.export({
+          ...sheet,
           title: `${subject} — ${examData.title}`,
-          subtitle: `Total de alunos: ${data.length}`,
-          includeStats: true,
-          columns: CORRECTION_SUBJECT_COLUMNS,
-          data,
           filename: `${subject}_${examData.title}_${timestamp}`,
         });
       }
