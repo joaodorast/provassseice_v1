@@ -980,13 +980,18 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     <div className="space-y-6">
       <ActionResultDialog result={saveResult} onClose={() => setSaveResult(null)} />
 
-      <div className="flex items-center justify-between">
-        <div className="flex items-center space-x-4">
-          <Button variant="ghost" onClick={onBack}>
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Voltar
+      {/* Cabeçalho fixo no topo: o botão de voltar fica sempre à mão, mesmo rolando a página */}
+      <div className="sticky top-0 z-20 -mx-2 px-2 py-3 bg-white/95 backdrop-blur border-b border-slate-200 flex items-center justify-between gap-4">
+        <div className="flex items-center gap-4 min-w-0">
+          <Button
+            variant="outline"
+            onClick={onBack}
+            className="h-11 px-4 text-base font-medium border-slate-300 shadow-sm hover:bg-slate-100 shrink-0"
+          >
+            <ArrowLeft className="w-5 h-5 mr-2" />
+            {examToEdit ? 'Voltar aos Simulados' : 'Voltar'}
           </Button>
-          <div>
+          <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-slate-800">{examToEdit ? 'Editar Simulado' : 'Criar Simulado'}</h1>
             <p className="text-slate-600">
               {examToEdit ? 'Altere as questões, seções e configurações deste simulado' : 'Configure um simulado organizado em seções'}

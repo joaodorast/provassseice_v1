@@ -33,6 +33,10 @@ import {
 import { apiService } from '../../utils/api';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 
+// Compara nomes de turma sem diferenciar maiúsculas nem espaços nas pontas
+const sameClass = (a: any, b: any) =>
+  String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+
 type ManageExamsPageProps = {
   onCreateExam?: () => void;
   onEditExam?: (exam: any) => void;
@@ -84,6 +88,12 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
   const [selectedClass, setSelectedClass] = useState('');
   const [saveClassLoading, setSaveClassLoading] = useState(false);
   const [saveClassError, setSaveClassError] = useState('');
+  // Renomear a turma selecionada direto no modal
+  const [renamingClass, setRenamingClass] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
+  const [renameLoading, setRenameLoading] = useState(false);
+  // Nome do simulado, editável no mesmo modal da turma
+  const [classExamTitle, setClassExamTitle] = useState('');
 
   useEffect(() => {
     loadData();
@@ -108,17 +118,19 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       const submissionsList = submissionsResponse?.submissions || [];
       const studentsList = studentsResponse?.students || [];
       
-      // Extrair turmas únicas dos alunos
-      const uniqueClassNames = Array.from(new Set(
-        studentsList
-          .map(s => s.class)
-          .filter(Boolean)
-      )).sort();
-      
+      // Extrair turmas únicas dos alunos. Agrupa sem diferenciar maiúsculas/espaços
+      // ("5001-ce" e "5001-CE " são a mesma turma), mantendo a primeira grafia encontrada.
+      const classByKey = new Map<string, string>();
+      studentsList.forEach((s: any) => {
+        const raw = String(s.class || '').trim();
+        if (raw && !classByKey.has(raw.toLowerCase())) classByKey.set(raw.toLowerCase(), raw);
+      });
+      const uniqueClassNames = Array.from(classByKey.values()).sort();
+
       const classesList = uniqueClassNames.map(className => ({
         id: className,
         name: className,
-        studentsCount: studentsList.filter(s => s.class === className).length
+        studentsCount: studentsList.filter(s => sameClass(s.class, className)).length
       }));
       
       console.log('ManageExamsPage: Classes extracted from students:', classesList);
@@ -265,9 +277,76 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
   const handleEditClassClick = (exam: any) => {
     console.log('Abrindo edição de turma do exame:', exam);
     setEditingClassExam(exam);
-    setSelectedClass(exam.selectedClass || '');
+    // Usa a grafia da lista de turmas, para o Select reconhecer a turma atual
+    const current = classes.find(cls => sameClass(cls.name, exam.selectedClass));
+    setSelectedClass(current?.name || exam.selectedClass || '');
     setSaveClassError('');
+    setRenamingClass(false);
+    setNewClassName('');
+    setClassExamTitle(exam.title || '');
     setEditClassDialogOpen(true);
+  };
+
+  // Renomeia a turma selecionada: atualiza o cadastro em Gerenciar Turmas (se existir),
+  // os alunos vinculados e os simulados que usam o nome antigo
+  const handleRenameClass = async () => {
+    const oldName = selectedClass.trim();
+    const newName = newClassName.trim();
+    if (!oldName || !newName) {
+      setSaveClassError('Digite o novo nome da turma');
+      return;
+    }
+    if (oldName === newName) {
+      setRenamingClass(false);
+      return;
+    }
+    if (!sameClass(oldName, newName) && classes.some(cls => sameClass(cls.name, newName))) {
+      setSaveClassError(`Já existe uma turma chamada "${newName}".`);
+      return;
+    }
+
+    try {
+      setRenameLoading(true);
+      setSaveClassError('');
+
+      const classesRes = await apiService.getClasses();
+      const registered = (classesRes?.classes || []).find((cls: any) => sameClass(cls.name, oldName));
+      if (registered) {
+        const res = await apiService.updateClass(registered.id, {
+          name: newName,
+          grade: registered.grade,
+          shift: registered.shift,
+          year: registered.year
+        });
+        if (res?.success === false) throw new Error(res.error || 'Erro ao renomear turma');
+      }
+
+      const studentIds = students.filter(s => sameClass(s.class, oldName)).map(s => s.id);
+      const examIds = exams.filter(e => sameClass(e.selectedClass, oldName)).map(e => e.id);
+      let failed = 0;
+      for (let i = 0; i < studentIds.length; i += 10) {
+        const results = await Promise.allSettled(
+          studentIds.slice(i, i + 10).map(id => apiService.updateStudent(id, { class: newName }))
+        );
+        failed += results.filter(r => r.status === 'rejected' || (r.status === 'fulfilled' && r.value?.success === false)).length;
+      }
+      await Promise.allSettled(examIds.map(id => apiService.updateExam(id, { selectedClass: newName })));
+
+      if (failed > 0) {
+        showToast(`${failed} aluno(s) não foram atualizados`, 'error', 'Confira em Gerenciar Alunos.');
+      } else {
+        showToast('Turma renomeada!', 'success', `"${oldName}" agora é "${newName}"`);
+      }
+      setSelectedClass(newName);
+      setEditingClassExam((prev: any) => prev && sameClass(prev.selectedClass, oldName) ? { ...prev, selectedClass: newName } : prev);
+      setRenamingClass(false);
+      await loadData();
+    } catch (error) {
+      console.error('Erro ao renomear turma:', error);
+      setSaveClassError(error.message || 'Erro ao renomear turma. Tente novamente.');
+    } finally {
+      setRenameLoading(false);
+    }
   };
 
   // Função para salvar a alteração de turma via API
@@ -276,24 +355,32 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       setSaveClassError('Por favor, selecione uma turma');
       return;
     }
+    const title = classExamTitle.trim();
+    if (!title) {
+      setSaveClassError('O nome do simulado não pode ficar vazio');
+      return;
+    }
 
     try {
       setSaveClassLoading(true);
       setSaveClassError('');
-      
+
       console.log('Atualizando turma do simulado via API:', {
         examId: editingClassExam.id,
-        selectedClass: selectedClass
+        selectedClass: selectedClass,
+        title
       });
 
+      const titleChanged = title !== (editingClassExam.title || '');
       const response = await apiService.updateExam(editingClassExam.id, {
-        selectedClass: selectedClass
+        selectedClass: selectedClass,
+        ...(titleChanged ? { title } : {})
       });
 
       console.log('Resposta da API:', response);
 
       if (response.success) {
-        showToast('Turma atualizada com sucesso!', 'success');
+        showToast(titleChanged ? 'Simulado atualizado com sucesso!' : 'Turma atualizada com sucesso!', 'success');
         setEditClassDialogOpen(false);
         await loadData();
       } else {
@@ -420,7 +507,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         return;
       }
 
-      const classStudents = students.filter(student => student.class === selectedClass);
+      const classStudents = students.filter(student => sameClass(student.class, selectedClass));
       
       if (classStudents.length === 0) {
         showToast(`Nenhum aluno encontrado na turma ${selectedClass}`, 'error');
@@ -1007,7 +1094,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
           <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
             {filteredExams.map((exam) => {
               const stats = getExamStats(exam.id);
-              const classStudentsCount = students.filter(s => s.class === exam.selectedClass).length;
+              const classStudentsCount = students.filter(s => sameClass(s.class, exam.selectedClass)).length;
               const subjectCount = getExamSubjectBreakdown(exam).length;
               const isApplied = !!exam.answerSheetsGeneratedAt || stats.submissions > 0;
               const actionClass = 'flex-col h-auto py-2 gap-1 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm hover:bg-white';
@@ -1532,18 +1619,27 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Users className="w-5 h-5 text-teal-600" />
-              Alterar Turma do Simulado
+              Editar Nome e Turma do Simulado
             </DialogTitle>
             <DialogDescription>
-              Selecione a turma que realizará este simulado
+              Altere o nome do simulado e a turma que vai realizá-lo
             </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">
             {editingClassExam && (
               <div className="bg-slate-50 p-3 rounded-lg border border-slate-200">
-                <p className="text-sm font-medium text-slate-700">Simulado:</p>
-                <p className="text-base font-semibold text-slate-900 mt-1">{editingClassExam.title}</p>
+                <Label htmlFor="class-exam-title" className="text-sm font-medium text-slate-700">
+                  Nome do Simulado <span className="text-red-500">*</span>
+                </Label>
+                <Input
+                  id="class-exam-title"
+                  value={classExamTitle}
+                  onChange={(e) => setClassExamTitle(e.target.value)}
+                  disabled={saveClassLoading}
+                  className="mt-1.5 bg-white font-semibold text-slate-900"
+                  placeholder="Ex: SIMULADO - 5º ANO - 5001-CE - 4º BIMESTRE"
+                />
                 {editingClassExam.selectedClass && (
                   <p className="text-xs text-slate-500 mt-1">
                     Turma atual: <span className="font-medium">{editingClassExam.selectedClass}</span>
@@ -1556,7 +1652,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               <Label htmlFor="select-class">
                 Selecione a Turma <span className="text-red-500">*</span>
               </Label>
-              <Select value={selectedClass} onValueChange={setSelectedClass}>
+              <Select value={selectedClass} onValueChange={setSelectedClass} disabled={renamingClass}>
                 <SelectTrigger id="select-class" className={saveClassError && !selectedClass ? 'border-red-500' : ''}>
                   <SelectValue placeholder="Escolha uma turma" />
                 </SelectTrigger>
@@ -1567,7 +1663,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                     </div>
                   ) : (
                     classes.map((cls) => {
-                      const studentsInClass = students.filter(s => s.class === cls.name).length;
+                      const studentsInClass = students.filter(s => sameClass(s.class, cls.name)).length;
                       return (
                         <SelectItem key={cls.id} value={cls.name}>
                           <div className="flex items-center justify-between w-full">
@@ -1583,11 +1679,54 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                 </SelectContent>
               </Select>
               
-              {selectedClass && (
-                <div className="mt-2 p-2 bg-zinc-50 border border-zinc-200 rounded text-xs text-zinc-900">
+              {selectedClass && !renamingClass && (
+                <div className="mt-2 p-2 bg-zinc-50 border border-zinc-200 rounded text-xs text-zinc-900 flex items-center justify-between gap-2">
                   <p className="font-medium">
-                    <Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />{students.filter(s => s.class === selectedClass).length} alunos nesta turma
+                    <Check className="w-3.5 h-3.5 inline-block align-text-bottom mr-1" />{students.filter(s => sameClass(s.class, selectedClass)).length} alunos nesta turma
                   </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => { setNewClassName(selectedClass); setSaveClassError(''); setRenamingClass(true); }}
+                  >
+                    <Edit className="w-3.5 h-3.5 mr-1" />
+                    Editar nome da turma
+                  </Button>
+                </div>
+              )}
+
+              {selectedClass && renamingClass && (
+                <div className="mt-2 p-3 bg-teal-50 border border-teal-200 rounded-lg space-y-2">
+                  <Label htmlFor="rename-class" className="text-xs text-teal-900">
+                    Novo nome da turma "{selectedClass}"
+                  </Label>
+                  <Input
+                    id="rename-class"
+                    value={newClassName}
+                    onChange={(e) => setNewClassName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') handleRenameClass(); }}
+                    disabled={renameLoading}
+                    autoFocus
+                  />
+                  <p className="text-[11px] text-teal-800">
+                    Os alunos da turma e os simulados que usam esse nome também serão atualizados.
+                  </p>
+                  <div className="flex justify-end gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setRenamingClass(false)} disabled={renameLoading}>
+                      Cancelar
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={handleRenameClass}
+                      disabled={renameLoading || !newClassName.trim()}
+                      className="bg-teal-600 hover:bg-teal-700"
+                    >
+                      {renameLoading ? 'Renomeando...' : 'Salvar nome'}
+                    </Button>
+                  </div>
                 </div>
               )}
             </div>
@@ -1622,7 +1761,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
             </Button>
             <Button
               onClick={handleSaveClassEdit}
-              disabled={saveClassLoading || !selectedClass || classes.length === 0}
+              disabled={saveClassLoading || renamingClass || !selectedClass || !classExamTitle.trim() || classes.length === 0}
               className="bg-teal-600 hover:bg-teal-700"
             >
               {saveClassLoading ? (

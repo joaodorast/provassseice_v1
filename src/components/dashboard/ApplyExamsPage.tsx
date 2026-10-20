@@ -206,7 +206,9 @@ export function ApplyExamsPage() {
   };
 
   const selectStudentsByClass = (className: string) => {
-    const classStudents = students.filter(s => s.class === className);
+    // Sem diferenciar maiúsculas/espaços: "5001-ce" e "5001-CE" são a mesma turma
+    const key = String(className || '').trim().toLowerCase();
+    const classStudents = students.filter(s => String(s.class || '').trim().toLowerCase() === key);
     setSelectedStudents(classStudents.map(s => s.id));
   };
 
