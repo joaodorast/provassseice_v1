@@ -71,14 +71,17 @@ const pct = (part: number, whole: number) => (whole > 0 ? Math.round((part / who
 
 // Cabeçalho com o valor máximo quando ele é igual em todas as linhas ("Nota (de 5,0)");
 // se variar (simulados diferentes), o máximo vai numa coluna própria
-function pointsColumns(key: string, label: string, maxes: number[], width = 14): ExcelColumn[] {
+function pointsColumns(key: string, label: string, maxes: number[], minWidth = 14): ExcelColumn[] {
+  // Largura suficiente para o título inteiro caber sem cortar (+4 do botão de filtro)
+  const fit = (header: string) => Math.max(minWidth, Math.ceil(header.length * 1.1) + 5);
   const unique = Array.from(new Set(maxes.map(round2)));
   if (unique.length === 1) {
-    return [{ header: `${label} (de ${formatPoints(unique[0])})`, key, width, type: 'number', format: '0.0#' }];
+    const header = `${label} (de ${formatPoints(unique[0])})`;
+    return [{ header, key, width: fit(header), type: 'number', format: '0.0#' }];
   }
   return [
-    { header: label, key, width, type: 'number', format: '0.0#' },
-    { header: `${label} – Valor`, key: `${key}Max`, width: 12, type: 'number', format: '0.0#' }
+    { header: label, key, width: fit(label), type: 'number', format: '0.0#' },
+    { header: `${label} – Valor`, key: `${key}Max`, width: fit(`${label} – Valor`), type: 'number', format: '0.0#' }
   ];
 }
 
@@ -131,9 +134,9 @@ export function buildGradeReportSheets({ title, submissions, examsById, correcti
     { header: 'Aluno', key: 'aluno', width: 34, type: 'text' },
     { header: 'Turma', key: 'turma', width: 12, type: 'text' },
     ...(multipleExams ? [{ header: 'Simulado', key: 'simulado', width: 30, type: 'text' } as ExcelColumn] : []),
-    { header: 'Acertos', key: 'acertos', width: 10, type: 'number' },
-    { header: 'Questões', key: 'questoes', width: 10, type: 'number' },
-    { header: 'Percentual', key: 'percentual', width: 12, type: 'percentage' },
+    { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
+    { header: 'Questões', key: 'questoes', width: 14, type: 'number' },
+    { header: 'Percentual', key: 'percentual', width: 15, type: 'percentage' },
     ...pointsColumns('notaGeral', 'Nota Geral', scored.map(x => x.score.max), 16),
     ...subjectOrder.flatMap((name, i) => pointsColumns(
       subjectKey(i),
@@ -141,7 +144,7 @@ export function buildGradeReportSheets({ title, submissions, examsById, correcti
       scored.map(x => x.score.subjects.find(s => s.subject === name)?.max).filter((m): m is number => m !== undefined),
       16
     )),
-    ...(correctionTypeLabel ? [{ header: 'Tipo de Correção', key: 'tipoCorrecao', width: 18, type: 'text' } as ExcelColumn] : [])
+    ...(correctionTypeLabel ? [{ header: 'Tipo de Correção', key: 'tipoCorrecao', width: 21, type: 'text' } as ExcelColumn] : [])
   ];
 
   const resumoSheet: ExcelExportOptions = {
@@ -184,9 +187,9 @@ export function buildGradeReportSheets({ title, submissions, examsById, correcti
         { header: 'Aluno', key: 'aluno', width: 34, type: 'text' },
         { header: 'Turma', key: 'turma', width: 12, type: 'text' },
         ...(multipleExams ? [{ header: 'Simulado', key: 'simulado', width: 30, type: 'text' } as ExcelColumn] : []),
-        { header: 'Acertos', key: 'acertos', width: 10, type: 'number' },
-        { header: 'Questões', key: 'questoes', width: 10, type: 'number' },
-        { header: 'Percentual', key: 'percentual', width: 12, type: 'percentage' },
+        { header: 'Acertos', key: 'acertos', width: 12, type: 'number' },
+        { header: 'Questões', key: 'questoes', width: 14, type: 'number' },
+        { header: 'Percentual', key: 'percentual', width: 15, type: 'percentage' },
         ...pointsColumns('nota', 'Nota na Matéria', rows.map(r => r.notaMax), 18),
         ...pointsColumns('notaGeral', 'Nota Geral', rows.map(r => r.notaGeralMax), 16)
       ],
