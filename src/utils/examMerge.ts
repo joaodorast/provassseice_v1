@@ -80,6 +80,11 @@ function similarity(file: Signature, existing: Signature): number {
   return fileWords.size >= 8 && contained >= CONTAINED_THRESHOLD ? contained * 0.9 : 0;
 }
 
+// Para conferências externas: quão parecidas são duas questões (0 = diferentes, perto de 1 = a mesma)
+export function questionSimilarity(a: MergeQuestion, b: MergeQuestion): number {
+  return similarity(signature(a), signature(b));
+}
+
 const sameSectionName = (a: string, b: string) =>
   normalizeText(a).replace(/[^a-z0-9]+/g, ' ').trim() === normalizeText(b).replace(/[^a-z0-9]+/g, ' ').trim();
 
