@@ -491,9 +491,9 @@ export function ManageStudentsPage() {
 
   const downloadTemplate = () => {
     downloadCsv('modelo_alunos.csv', [
-      ['NOME', 'EMAIL', 'TURMA', 'TURNO', 'MATRICULA'],
-      ['João Silva', 'joao@email.com', 'Turma A', 'Manhã', '001'],
-      ['Maria Santos', 'maria@email.com', 'Turma B', 'Tarde', '002']
+      ['NOME', 'EMAIL', 'TURMA', 'CURSO', 'TURNO', 'MATRICULA'],
+      ['João Silva', 'joao@email.com', '8001-CE', '8º Ano', 'Manhã', '001'],
+      ['Maria Santos', 'maria@email.com', '8002-CE', '8º Ano', 'Tarde', '002']
     ]);
     toast.success('Modelo baixado com sucesso!');
   };
@@ -756,9 +756,13 @@ export function ManageStudentsPage() {
                     <AlertCircle className="w-5 h-5 text-zinc-800 mt-0.5 flex-shrink-0" />
                     <div className="text-sm text-zinc-900">
                       <p className="font-medium mb-1">Formato do arquivo:</p>
-                      <p>O arquivo deve conter as colunas na seguinte ordem:</p>
+                      <p>A primeira linha traz os títulos das colunas (a ordem não importa):</p>
                       <p className="font-mono text-xs mt-1 bg-zinc-100 p-2 rounded">
-                        NOME | EMAIL | TURMA | TURNO | MATRICULA
+                        NOME | EMAIL | TURMA | CURSO | TURNO | MATRICULA
+                      </p>
+                      <p className="mt-2 text-xs text-zinc-600">
+                        Com a coluna <strong>CURSO</strong> (ex: 8º Ano) as turmas novas já nascem com o curso certo. Sem ela, o
+                        sistema deduz pelo código da turma (8001-CE → 8º Ano). O turno é lido de TURNO (Manhã, Tarde ou Noite).
                       </p>
                     </div>
                   </div>
