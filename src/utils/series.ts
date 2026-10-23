@@ -77,3 +77,36 @@ export function inferSeriesFromClassCode(code: string, registered: string[]): st
   if (!m) return undefined;
   return findRegisteredSeries(`${m[1]}º Ano`, registered);
 }
+
+// Nome do curso pelo código da turma, mesmo que o curso ainda não esteja cadastrado:
+// "8001-CE" -> "8º Ano". Só vale para o padrão do Ensino Fundamental (1º ao 9º ano: um dígito do
+// ano + "00" + número da turma). Códigos do Ensino Médio (1101, 2101...) não seguem esse padrão e
+// ficam sem dedução, para não atribuir um curso errado.
+export function courseNameFromClassCode(code: string): string | undefined {
+  const m = normalizeText(code).match(/^([1-9])00\d\b/);
+  return m ? `${m[1]}º Ano` : undefined;
+}
+
+// Escreve o curso do jeito do sistema: "8 ano", "8° ANO" e "8º Ano" viram o curso cadastrado
+// ("8º Ano"); texto que não segue esse padrão ("Pré II", "1º Ano EM") só é aparado.
+export function canonicalCourseName(text: string, registered: string[]): string {
+  const clean = String(text || '').trim().replace(/\s+/g, ' ');
+  if (!clean) return '';
+  const known = findRegisteredSeries(clean, registered);
+  if (known) return known;
+  const m = normalizeText(clean).match(/^(\d{1,2}) ?º? ?ano$/);
+  return m ? `${m[1]}º Ano` : clean;
+}
+
+// Turno escrito de qualquer jeito na planilha ("MANHÃ", "manha", "MNHÃ", "Matutino", "tarde",
+// "Vespertino", "noite") vira "Manhã", "Tarde" ou "Noite". Texto desconhecido (ex: "Integral") volta
+// como veio; vazio volta vazio.
+export function normalizeShift(raw: unknown): string {
+  const text = String(raw ?? '').trim();
+  const n = normalizeText(text);
+  if (!n) return '';
+  if (/^(m|mat)/.test(n)) return 'Manhã';
+  if (/^(t|v)/.test(n)) return 'Tarde';
+  if (/^n/.test(n)) return 'Noite';
+  return text;
+}
