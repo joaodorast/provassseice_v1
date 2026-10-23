@@ -1,12 +1,18 @@
 // Leitura de planilhas/CSV de alunos (usada em Gerenciar Alunos e em Configurações)
 import { apiService } from './api';
+import { projectId, publicAnonKey } from './supabase/info';
+import { canonicalCourseName, courseNameFromClassCode, findRegisteredSeries, normalizeShift } from './series';
 
 export type ImportedStudent = {
   name: string;
   email: string;
   class: string;
+  // Turno do aluno (Manhã, Tarde, Noite)
   grade: string;
   registration: string;
+  // Curso da turma, quando a planilha tem a coluna CURSO/SÉRIE (ex: "8º Ano"). Só serve para cadastrar
+  // a turma; não é salvo no aluno.
+  course?: string;
 };
 
 export const stripAccents = (text: string) => text.normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -124,7 +130,10 @@ export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Im
   let cName = findCol('nome', 'aluno', 'estudante');
   let cEmail = findCol('email', 'e-mail');
   let cClass = findCol('turma', 'classe');
-  let cGrade = findCol('turno', 'curso', 'serie', 'ano');
+  // TURNO (Manhã/Tarde/Noite) e CURSO (8º Ano) são colunas diferentes. Antes as duas caíam no mesmo
+  // campo, e o turno acabava cadastrado como se fosse o curso da turma.
+  let cGrade = findCol('turno', 'periodo');
+  let cCourse = header.findIndex((h, i) => i !== cGrade && (h === 'ano' || /curso|serie|etapa/.test(h)));
   let cRegistration = findCol('matricula', 'registro', 'ra');
 
   const dataRows = rows.slice(1);
@@ -138,9 +147,10 @@ export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Im
       cRegistration = guessed.cRegistration;
       cClass = -1;
       cGrade = -1;
+      cCourse = -1;
     } else {
-      // Último recurso: modelo fixo antigo (Nome, Email, Turma, Série, Matrícula)
-      cName = 0; cEmail = 1; cClass = 2; cGrade = 3; cRegistration = 4;
+      // Último recurso: modelo fixo antigo (Nome, Email, Turma, Turno, Matrícula)
+      cName = 0; cEmail = 1; cClass = 2; cGrade = 3; cRegistration = 4; cCourse = -1;
     }
   }
 
@@ -157,8 +167,10 @@ export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Im
       name,
       email: cell(row, cEmail),
       class: cell(row, cClass) || sheetNameAsClassFallback,
-      grade: cell(row, cGrade),
-      registration: cell(row, cRegistration)
+      // "MANHÃ", "manha" e "MNHÃ" (erro de digitação comum) viram "Manhã"
+      grade: normalizeShift(cell(row, cGrade)),
+      registration: cell(row, cRegistration),
+      course: cell(row, cCourse) || undefined
     });
   }
 
@@ -191,35 +203,105 @@ export async function readStudentsFromFile(file: File): Promise<ImportedStudent[
   return rowsToStudents(jsonData, sheetNameHint);
 }
 
-// Cadastra em "Gerenciar Turmas" as turmas dos alunos que ainda não existem lá.
-// Retorna quantas turmas foram criadas
-export async function ensureClassesExist(studentsList: { class?: string; grade?: string }[]): Promise<number> {
+export type PlannedClass = { name: string; grade: string; shift: string };
+
+// Decide, a partir dos alunos importados, quais turmas ainda não existem e com que curso e turno
+// cadastrá-las:
+//  - curso: o da planilha (coluna CURSO/SÉRIE); sem ela, deduzido pelo código da turma
+//    ("8001-CE" -> "8º Ano"); se nenhum dos dois der, fica em branco para o usuário definir;
+//  - turno: o que a maioria dos alunos da turma tem na planilha ("Manhã" se a planilha não diz).
+export function planClassesFromStudents(
+  students: { class?: string; grade?: string; course?: string }[],
+  registeredSeries: string[],
+  existingClassNames: string[]
+): PlannedClass[] {
+  const existing = new Set(existingClassNames.map(n => String(n).trim().toLowerCase()));
+  type Group = { name: string; shifts: Map<string, number>; courses: Map<string, number> };
+  const groups = new Map<string, Group>();
+
+  students.forEach(s => {
+    const name = (s.class || '').trim();
+    const key = name.toLowerCase();
+    if (!name || existing.has(key)) return;
+    const group = groups.get(key) || { name, shifts: new Map(), courses: new Map() };
+    const shift = normalizeShift(s.grade);
+    if (shift) group.shifts.set(shift, (group.shifts.get(shift) || 0) + 1);
+    const course = canonicalCourseName(s.course || '', registeredSeries);
+    if (course) group.courses.set(course, (group.courses.get(course) || 0) + 1);
+    groups.set(key, group);
+  });
+
+  const mostCommon = (counts: Map<string, number>) =>
+    [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+
+  return [...groups.values()].map(group => ({
+    name: group.name,
+    grade: mostCommon(group.courses) || courseNameFromClassCode(group.name) || '',
+    shift: mostCommon(group.shifts) || 'Manhã'
+  }));
+}
+
+const SERIES_URL = `https://${projectId}.supabase.co/functions/v1/make-server-83358821/subjects-series`;
+
+// Cursos cadastrados em "Gerenciar Cursos". null = não deu para consultar (nesse caso nada é gravado
+// na lista, para nunca apagar os cursos existentes por engano)
+async function fetchRegisteredSeries(): Promise<string[] | null> {
   try {
-    const names = new Map<string, string>();
-    studentsList.forEach(s => {
-      const name = (s.class || '').trim();
-      if (name && !names.has(name.toLowerCase())) names.set(name.toLowerCase(), s.grade?.trim() || '');
+    const response = await fetch(SERIES_URL, { headers: { Authorization: `Bearer ${publicAnonKey}` } });
+    if (!response.ok) return null;
+    const result = await response.json();
+    return result?.success ? (result.series || []).map((s: unknown) => String(s)) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveRegisteredSeries(series: string[]): Promise<boolean> {
+  try {
+    const response = await fetch(SERIES_URL, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${publicAnonKey}` },
+      body: JSON.stringify({ series })
     });
-    if (names.size === 0) return 0;
+    return response.ok;
+  } catch {
+    return false;
+  }
+}
 
-    const existing = (await apiService.getClasses())?.classes || [];
-    const existingNames = new Set(existing.map((c: any) => String(c.name).trim().toLowerCase()));
-    const missing = Array.from(names.entries()).filter(([key]) => !existingNames.has(key));
+export type ClassRegistration = { created: number; withoutCourse: string[] };
 
-    for (const [key, grade] of missing) {
-      const original = studentsList.find(s => (s.class || '').trim().toLowerCase() === key)!.class!.trim();
-      await apiService.createClass({
-        name: original,
-        grade: grade || original,
-        shift: 'Manhã',
-        year: new Date().getFullYear().toString()
-      });
+// Cadastra em "Gerenciar Turmas" as turmas dos alunos que ainda não existem lá, já com curso e turno,
+// e registra em "Gerenciar Cursos" os cursos novos (ex: "8º Ano") que apareceram.
+export async function registerClassesFromStudents(
+  studentsList: { class?: string; grade?: string; course?: string }[]
+): Promise<ClassRegistration> {
+  try {
+    if (!studentsList.some(s => (s.class || '').trim())) return { created: 0, withoutCourse: [] };
+
+    const [classesResponse, series] = await Promise.all([apiService.getClasses(), fetchRegisteredSeries()]);
+    const existingNames = (classesResponse?.classes || []).map((c: any) => String(c.name));
+    const planned = planClassesFromStudents(studentsList, series || [], existingNames);
+
+    const newCourses = Array.from(new Set(planned.map(p => p.grade).filter(g => g && !findRegisteredSeries(g, series || []))));
+    if (series && newCourses.length > 0) await saveRegisteredSeries([...series, ...newCourses]);
+
+    const year = new Date().getFullYear().toString();
+    let created = 0;
+    for (const p of planned) {
+      const response = await apiService.createClass({ name: p.name, grade: p.grade, shift: p.shift, year });
+      if (response?.success !== false) created++;
     }
-    return missing.length;
+    return { created, withoutCourse: planned.filter(p => !p.grade).map(p => p.name) };
   } catch (error) {
     console.error('Error auto-registering classes:', error);
-    return 0;
+    return { created: 0, withoutCourse: [] };
   }
+}
+
+// Versão que só devolve quantas turmas foram criadas
+export async function ensureClassesExist(studentsList: { class?: string; grade?: string; course?: string }[]): Promise<number> {
+  return (await registerClassesFromStudents(studentsList)).created;
 }
 
 export type StudentImportSummary = {
@@ -229,6 +311,8 @@ export type StudentImportSummary = {
   failed: number;
   withoutClass: number;
   createdClasses: number;
+  // Turmas criadas sem curso: a planilha não tem a coluna CURSO e o código da turma não segue o padrão (8001)
+  classesWithoutCourse: string[];
   error?: string;
 };
 
@@ -245,7 +329,7 @@ const studentKey = (s: { name?: string; class?: string; registration?: string })
 // falha apareça como erro em vez de "importado com sucesso".
 export async function saveImportedStudents(students: ImportedStudent[]): Promise<StudentImportSummary> {
   const summary: StudentImportSummary = {
-    total: students.length, saved: 0, duplicates: 0, failed: 0, withoutClass: 0, createdClasses: 0
+    total: students.length, saved: 0, duplicates: 0, failed: 0, withoutClass: 0, createdClasses: 0, classesWithoutCourse: []
   };
 
   const existingResponse = await apiService.getStudents();
@@ -267,7 +351,8 @@ export async function saveImportedStudents(students: ImportedStudent[]): Promise
   const BATCH_SIZE = 20;
   for (let i = 0; i < toSave.length; i += BATCH_SIZE) {
     const batch = toSave.slice(i, i + BATCH_SIZE);
-    const response = await apiService.createStudents(batch);
+    // O curso só serve para cadastrar a turma; não vai dentro do aluno
+    const response = await apiService.createStudents(batch.map(({ course, ...student }) => student));
     const savedCount = Array.isArray(response?.students) ? response.students.length : 0;
     if (response?.success && savedCount > 0) {
       summary.saved += savedCount;
@@ -280,7 +365,9 @@ export async function saveImportedStudents(students: ImportedStudent[]): Promise
 
   const savedStudents = toSave.slice(0, summary.saved);
   summary.withoutClass = savedStudents.filter(s => !s.class?.trim()).length;
-  summary.createdClasses = await ensureClassesExist(savedStudents);
+  const registration = await registerClassesFromStudents(savedStudents);
+  summary.createdClasses = registration.created;
+  summary.classesWithoutCourse = registration.withoutCourse;
   return summary;
 }
 
@@ -292,7 +379,11 @@ export function describeStudentImport(summary: StudentImportSummary) {
   if (summary.failed > 0) details.push(`${plural(summary.failed, 'aluno não foi salvo', 'alunos não foram salvos')}${summary.error ? ` (${summary.error})` : ''}`);
   if (summary.duplicates > 0) details.push(`${plural(summary.duplicates, 'aluno já estava cadastrado e foi ignorado', 'alunos já estavam cadastrados e foram ignorados')}`);
   if (summary.withoutClass > 0) details.push(`${plural(summary.withoutClass, 'aluno ficou sem turma', 'alunos ficaram sem turma')}: a planilha não tem coluna de turma. Defina a turma em Gerenciar Alunos.`);
-  if (summary.createdClasses > 0) details.push(`${summary.createdClasses} turma(s) cadastrada(s) automaticamente em Gerenciar Turmas`);
+  if (summary.createdClasses > 0) details.push(`${summary.createdClasses} turma(s) cadastrada(s) automaticamente em Gerenciar Turmas, com curso e turno`);
+  if (summary.classesWithoutCourse.length > 0) {
+    const list = summary.classesWithoutCourse.slice(0, 6).join(', ') + (summary.classesWithoutCourse.length > 6 ? '…' : '');
+    details.push(`${plural(summary.classesWithoutCourse.length, 'turma ficou sem curso', 'turmas ficaram sem curso')} (${list}): a planilha não tem a coluna CURSO e o código não indica o ano. Defina em Gerenciar Turmas.`);
+  }
 
   if (summary.failed > 0) {
     return {
