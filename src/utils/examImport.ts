@@ -1,10 +1,9 @@
 // Importa um simulado pronto a partir de um arquivo Word (.docx), Excel (.xlsx/.xls/.csv),
 // PDF ou fotos da prova, organizando automaticamente em seções e questões.
 //
-// PDF, fotos e Word são lidos com IA (rota /ai/extract-exam): as páginas viram imagens (o Word vira
-// texto com marcadores de título/vermelho/imagem) e são enviadas em trechos de poucas páginas,
-// em paralelo. As imagens embutidas no Word (ex: alternativas que são equações) vão junto com o texto.
-// Se a IA falhar, PDF e Word caem na leitura heurística abaixo.
+// Word e PDF são lidos DIRETO DO ARQUIVO, SEM IA (rápido, gratuito e sempre com o mesmo resultado).
+// Lendo por trechos, a IA deixava questões de fora e bagunçava a numeração. Só as FOTOS da prova
+// (JPG/PNG) usam IA (rota /ai/extract-exam), porque uma foto não tem texto para ser lido.
 //
 // Word: o .docx é lido diretamente do XML interno (não só o texto), para capturar formatação
 // que o enunciado usa: título com estilo "Título"/heading do Word ou texto em negrito sozinho
@@ -20,6 +19,8 @@
 import * as XLSX from 'xlsx';
 
 export interface ImportedQuestion {
+  /** Número impresso na prova (ex: 17), quando o arquivo traz; usado para achar questões que faltaram */
+  number?: number;
   question: string;
   subject: string;
   type: 'multiple-choice' | 'essay';
@@ -401,7 +402,6 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   let anyRedMarked = false;
   // Questões com letras de alternativa mas sem texto nelas (conteúdo em imagem): ficam objetivas
   const bareOptionQuestions = new Set<ImportedQuestion>();
-  const questionNumbers = new Map<ImportedQuestion, number>();
 
   for (const { text: line, heading, redMarked, listItem } of lines) {
     const explicitHeading = heading || SECTION_RE.test(line) || looksLikeSectionHeading(line);
@@ -450,6 +450,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       }
       lastQuestionNumber = number;
       currentQuestion = {
+        number,
         question: questionMatch[2] || '',
         subject: currentSection?.name || '',
         type: 'multiple-choice',
@@ -458,7 +459,6 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
         difficulty: 'Médio',
         points: 1
       };
-      questionNumbers.set(currentQuestion, number);
       continue;
     }
 
@@ -532,7 +532,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     const bareNumbers = sections
       .flatMap(s => s.questions)
       .filter(q => bareOptionQuestions.has(q) && q.options.every(o => !o.trim()))
-      .map(q => questionNumbers.get(q))
+      .map(q => q.number)
       .filter((n): n is number => n !== undefined);
     if (bareNumbers.length > 0) {
       warnings.push(`Questão(ões) ${bareNumbers.join(', ')}: as alternativas estão como imagem no arquivo e não têm texto para ler. Preencha o texto delas manualmente.`);
@@ -540,9 +540,59 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     if (essayCount > 0) {
       warnings.push(`${essayCount} questão(ões) ficaram como dissertativa porque não achei ao menos 2 alternativas nela(s) — confira a formatação das alternativas dessas questões.`);
     }
+    warnings.push(...checkNumbering(nonEmptySections));
   }
 
   return { sections: nonEmptySections, warnings };
+}
+
+// "17", "17 e 20", "17, 18 e 20"
+const joinNumbers = (nums: number[]) =>
+  nums.length <= 1 ? nums.join('') : `${nums.slice(0, -1).join(', ')} e ${nums[nums.length - 1]}`;
+
+// Confere a numeração impressa na prova: um número que pula (ex: 16 → 18) é questão que não foi lida,
+// e uma seção com menos questões que as outras também merece conferência. Nada é adivinhado: só avisa.
+function checkNumbering(sections: ImportedSection[]): string[] {
+  const warnings: string[] = [];
+  const gapSections = new Set<string>();
+  let prev: { n: number; section: string } | null = null;
+
+  sections.forEach((section, si) => {
+    section.questions.forEach((q) => {
+      const n = q.number;
+      if (n === undefined) return;
+      if (!prev && si === 0 && n > 1) {
+        const missing = Array.from({ length: n - 1 }, (_, i) => i + 1);
+        warnings.push(`A prova começa na questão ${n}: ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} não ${missing.length === 1 ? 'foi lida' : 'foram lidas'}. Confira e adicione.`);
+        gapSections.add(section.name);
+      }
+      // Número menor ou igual ao anterior = a numeração recomeçou (prova que numera por matéria)
+      if (prev && n > prev.n + 1) {
+        const missing = Array.from({ length: n - prev.n - 1 }, (_, i) => prev!.n + 1 + i);
+        const where = prev.section === section.name
+          ? `Em ${section.name}`
+          : `Entre ${prev.section} e ${section.name}`;
+        warnings.push(`${where}: a numeração da prova pula de ${prev.n} para ${n}, então ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} ${missing.length === 1 ? 'não foi lida' : 'não foram lidas'}. Adicione ${missing.length === 1 ? 'ela' : 'elas'} na seção e ajuste a posição.`);
+        gapSections.add(prev.section);
+        gapSections.add(section.name);
+      }
+      prev = { n, section: section.name };
+    });
+  });
+
+  // Seção com menos questões que as demais (ex: 9 contra 10 nas outras)
+  const counts = sections.map(s => s.questions.length);
+  const freq = new Map<number, number>();
+  counts.forEach(c => freq.set(c, (freq.get(c) || 0) + 1));
+  const [typical, typicalTimes] = [...freq.entries()].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0] || [0, 0];
+  if (typicalTimes >= 2) {
+    sections.forEach(s => {
+      if (s.questions.length < typical && !gapSections.has(s.name)) {
+        warnings.push(`${s.name} tem ${s.questions.length} questões e as outras seções têm ${typical}. Confira se alguma ficou de fora.`);
+      }
+    });
+  }
+  return warnings;
 }
 
 // ---------- Parser estruturado de planilha (Excel/CSV) ----------
@@ -975,21 +1025,14 @@ export async function importExamFile(input: File | File[], onProgress?: Progress
     return { sections: [], warnings: ['Fotos HEIC (iPhone) não são aceitas. No iPhone, use Ajustes > Câmera > Formatos > "Mais Compatível", ou envie a foto como JPG.'] };
   }
 
-  const onlyImages = files.every(isImageFile);
-  const pdfOrImages = files.every(f => f.name.toLowerCase().endsWith('.pdf') || isImageFile(f));
-
-  if (name.endsWith('.docx') || pdfOrImages) {
+  // Só fotos passam pela IA; Word, PDF e planilhas são lidos direto do arquivo
+  if (files.every(isImageFile)) {
     try {
-      const result = await importWithAI(name.endsWith('.docx') ? [file] : files, onProgress);
-      if (result.sections.length > 0 || onlyImages) return result;
+      return await importWithAI(files, onProgress);
     } catch (error) {
-      console.error('Error importing exam with AI:', error);
+      console.error('Error importing exam photos with AI:', error);
       const reason = (error as Error)?.message || 'erro desconhecido';
-      if (onlyImages) return { sections: [], warnings: [`Não foi possível ler as fotos: ${reason}`] };
-      // Sem IA: tenta a leitura heurística do PDF/Word
-      const fallback = await importExamFileHeuristic(file);
-      fallback.warnings.unshift(`A leitura com IA falhou (${reason}); usei a leitura automática simples, que erra mais. Revise com atenção.`);
-      return fallback;
+      return { sections: [], warnings: [`Não foi possível ler as fotos: ${reason}`] };
     }
   }
   return importExamFileHeuristic(file);
