@@ -39,6 +39,7 @@ import { toast } from '../../utils/toast';
 import { confirmAction } from '../../utils/confirm';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 import { apiService } from '../../utils/api';
+import { mergeMissingQuestions } from '../../utils/examMerge';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
 interface Question {
@@ -58,8 +59,12 @@ interface Question {
 
 // Resumo mostrado depois de importar um arquivo: quantas questões vieram em cada seção e o que conferir
 interface ImportReport {
+  // Título próprio (ex: ao completar um simulado); sem ele usa "Importação concluída"
+  title?: string;
   total: number;
   sections: { name: string; count: number }[];
+  // Informações do que foi feito (ex: "Adicionei nº 17 e nº 20")
+  notes?: string[];
   warnings: string[];
 }
 
@@ -342,6 +347,8 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const orderChangeAccepted = useRef(false);
   // Resumo da última importação de arquivo (fica na tela até ser fechado)
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  // Arquivo já lido, esperando o usuário escolher: completar o simulado ou adicionar tudo como seções novas
+  const [pendingImport, setPendingImport] = useState<{ sections: Section[]; warnings: string[] } | null>(null);
   // Arrastar questões para mudar a ordem (dentro da mesma seção), com o ponteiro (mouse ou toque).
   // Ao começar a arrastar, as questões da seção encolhem para uma linha cada: todas cabem na tela e
   // o destino fica sempre à vista. A página rola sozinha perto das bordas.
@@ -615,12 +622,14 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
 
   // Muda a ordem das questões muda o número de cada uma no gabarito. Se o simulado já teve cartões
   // gerados, avisa uma vez antes de mexer (os cartões já impressos seguem a ordem antiga).
-  const confirmOrderChange = async (): Promise<boolean> => {
+  const confirmOrderChange = async (kind: 'order' | 'add' = 'order'): Promise<boolean> => {
     if (!examToEdit?.answerSheetsGeneratedAt || orderChangeAccepted.current) return true;
     const ok = await confirmAction({
-      title: 'Mudar a ordem das questões?',
-      description: 'Os cartões-resposta deste simulado já foram gerados. Mudar a ordem muda o número de cada questão no gabarito, e os cartões já impressos podem ficar errados.',
-      confirmLabel: 'Mudar mesmo assim',
+      title: kind === 'add' ? 'Adicionar questões a este simulado?' : 'Mudar a ordem das questões?',
+      description: kind === 'add'
+        ? 'Os cartões-resposta deste simulado já foram gerados. Adicionar questões muda a numeração e o gabarito, e os cartões já impressos podem ficar errados.'
+        : 'Os cartões-resposta deste simulado já foram gerados. Mudar a ordem muda o número de cada questão no gabarito, e os cartões já impressos podem ficar errados.',
+      confirmLabel: kind === 'add' ? 'Adicionar mesmo assim' : 'Mudar mesmo assim',
       tone: 'warning'
     });
     if (ok) orderChangeAccepted.current = true;
@@ -1051,6 +1060,69 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     return () => clearInterval(timer);
   }, [isImportingFile, importStep]);
 
+  // Importação que entra como seções novas no fim do simulado
+  const addImportedSections = (importedSections: Section[], warnings: string[]) => {
+    setSimuladoData(prev => ({ ...prev, sections: [...prev.sections, ...importedSections] }));
+
+    const totalQuestions = importedSections.reduce((sum, s) => sum + s.questions.length, 0);
+    setImportReport({
+      total: totalQuestions,
+      sections: importedSections.map(s => ({ name: s.name, count: s.questions.length })),
+      warnings
+    });
+    // Um aviso só (cada um abre um pop-up); os detalhes ficam no resumo fixo na tela
+    if (warnings.length > 0) {
+      toast.warning(`${totalQuestions} questão(ões) importadas, mas confira o resumo abaixo: ${warnings.length} ponto(s) de atenção.`);
+    } else {
+      toast.success(`${importedSections.length} seção(ões) e ${totalQuestions} questão(ões) importadas! Revise antes de salvar.`);
+    }
+  };
+
+  // Importação que só completa um simulado que já existe: adiciona as questões do arquivo que ainda
+  // não estão nele, cada uma no lugar certo; o que já existe não é mexido
+  const completeWithImport = async () => {
+    const pending = pendingImport;
+    if (!pending) return;
+    setPendingImport(null);
+
+    const merged = mergeMissingQuestions<Question, Section>(simuladoData.sections, pending.sections);
+    if (merged.added.length > 0 && !(await confirmOrderChange('add'))) return;
+    setSimuladoData(prev => ({ ...prev, sections: merged.sections }));
+
+    // "nº 17 (agora Q7) em MATEMÁTICA"
+    const bySection = new Map<string, string[]>();
+    merged.added.forEach(({ section, question }) => {
+      const position = (merged.sections.find(s => s.name === section)?.questions.findIndex(q => q.id === question.id) ?? -1) + 1;
+      const label = `${question.printedNumber !== undefined ? `nº ${question.printedNumber}` : 'uma questão'} (agora Q${position})`;
+      bySection.set(section, [...(bySection.get(section) || []), label]);
+    });
+    const where = Array.from(bySection.entries()).map(([name, labels]) => `${labels.join(', ')} em ${name}`).join('; ');
+
+    const notes: string[] = [];
+    if (merged.added.length > 0) {
+      notes.push(`Adicionei ${merged.added.length} ${merged.added.length === 1 ? 'questão que faltava' : 'questões que faltavam'}: ${where}.`);
+      notes.push(`As outras ${merged.matched} questões do arquivo já estavam no simulado e não foram mexidas.`);
+    } else {
+      notes.push(`As ${merged.matched} questões do arquivo já estão todas no simulado: nada precisou ser adicionado.`);
+    }
+    if (merged.notInFile > 0) {
+      notes.push(`${merged.notInFile} ${merged.notInFile === 1 ? 'questão do simulado não aparece' : 'questões do simulado não aparecem'} neste arquivo e ${merged.notInFile === 1 ? 'foi mantida' : 'foram mantidas'} onde estavam.`);
+    }
+
+    setImportReport({
+      title: merged.added.length > 0
+        ? `Simulado completado: ${merged.added.length} ${merged.added.length === 1 ? 'questão adicionada' : 'questões adicionadas'}`
+        : 'O simulado já estava completo',
+      total: merged.sections.reduce((sum, s) => sum + s.questions.length, 0),
+      sections: merged.sections.map(s => ({ name: s.name, count: s.questions.length })),
+      notes,
+      warnings: pending.warnings
+    });
+    toast.success(merged.added.length > 0
+      ? `${merged.added.length} ${merged.added.length === 1 ? 'questão adicionada' : 'questões adicionadas'}. Confira o resumo e salve o simulado.`
+      : 'Nada a adicionar: o simulado já tem todas as questões do arquivo.');
+  };
+
   const handleImportFile = async (fileList: FileList | null) => {
     const files = fileList ? Array.from(fileList) : [];
     if (files.length === 0) return;
@@ -1110,20 +1182,13 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
       }
       warnings.push(...result.warnings);
 
-      setSimuladoData(prev => ({ ...prev, sections: [...prev.sections, ...importedSections] }));
-
-      const totalQuestions = importedSections.reduce((sum, s) => sum + s.questions.length, 0);
-      setImportReport({
-        total: totalQuestions,
-        sections: importedSections.map(s => ({ name: s.name, count: s.questions.length })),
-        warnings
-      });
-      // Um aviso só (cada um abre um pop-up); os detalhes ficam no resumo fixo na tela
-      if (warnings.length > 0) {
-        toast.warning(`${totalQuestions} questão(ões) importadas, mas confira o resumo abaixo: ${warnings.length} ponto(s) de atenção.`);
-      } else {
-        toast.success(`${importedSections.length} seção(ões) e ${totalQuestions} questão(ões) importadas! Revise antes de salvar.`);
+      // Simulado que já tem questões (ex: um que foi importado antes e ficou sem alguma): pergunta se é
+      // para só completar o que falta ou adicionar tudo de novo
+      if (simuladoData.sections.some(s => s.questions.length > 0)) {
+        setPendingImport({ sections: importedSections, warnings });
+        return;
       }
+      addImportedSections(importedSections, warnings);
     } catch (error) {
       console.error('Error importing file:', error);
       toast.error('Erro ao importar arquivo');
@@ -1653,7 +1718,9 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                   )}
                   <div>
                     <p className="font-semibold text-slate-900">
-                      Importação concluída: {importReport.total} questões em {importReport.sections.length} {importReport.sections.length === 1 ? 'seção' : 'seções'}
+                      {importReport.title
+                        ? `${importReport.title} · ${importReport.total} questões no total`
+                        : `Importação concluída: ${importReport.total} questões em ${importReport.sections.length} ${importReport.sections.length === 1 ? 'seção' : 'seções'}`}
                     </p>
                     <p className="text-sm text-slate-600">
                       {importReport.warnings.length > 0
@@ -1680,6 +1747,17 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                   </span>
                 ))}
               </div>
+
+              {importReport.notes && importReport.notes.length > 0 && (
+                <ul className="mt-3 space-y-1.5 text-sm text-slate-800">
+                  {importReport.notes.map((n, i) => (
+                    <li key={i} className="flex gap-2">
+                      <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                      <span>{n}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
 
               {importReport.warnings.length > 0 && (
                 <ul className="mt-3 space-y-1.5 text-sm text-amber-900">
@@ -2013,6 +2091,46 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
           Próximo
         </Button>
       </div>
+
+      {/* O simulado já tem questões: completar o que falta ou adicionar tudo como seções novas */}
+      <Dialog open={!!pendingImport} onOpenChange={(open) => { if (!open) setPendingImport(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Este simulado já tem questões</DialogTitle>
+            <DialogDescription>
+              Li {pendingImport?.sections.reduce((sum, s) => sum + s.questions.length, 0) ?? 0} questões do arquivo. O que você quer fazer com elas?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <button
+              type="button"
+              onClick={completeWithImport}
+              className="w-full rounded-xl border-2 border-amber-400 bg-amber-50 p-4 text-left transition-colors hover:bg-amber-100"
+            >
+              <p className="flex items-center gap-2 font-semibold text-slate-900">
+                Só completar o que falta
+                <span className="rounded-full bg-amber-400 px-2 py-0.5 text-xs font-semibold text-zinc-900">Recomendado</span>
+              </p>
+              <p className="mt-1 text-sm text-slate-600">
+                Procura cada questão do arquivo neste simulado e adiciona só as que não estão nele, no lugar certo. Nada do que já existe é mexido (texto, pontos, gabarito).
+              </p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { const pending = pendingImport; setPendingImport(null); if (pending) addImportedSections(pending.sections, pending.warnings); }}
+              className="w-full rounded-xl border-2 border-slate-200 bg-white p-4 text-left transition-colors hover:bg-slate-50"
+            >
+              <p className="font-semibold text-slate-900">Adicionar tudo como seções novas</p>
+              <p className="mt-1 text-sm text-slate-600">
+                Todas as questões do arquivo entram em seções novas no fim do simulado. Se elas já estavam aqui, ficam repetidas.
+              </p>
+            </button>
+          </div>
+          <div className="flex justify-end pt-1">
+            <Button variant="outline" onClick={() => setPendingImport(null)}>Cancelar</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Section Dialog */}
       <Dialog open={showSectionDialog} onOpenChange={setShowSectionDialog}>
