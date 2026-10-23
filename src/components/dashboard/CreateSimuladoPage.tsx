@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -198,22 +198,29 @@ function buildSimuladoDataFromExam(exam: any): SimuladoData {
   };
 }
 
-// Enquanto arrasta perto da borda de cima ou de baixo da tela, rola a página sozinha para dar para
-// alcançar o destino (os cartões das questões são compridos e a lista não cabe na tela).
-function autoScrollNearEdge(e: React.DragEvent) {
-  const EDGE = 110;
-  const STEP = 22;
-  const dir = e.clientY < EDGE ? -1 : e.clientY > window.innerHeight - EDGE ? 1 : 0;
-  if (!dir) return;
-  let el: HTMLElement | null = e.currentTarget as HTMLElement;
-  while (el) {
-    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight) {
-      el.scrollTop += dir * STEP;
-      return;
-    }
-    el = el.parentElement;
+// Ancestral que realmente rola (a área de conteúdo do painel); usado na rolagem automática do arrastar
+function findScrollParent(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    if (/(auto|scroll)/.test(getComputedStyle(node).overflowY) && node.scrollHeight > node.clientHeight) return node;
+    node = node.parentElement;
   }
-  window.scrollBy(0, dir * STEP);
+  return (document.scrollingElement as HTMLElement | null) ?? null;
+}
+
+// Alça para arrastar a questão (segurar e mover). Funciona com mouse e com toque.
+function QuestionDragHandle({ onPointerDown }: { onPointerDown: (e: React.PointerEvent) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Arrastar para mudar a ordem"
+      title="Segure e arraste para mudar a ordem da questão"
+      onPointerDown={onPointerDown}
+      className="flex h-9 w-8 shrink-0 cursor-grab touch-none select-none items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+    >
+      <GripVertical className="h-5 w-5" />
+    </button>
+  );
 }
 
 // Posição da questão na seção: setas para subir/descer e o número digitável ("Q7"). Digitar outro
@@ -335,11 +342,20 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const orderChangeAccepted = useRef(false);
   // Resumo da última importação de arquivo (fica na tela até ser fechado)
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
-  // Arrastar questões para mudar a ordem (dentro da mesma seção). A questão só fica "arrastável"
-  // enquanto a alça está pressionada, para não atrapalhar selecionar texto e digitar nos campos.
-  const [armedDragId, setArmedDragId] = useState<string | null>(null);
-  const [dragging, setDragging] = useState<{ sectionId: string; questionId: string } | null>(null);
-  const [dropTarget, setDropTarget] = useState<{ questionId: string; before: boolean } | null>(null);
+  // Arrastar questões para mudar a ordem (dentro da mesma seção), com o ponteiro (mouse ou toque).
+  // Ao começar a arrastar, as questões da seção encolhem para uma linha cada: todas cabem na tela e
+  // o destino fica sempre à vista. A página rola sozinha perto das bordas.
+  const [drag, setDrag] = useState<{ sectionId: string; questionId: string; started: boolean } | null>(null);
+  const [dragPoint, setDragPoint] = useState({ x: 0, y: 0 });
+  const [dropIndex, setDropIndex] = useState<number | null>(null);
+  const dragInfo = useRef<{
+    startX: number; startY: number; pointerY: number; started: boolean;
+    anchorTop: number | null; scroller: HTMLElement | null; dropIndex: number | null;
+  }>({ startX: 0, startY: 0, pointerY: 0, started: false, anchorTop: null, scroller: null, dropIndex: null });
+  const questionRowRefs = useRef(new Map<string, HTMLDivElement>());
+  const sectionsRef = useRef<Section[]>([]);
+  sectionsRef.current = simuladoData.sections;
+  const moveQuestionRef = useRef<(sectionId: string, questionId: string, toPosition: number) => void>(() => {});
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
@@ -629,25 +645,124 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     }));
   };
 
-  const finishDrag = () => {
-    setDragging(null);
-    setDropTarget(null);
-    setArmedDragId(null);
+  moveQuestionRef.current = moveQuestion;
+
+  const beginQuestionDrag = (e: React.PointerEvent, sectionId: string, questionId: string) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
+    dragInfo.current = {
+      startX: e.clientX, startY: e.clientY, pointerY: e.clientY, started: false,
+      anchorTop: null, scroller: findScrollParent(e.currentTarget as HTMLElement), dropIndex: null
+    };
+    setDragPoint({ x: e.clientX, y: e.clientY });
+    setDrag({ sectionId, questionId, started: false });
   };
 
-  // Soltou a questão sobre outra: ela vai para o lugar indicado pela linha amarela
-  const dropQuestionOn = (section: Section) => {
-    const active = dragging;
-    const target = dropTarget;
-    finishDrag();
-    if (!active || !target || active.sectionId !== section.id) return;
-    const from = section.questions.findIndex(q => q.id === active.questionId);
-    const targetIndex = section.questions.findIndex(q => q.id === target.questionId);
-    if (from < 0 || targetIndex < 0) return;
-    const insertAt = targetIndex + (target.before ? 0 : 1);
-    const to = insertAt > from ? insertAt - 1 : insertAt; // posição depois de tirar a questão do lugar antigo
-    if (to !== from) moveQuestion(section.id, active.questionId, to + 1);
+  // Onde a questão cairia: depois de todas as linhas cujo meio está acima do ponteiro
+  const updateDropIndex = (sectionId: string, y: number) => {
+    const section = sectionsRef.current.find(s => s.id === sectionId);
+    if (!section) return;
+    let index = 0;
+    section.questions.forEach((q, i) => {
+      const el = questionRowRefs.current.get(q.id);
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (y > rect.top + rect.height / 2) index = i + 1;
+    });
+    dragInfo.current.dropIndex = index;
+    setDropIndex(prev => (prev === index ? prev : index));
   };
+
+  useEffect(() => {
+    if (!drag) return;
+    const { sectionId, questionId } = drag;
+    const info = dragInfo.current;
+    let raf = 0;
+
+    const stop = () => { setDrag(null); setDropIndex(null); };
+
+    const onMove = (ev: PointerEvent) => {
+      info.pointerY = ev.clientY;
+      if (!info.started) {
+        // Só vira arrasto depois de mover alguns pixels (um clique simples na alça não faz nada)
+        if (Math.hypot(ev.clientX - info.startX, ev.clientY - info.startY) < 5) return;
+        info.started = true;
+        info.anchorTop = questionRowRefs.current.get(questionId)?.getBoundingClientRect().top ?? null;
+        setDrag({ sectionId, questionId, started: true });
+      }
+      setDragPoint({ x: ev.clientX, y: ev.clientY });
+      updateDropIndex(sectionId, ev.clientY);
+    };
+
+    const onUp = () => {
+      const { started, dropIndex: target } = info;
+      stop();
+      if (!started || target === null) return;
+      const section = sectionsRef.current.find(s => s.id === sectionId);
+      const from = section?.questions.findIndex(q => q.id === questionId) ?? -1;
+      if (from < 0) return;
+      const to = target > from ? target - 1 : target; // posição depois de tirar a questão do lugar antigo
+      if (to !== from) moveQuestionRef.current(sectionId, questionId, to + 1);
+    };
+
+    const onKey = (ev: KeyboardEvent) => { if (ev.key === 'Escape') stop(); };
+
+    // Rola a página sozinha quando o ponteiro chega perto da borda de cima ou de baixo
+    const tick = () => {
+      if (info.started && info.scroller) {
+        const rect = info.scroller.getBoundingClientRect();
+        const EDGE = 90;
+        const MAX = 16;
+        let speed = 0;
+        if (info.pointerY < rect.top + EDGE) speed = -MAX * Math.min(1, (rect.top + EDGE - info.pointerY) / EDGE);
+        else if (info.pointerY > rect.bottom - EDGE) speed = MAX * Math.min(1, (info.pointerY - (rect.bottom - EDGE)) / EDGE);
+        if (speed) {
+          info.scroller.scrollTop += speed;
+          updateDropIndex(sectionId, info.pointerY);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+    window.addEventListener('pointercancel', stop);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      window.removeEventListener('pointercancel', stop);
+      window.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.sectionId, drag?.questionId]);
+
+  // Quando as questões encolhem, a página "pula": mantém a questão arrastada onde estava na tela
+  useLayoutEffect(() => {
+    if (!drag?.started) return;
+    const info = dragInfo.current;
+    const row = questionRowRefs.current.get(drag.questionId);
+    if (row && info.anchorTop !== null && info.scroller) {
+      const delta = row.getBoundingClientRect().top - info.anchorTop;
+      if (Math.abs(delta) > 1) info.scroller.scrollTop += delta;
+    }
+    updateDropIndex(drag.sectionId, info.pointerY);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [drag?.started]);
+
+  // Sem selecionar texto e com a mãozinha de "segurando" enquanto arrasta
+  useEffect(() => {
+    if (!drag?.started) return;
+    const { userSelect, cursor } = document.body.style;
+    document.body.style.userSelect = 'none';
+    document.body.style.cursor = 'grabbing';
+    return () => {
+      document.body.style.userSelect = userSelect;
+      document.body.style.cursor = cursor;
+    };
+  }, [drag?.started]);
 
   const handleAddQuestion = (sectionId: string) => {
     setCurrentSectionId(sectionId);
@@ -1154,6 +1269,24 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   return (
     <div className="space-y-6">
       <ActionResultDialog result={saveResult} onClose={() => setSaveResult(null)} />
+
+      {/* Etiqueta que acompanha o mouse enquanto uma questão é arrastada */}
+      {drag?.started && (() => {
+        const section = simuladoData.sections.find(s => s.id === drag.sectionId);
+        const index = section?.questions.findIndex(q => q.id === drag.questionId) ?? -1;
+        const dragged = index >= 0 ? section!.questions[index] : null;
+        if (!dragged) return null;
+        return (
+          <div
+            className="pointer-events-none fixed z-[100] flex max-w-sm items-center gap-2 rounded-lg border-2 border-amber-400 bg-white px-3 py-2 shadow-xl"
+            style={{ left: dragPoint.x + 16, top: dragPoint.y - 20 }}
+          >
+            <GripVertical className="h-4 w-4 shrink-0 text-amber-600" />
+            <span className="text-xs font-bold text-slate-900">Q{index + 1}</span>
+            <span className="truncate text-sm text-slate-700">{dragged.question}</span>
+          </div>
+        );
+      })()}
 
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
@@ -1681,46 +1814,38 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {section.questions.map((question, qIndex) => (
-                          <Card
+                        {section.questions.map((question, qIndex) => {
+                          const compact = !!(drag?.started && drag.sectionId === section.id);
+                          const isDragged = compact && drag?.questionId === question.id;
+                          const fromIndex = compact ? section.questions.findIndex(q => q.id === drag!.questionId) : -1;
+                          // Linha amarela só onde soltar de fato muda a ordem
+                          const lineAbove = compact && dropIndex === qIndex && dropIndex !== fromIndex && dropIndex !== fromIndex + 1;
+                          const lineBelow = compact && qIndex === section.questions.length - 1
+                            && dropIndex === section.questions.length && dropIndex !== fromIndex + 1;
+                          return (
+                          <div
                             key={question.id}
-                            draggable={armedDragId === question.id}
-                            onDragStart={(e) => {
-                              setDragging({ sectionId: section.id, questionId: question.id });
-                              e.dataTransfer.effectAllowed = 'move';
-                              e.dataTransfer.setData('text/plain', question.id);
-                            }}
-                            onDragEnd={finishDrag}
-                            onDragOver={(e) => {
-                              if (!dragging || dragging.sectionId !== section.id) return;
-                              e.preventDefault();
-                              e.dataTransfer.dropEffect = 'move';
-                              autoScrollNearEdge(e);
-                              const rect = e.currentTarget.getBoundingClientRect();
-                              const before = e.clientY < rect.top + rect.height / 2;
-                              setDropTarget(prev => (prev && prev.questionId === question.id && prev.before === before ? prev : { questionId: question.id, before }));
-                            }}
-                            onDrop={(e) => { e.preventDefault(); dropQuestionOn(section); }}
-                            className={`relative border transition-opacity ${dragging?.questionId === question.id ? 'opacity-40' : ''}`}
+                            ref={(el) => { if (el) questionRowRefs.current.set(question.id, el); else questionRowRefs.current.delete(question.id); }}
+                            className="relative"
                           >
-                            {dropTarget?.questionId === question.id && dragging && dragging.questionId !== question.id && (
-                              <div
-                                className={`pointer-events-none absolute left-0 right-0 z-10 h-1 rounded-full bg-amber-500 shadow ${dropTarget.before ? '-top-2' : '-bottom-2'}`}
-                              />
-                            )}
-                            <CardContent className="p-4">
+                            {lineAbove && <div className="pointer-events-none absolute -top-2 left-0 right-0 z-10 h-1 rounded-full bg-amber-500 shadow" />}
+                            {lineBelow && <div className="pointer-events-none absolute -bottom-2 left-0 right-0 z-10 h-1 rounded-full bg-amber-500 shadow" />}
+                          <Card className={`border transition-opacity ${isDragged ? 'opacity-40' : ''}`}>
+                            <CardContent className={compact ? 'px-3 py-2 [&:last-child]:pb-2' : 'p-4'}>
+                              {compact ? (
+                                <div className="flex items-center gap-3">
+                                  <QuestionDragHandle onPointerDown={(e) => beginQuestionDrag(e, section.id, question.id)} />
+                                  <span className="w-9 shrink-0 text-xs font-semibold text-slate-700">Q{qIndex + 1}</span>
+                                  {question.printedNumber !== undefined && (
+                                    <span className="shrink-0 text-xs text-slate-400">nº {question.printedNumber}</span>
+                                  )}
+                                  <p className="min-w-0 flex-1 truncate text-sm text-slate-800">{question.question}</p>
+                                </div>
+                              ) : (
+                              <>
                               <div className="flex items-start justify-between gap-3 mb-2">
                                 <div className="flex items-center space-x-2 flex-wrap gap-1 min-w-0">
-                                  <button
-                                    type="button"
-                                    aria-label="Arrastar para mudar a ordem"
-                                    title="Segure e arraste para mudar a ordem da questão"
-                                    onMouseDown={() => setArmedDragId(question.id)}
-                                    onMouseUp={() => setArmedDragId(null)}
-                                    className="cursor-grab rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
-                                  >
-                                    <GripVertical className="h-5 w-5" />
-                                  </button>
+                                  <QuestionDragHandle onPointerDown={(e) => beginQuestionDrag(e, section.id, question.id)} />
                                   <QuestionPosition
                                     position={qIndex + 1}
                                     total={section.questions.length}
@@ -1810,9 +1935,13 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                                   Questão dissertativa - Resposta em texto livre
                                 </div>
                               )}
+                              </>
+                              )}
                             </CardContent>
                           </Card>
-                        ))}
+                          </div>
+                          );
+                        })}
                         <div className="flex justify-center space-x-3 pt-2">
                           <Button
                             variant="outline"
