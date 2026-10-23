@@ -118,6 +118,17 @@ function collapseChars(chars: StyledChar[]): StyledChar[] {
   return out;
 }
 
+// A alternativa está marcada em vermelho (gabarito)? Vale quando a letra ("C)") está em vermelho ou quando a
+// maior parte do texto está. Um ponto ou espaço vermelho solto (descuido de quem formatou a prova, ex: só o
+// "." no fim de "D) Timbres.") não marca a alternativa.
+function isMostlyRed(chars: StyledChar[]): boolean {
+  const visible = chars.filter(x => x.c !== ' ');
+  if (visible.length === 0) return false;
+  const label = /^\(?[a-eA-E]\)/.exec(visible.slice(0, 3).map(x => x.c).join(''));
+  if (label && visible.slice(0, label[0].length).every(x => x.red)) return true;
+  return visible.filter(x => x.red).length >= visible.length * 0.6;
+}
+
 // Alternativas escritas na mesma linha ("A) x  B) y  C) z") viram uma linha cada, cada uma com a sua cor.
 // Só separa quando as letras vêm em sequência (A, B, C...) com ")" depois, o que quase nunca ocorre à toa.
 function splitInlineOptions(chars: StyledChar[]): { text: string; chars: StyledChar[] }[] {
@@ -212,7 +223,7 @@ export async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
             // sinal sozinho causava seções demais. Só um estilo de título do Word conta como certeza;
             // o teste de "tudo em maiúsculas" (looksLikeSectionHeading) cuida do resto mais abaixo.
             heading: first && isFirstLineOfParagraph && isHeadingStyle,
-            redMarked: part.chars.some(x => x.red),
+            redMarked: isMostlyRed(part.chars),
             listItem: first && isFirstLineOfParagraph && isListItem,
             startsParagraph: first && isFirstLineOfParagraph,
             hasImage: first && curHasImage,
@@ -422,6 +433,8 @@ function looksLikeSectionHeading(line: string): boolean {
   if (SECTION_RE.test(line)) return true;
   const trimmed = cleanHeadingText(line);
   if (NOT_A_SUBJECT_RE.test(trimmed)) return false;
+  // Siglas com pontos ("N.D.A.", "S.O.S") são alternativas ou abreviações, não matéria
+  if (/[A-ZÀ-Ý]\.[A-ZÀ-Ý]/.test(trimmed)) return false;
   // Mínimo de 5 caracteres: evita que uma sigla solta em caixa alta (ex: "LCD.") vire seção
   if (trimmed.length < 5 || trimmed.length > 45) return false;
   // Título de seção não tem parênteses: "(CNBB)." no meio de uma alternativa não é cabeçalho
@@ -445,8 +458,15 @@ function isPlausibleQuestionStart(line: string, match: RegExpExecArray): boolean
   return true;
 }
 
+// Título de matéria "decorado" com traços: "––––– HISTÓRIA –––––"
+const DECORATED_HEADING_RE = /^[\s\-–—_.·•]{3,}[A-ZÀ-Ý][A-ZÀ-Ý\s]{3,}[\s\-–—_.·•]{3,}$/;
+
 function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   const lines = docLines.filter(l => l.text.trim().length > 0);
+
+  // Se a prova marca as matérias com traços, só esse formato vale como título de seção: uma linha solta em
+  // maiúsculas (título de um texto, como "RESPEITO AO TRÂNSITO") não pode virar matéria
+  const decoratedHeadings = lines.filter(l => DECORATED_HEADING_RE.test(l.text.trim())).length >= 2;
 
   const sections: ImportedSection[] = [];
   const warnings: string[] = [];
@@ -494,9 +514,14 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   // Depois das alternativas, um parágrafo novo e solto (texto de apoio da próxima questão, título como
   // "TEXTO I", "Boa prova!") não é continuação da última alternativa: fica de fora até a próxima questão
   let inLooseText = false;
+  // Quantas alternativas da questão atual foram escritas com letra ("A)", "B)"...). Itens de uma lista
+  // automática do Word não contam: podem ser parte do enunciado ("Match the quantifiers...")
+  let explicitOptions = 0;
 
-  for (const { text: line, heading, redMarked, listItem, startsParagraph } of lines) {
-    const explicitHeading = heading || SECTION_RE.test(line) || looksLikeSectionHeading(line);
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex++) {
+    const { text: line, heading, redMarked, listItem, startsParagraph } = lines[lineIndex];
+    const explicitHeading = heading || SECTION_RE.test(line)
+      || (decoratedHeadings ? DECORATED_HEADING_RE.test(line.trim()) : looksLikeSectionHeading(line));
 
     if (explicitHeading && !QUESTION_RE.test(line) && !OPTION_RE.test(line) && !ANSWER_RE.test(line)) {
       anyExplicitHeading = true;
@@ -515,26 +540,33 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     if (questionMatch && !isPlausibleQuestionStart(line, questionMatch)) questionMatch = null;
     // Dentro de uma seção já numerada, um número igual ou menor que o último costuma ser quebra de linha
     // do enunciado (ex: "...pontos P(2," + "4) e Q(10, 12)?"), não uma nova questão. Exceções, que são
-    // questão nova de verdade: (a) a questão anterior já tem as alternativas e a linha parece um
-    // enunciado (o arquivo repetiu o número, ex: dois "18."); (b) volta ao "1" com cara de enunciado.
+    // questão nova de verdade: a questão anterior já tem as alternativas e a linha parece um
+    // enunciado (o arquivo repetiu o número, ex: dois "18."). Uma lista numerada dentro do enunciado
+    // ("1. Guerra dos Emboabas", "2. ...") continua sendo parte da questão.
     if (questionMatch && currentQuestion && anyExplicitHeading && parseInt(questionMatch[1], 10) <= lastQuestionNumber) {
       const statement = (questionMatch[2] || '').trim();
       const looksLikeStatement = statement.length >= 15 && /^[("“'0-9A-ZÀ-Ý]/.test(statement);
       const optionsSoFar = currentQuestion.options.filter(o => (o || '').trim()).length;
-      const isNewQuestion = looksLikeStatement && (optionsSoFar >= 2 || parseInt(questionMatch[1], 10) === 1);
+      const isNewQuestion = looksLikeStatement && optionsSoFar >= 2;
       if (!isNewQuestion) questionMatch = null;
     }
     let optionMatch = !questionMatch ? OPTION_RE.exec(line) : null;
     if (!optionMatch && !questionMatch && currentQuestion) {
       const loose = LOOSE_OPTION_RE.exec(line);
-      if (loose && LETTER_INDEX[loose[1].toLowerCase()] === lastOptionIndex + 1) {
+      // A primeira alternativa sem pontuação ("A texto") só vale se a próxima linha for a "B": senão é só
+      // uma frase que começa com o artigo "A" ("A política do apartheid...") e não pode virar alternativa
+      const nextLooksLikeB = /^\(?[bB][\.\)]?\s+\S/.test(lines[lineIndex + 1]?.text ?? '');
+      if (loose && LETTER_INDEX[loose[1].toLowerCase()] === lastOptionIndex + 1 && (lastOptionIndex >= 0 || nextLooksLikeB)) {
         optionMatch = loose;
       }
     }
     // Alternativa sem NENHUMA letra digitada (a numeração "a) b) c)..." é gerada automaticamente
     // pela lista do Word, então só existe no texto o conteúdo da alternativa em si).
     const isImplicitListOption = !optionMatch && !questionMatch && listItem && !!currentQuestion && lastOptionIndex < 4;
-    const bareMatch = !optionMatch && !questionMatch ? BARE_OPTION_RE.exec(line) : null;
+    // Item de lista automática do Word, sem nenhuma alternativa com letra antes ("embora." ... "e."): o "e."
+    // é o texto da alternativa, não a letra E sem conteúdo
+    const isPlainListText = listItem && explicitOptions === 0;
+    const bareMatch = !optionMatch && !questionMatch && !isPlainListText ? BARE_OPTION_RE.exec(line) : null;
 
     if (inLooseText && !questionMatch) continue;
 
@@ -556,6 +588,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
         pushQuestion();
       }
       lastQuestionNumber = number;
+      explicitOptions = 0;
       currentQuestion = {
         number,
         question: questionMatch[2] || '',
@@ -578,6 +611,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       }
       bareOptionQuestions.add(currentQuestion);
       lastOptionIndex = idx;
+      explicitOptions++;
       continue;
     }
 
@@ -594,15 +628,19 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
       }
       currentQuestion.options[idx] = text;
       lastOptionIndex = idx;
+      if (optionMatch) explicitOptions++;
       continue;
     }
 
     // Linha de continuação: acrescenta ao enunciado ou à última alternativa
     if (currentQuestion) {
       const lastOption = lastOptionIndex >= 0 ? currentQuestion.options[lastOptionIndex] || '' : '';
-      const startsNewBlock = !!startsParagraph && lastOptionIndex >= 1
-        && (/[.!?:;…"”)]\s*$/.test(lastOption) || /^[^a-zà-ÿ]{3,45}$/.test(line))
-        && /^[A-ZÀ-Ý0-9"“'(\[]/.test(line);
+      const startsNewBlock = !!startsParagraph && lastOptionIndex >= 0
+        && ((explicitOptions >= 2
+          && (/[.!?:;…"”)]\s*$/.test(lastOption) || /^[^a-zà-ÿ]{3,45}$/.test(line))
+          && /^[A-ZÀ-Ý0-9"“'(\[]/.test(line))
+          // título solto em maiúsculas ("TEXTO I", "GABARITO") depois das alternativas, mesmo sem letras nelas
+          || (/^[^a-zà-ÿ]{3,45}$/.test(line) && NOT_A_SUBJECT_RE.test(line)));
       if (startsNewBlock) {
         inLooseText = true;
         continue;
