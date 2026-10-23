@@ -49,6 +49,8 @@ interface DocLine {
   /** Parágrafo é item de uma lista numerada/com marcadores do Word (numPr) — comum quando as
    * alternativas A/B/C/D/E não são digitadas como texto, e sim geradas pela lista automática */
   listItem: boolean;
+  /** A linha abre um parágrafo novo do Word (e não é só uma quebra de linha dentro do mesmo parágrafo) */
+  startsParagraph?: boolean;
   /** Parágrafo tem imagem (Word): a IA recebe um marcador [IMAGEM n] nesse ponto */
   hasImage?: boolean;
   /** Ids de relacionamento (rId) das imagens da linha, na ordem: usados para mandar a imagem à IA */
@@ -99,7 +101,56 @@ function imageIdsIn(node: Element): string[] {
   return [...new Set(vml)];
 }
 
-async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
+// Letra com a informação de cor (vermelho = gabarito), para saber qual alternativa está marcada
+type StyledChar = { c: string; red: boolean };
+
+// Junta espaços repetidos (e os das pontas) mantendo a cor de cada letra
+function collapseChars(chars: StyledChar[]): StyledChar[] {
+  const out: StyledChar[] = [];
+  for (const ch of chars) {
+    if (/\s/.test(ch.c)) {
+      if (out.length > 0 && out[out.length - 1].c !== ' ') out.push({ c: ' ', red: false });
+    } else {
+      out.push(ch);
+    }
+  }
+  while (out.length > 0 && out[out.length - 1].c === ' ') out.pop();
+  return out;
+}
+
+// Alternativas escritas na mesma linha ("A) x  B) y  C) z") viram uma linha cada, cada uma com a sua cor.
+// Só separa quando as letras vêm em sequência (A, B, C...) com ")" depois, o que quase nunca ocorre à toa.
+function splitInlineOptions(chars: StyledChar[]): { text: string; chars: StyledChar[] }[] {
+  const text = chars.map(x => x.c).join('');
+  const whole = [{ text, chars }];
+  const first = /^\(?([a-eA-E])\)\s*\S/.exec(text);
+  if (!first) return whole;
+  const upper = first[1] !== first[1].toLowerCase();
+  let code = first[1].toLowerCase().charCodeAt(0);
+  const starts = [0];
+  let from = first[0].length;
+  while (code < 'e'.charCodeAt(0)) {
+    code++;
+    const letter = upper ? String.fromCharCode(code).toUpperCase() : String.fromCharCode(code);
+    const next = new RegExp(`\\s(\\(?${letter}\\))\\s*\\S`).exec(text.slice(from));
+    if (!next) break;
+    const at = from + next.index + 1;
+    starts.push(at);
+    from = at + next[1].length;
+  }
+  if (starts.length < 2) return whole;
+  return starts.map((start, i) => {
+    const part = collapseChars(chars.slice(start, starts[i + 1] ?? chars.length));
+    return { text: part.map(x => x.c).join(''), chars: part };
+  });
+}
+
+// Elementos do Word que apenas embrulham trechos de texto de um parágrafo
+const RUN_CONTAINERS = new Set([
+  'sdt', 'sdtContent', 'hyperlink', 'smartTag', 'ins', 'moveTo', 'fldSimple', 'customXml', 'dir', 'bdo'
+]);
+
+export async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
   const JSZip = (await import('jszip')).default;
   const zip = await JSZip.loadAsync(file);
   const xmlText = await zip.file('word/document.xml')?.async('text');
@@ -112,7 +163,13 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
 
   const lines: DocLine[] = [];
 
-  paragraphs.forEach((p) => {
+  // Caixas de texto do Word vêm gravadas duas vezes (mc:Choice e mc:Fallback, com o mesmo texto): lê só uma
+  const inFallback = (el: Element) => {
+    for (let node = el.parentElement; node; node = node.parentElement) if (localName(node) === 'Fallback') return true;
+    return false;
+  };
+
+  paragraphs.filter(p => !inFallback(p)).forEach((p) => {
     const pPr = firstChildNamed(p, 'pPr');
     const pStyleEl = pPr ? firstChildNamed(pPr, 'pStyle') : undefined;
     const styleVal = pStyleEl?.getAttribute('w:val') || pStyleEl?.getAttribute('val') || '';
@@ -121,17 +178,22 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     // essa numeração automática, sem nenhuma letra digitada no texto)
     const isListItem = !!(pPr && firstChildNamed(pPr, 'numPr'));
 
-    // Junta runs (e runs dentro de hyperlinks) na ordem em que aparecem no parágrafo
+    // Junta os trechos de texto na ordem em que aparecem no parágrafo, inclusive os que estão dentro de
+    // "recipientes" do Word: controle de conteúdo (sdt), revisão (ins), hiperlink, marca inteligente...
+    // Sem isso, o texto e as alternativas de uma questão dentro de um controle de conteúdo sumiam.
     const runs: Element[] = [];
-    Array.from(p.children).forEach(c => {
-      const name = localName(c);
-      if (name === 'r') runs.push(c);
-      else if (name === 'oMath') runs.push(c); // equação do Word (ex: √56 m) — não é um w:r
-      else if (name === 'hyperlink') childrenNamed(c, 'r').forEach(r => runs.push(r));
-    });
+    const collectRuns = (parent: Element) => {
+      Array.from(parent.children).forEach(c => {
+        const name = localName(c);
+        if (name === 'r') runs.push(c);
+        else if (name === 'oMath') runs.push(c); // equação do Word (ex: √56 m) — não é um w:r
+        else if (name === 'oMathPara') childrenNamed(c, 'oMath').forEach(m => runs.push(m)); // equação em bloco
+        else if (RUN_CONTAINERS.has(name)) collectRuns(c);
+      });
+    };
+    collectRuns(p);
 
-    let curText = '';
-    let curHasRed = false;
+    let curChars: StyledChar[] = [];
     let curAllBold = true;
     let curHasText = false;
     let curHasImage = false;
@@ -139,24 +201,27 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
     let isFirstLineOfParagraph = true;
 
     const flush = () => {
-      const text = curText.replace(/\s+/g, ' ').trim();
-      if (text || curHasImage) {
-        lines.push({
-          text,
-          // Negrito sozinho no parágrafo NÃO conta como título aqui: o enunciado usa negrito
-          // também em instruções ("Leia o texto...") e títulos de texto de apoio, então esse
-          // sinal sozinho causava seções demais. Só um estilo de título do Word conta como certeza;
-          // o teste de "tudo em maiúsculas" (looksLikeSectionHeading) cuida do resto mais abaixo.
-          heading: isFirstLineOfParagraph && isHeadingStyle,
-          redMarked: curHasRed,
-          listItem: isFirstLineOfParagraph && isListItem,
-          hasImage: curHasImage,
-          imageIds: curImageIds
-        });
-      }
+      const parts = splitInlineOptions(collapseChars(curChars));
+      parts.forEach((part, partIndex) => {
+        const first = partIndex === 0;
+        if (part.text || (first && curHasImage)) {
+          lines.push({
+            text: part.text,
+            // Negrito sozinho no parágrafo NÃO conta como título aqui: o enunciado usa negrito
+            // também em instruções ("Leia o texto...") e títulos de texto de apoio, então esse
+            // sinal sozinho causava seções demais. Só um estilo de título do Word conta como certeza;
+            // o teste de "tudo em maiúsculas" (looksLikeSectionHeading) cuida do resto mais abaixo.
+            heading: first && isFirstLineOfParagraph && isHeadingStyle,
+            redMarked: part.chars.some(x => x.red),
+            listItem: first && isFirstLineOfParagraph && isListItem,
+            startsParagraph: first && isFirstLineOfParagraph,
+            hasImage: first && curHasImage,
+            imageIds: first ? curImageIds : []
+          });
+        }
+      });
       isFirstLineOfParagraph = false;
-      curText = '';
-      curHasRed = false;
+      curChars = [];
       curAllBold = true;
       curHasText = false;
       curHasImage = false;
@@ -169,7 +234,7 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
         if (math) {
           curHasText = true;
           curAllBold = false;
-          curText += math;
+          for (const c of math) curChars.push({ c, red: false });
         }
         return;
       }
@@ -194,11 +259,10 @@ async function extractLinesFromDocx(file: File): Promise<DocLine[]> {
           if (t.trim()) {
             curHasText = true;
             if (!bold) curAllBold = false;
-            if (red) curHasRed = true;
           }
-          curText += t;
+          for (const c of t) curChars.push({ c, red: red && c.trim() !== '' });
         } else if (name === 'tab') {
-          curText += ' ';
+          curChars.push({ c: ' ', red: false });
         } else if (name === 'br' || name === 'cr') {
           flush();
         } else if (name === 'drawing' || name === 'pict' || name === 'object' || name === 'AlternateContent') {
@@ -233,11 +297,12 @@ function isRedHex(hex: string): boolean {
 }
 
 // Cabeçalho/rodapé repetido em todas as páginas (título do simulado, série, número da página)
-const PDF_NOISE_RE = /^(SIMULADO\b|\d{1,2}º\s*ANO\b|\d{1,3}$|\.$|.*BIMESTRE|.*ANO\s*[–-]\s*A\s*$|[–\-\s]*2026\b.{0,4}$)/i;
+// Só em MAIÚSCULAS: uma linha de enunciado como "No 8º ano, o segundo bimestre..." não pode ser apagada
+const PDF_NOISE_RE = /^(SIMULADO\b|\d{1,2}º\s*ANO\b|[A-ZÀ-Ý0-9ºª().\s–-]*BIMESTRE[A-ZÀ-Ý0-9ºª().\s–-]*$|.*ANO\s*[–-]\s*A\s*$|[–\-\s]*2026\b.{0,4}$|\d{1,3}$|\.$)/;
 
 // Lê o PDF com a posição e a cor de cada trecho de texto, separando as colunas da página
 // (provas costumam ter duas colunas: primeiro a esquerda de cima para baixo, depois a direita).
-async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
+export async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
   const pdfjsLib: any = await import('pdfjs-dist');
   const workerSrc = (await import('pdfjs-dist/build/pdf.worker.min.mjs?url')).default;
   pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
@@ -293,30 +358,35 @@ async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
       });
       [...byY.keys()].sort((a, b) => b - a).forEach((key) => {
         const row = byY.get(key)!.sort((a, b) => a.x - b.x);
-        // Junta os trechos; insere espaço quando há uma folga entre o fim de um e o início do próximo
-        let text = '';
+        // Junta os trechos (guardando a cor de cada letra); insere espaço quando há uma folga entre
+        // o fim de um e o início do próximo
+        const styled: StyledChar[] = [];
         row.forEach((s, i) => {
           const prev = row[i - 1];
-          if (prev && !/\s$/.test(text) && !/^\s/.test(s.text) && s.x - (prev.x + prev.adv) > s.size * 0.15) {
-            text += ' ';
+          const last = styled[styled.length - 1];
+          if (prev && last && !/\s/.test(last.c) && !/^\s/.test(s.text) && s.x - (prev.x + prev.adv) > s.size * 0.15) {
+            styled.push({ c: ' ', red: false });
           }
-          text += s.text;
+          for (const c of s.text) styled.push({ c, red: s.red });
         });
-        text = text.replace(/\s+/g, ' ').trim();
+        const collapsed = collapseChars(styled);
+        const text = collapsed.map(x => x.c).join('');
         if (!text || PDF_NOISE_RE.test(text)) return;
 
-        // Gabarito: a alternativa é vermelha se a letra dela ("C)") estiver em vermelho,
-        // ou se quase todo o texto da linha estiver em vermelho
-        const chars = row.flatMap(s => [...s.text].filter(c => !/\s/.test(c)).map(c => ({ c, red: s.red })));
-        const label = chars.slice(0, 2);
-        const labelRed = label.length === 2 && /^[a-eA-E]\)$/.test(label.map(l => l.c).join('')) && label.every(l => l.red);
-        const visible = chars.length;
-        const redChars = chars.filter(c => c.red).length;
-        lines.push({
-          text,
-          heading: false,
-          redMarked: labelRed || (visible > 0 && redChars >= visible * 0.6),
-          listItem: false
+        // Alternativas escritas na mesma linha viram uma linha cada
+        splitInlineOptions(collapsed).forEach((part) => {
+          // Gabarito: a alternativa é vermelha se a letra dela ("C)") estiver em vermelho,
+          // ou se quase todo o texto da linha estiver em vermelho
+          const visibleChars = part.chars.filter(x => x.c !== ' ');
+          const label = visibleChars.slice(0, 2);
+          const labelRed = label.length === 2 && /^[a-eA-E]\)$/.test(label.map(l => l.c).join('')) && label.every(l => l.red);
+          const redChars = visibleChars.filter(x => x.red).length;
+          lines.push({
+            text: part.text,
+            heading: false,
+            redMarked: labelRed || (visibleChars.length > 0 && redChars >= visibleChars.length * 0.6),
+            listItem: false
+          });
         });
       });
     });
@@ -328,7 +398,7 @@ async function extractLinesFromPdf(file: File): Promise<DocLine[]> {
 
 // Exige ":" ou "–" depois da palavra (ex: "Seção: Matemática"), para não pegar "parte do governo." no meio de um texto
 const SECTION_RE = /^(?:se(?:c|ç)(?:a|ã)o|parte|m(?:o|ó)dulo)\s*[:\-–]\s*(.+)$/i;
-const QUESTION_RE = /^(?:quest(?:a|ã)o\s*)?0*(\d{1,3})\s*[\.\)\-–]\s*(.*)$/i;
+const QUESTION_RE = /^(?:quest(?:a|ã)o\s*|q\s*\.?\s*)?0*(\d{1,3})\s*[º°]?\s*[\.\)\-–]\s*(.*)$/i;
 // Alternativa "de verdade": letra + pontuação (A), (A), A., A -, A:). É o formato esperado.
 const OPTION_RE = /^\(?([a-eA-E])\)?\s*[\.\)\-–:]\s*(\S.*)$/;
 // Fallback para quando o Word não coloca pontuação nenhuma depois da letra (ex: só "A" + tab):
@@ -345,9 +415,13 @@ function cleanHeadingText(line: string): string {
   return line.replace(/^[\s\-–—_.:·•]+|[\s\-–—_.:·•]+$/g, '').trim();
 }
 
+// Títulos em maiúsculas que aparecem no meio da prova mas não são matéria ("TEXTO I", "FIGURA 2", "GABARITO")
+const NOT_A_SUBJECT_RE = /^(texto|text|figura|fonte|tabela|gr[aá]fico|quadro|anexo|observa[cç][aã]o|aten[cç][aã]o|instru[cç][oõ]es|gabarito|boa prova|leia|dispon[ií]vel|adaptado|tirinha|charge|imagem|mapa|quest[aã]o)\b/i;
+
 function looksLikeSectionHeading(line: string): boolean {
   if (SECTION_RE.test(line)) return true;
   const trimmed = cleanHeadingText(line);
+  if (NOT_A_SUBJECT_RE.test(trimmed)) return false;
   // Mínimo de 5 caracteres: evita que uma sigla solta em caixa alta (ex: "LCD.") vire seção
   if (trimmed.length < 5 || trimmed.length > 45) return false;
   // Título de seção não tem parênteses: "(CNBB)." no meio de uma alternativa não é cabeçalho
@@ -358,6 +432,17 @@ function looksLikeSectionHeading(line: string): boolean {
   if (letters.length < 3) return false;
   // Título curto todo em maiúsculas (ex: "MATEMÁTICA", "LÍNGUA PORTUGUESA")
   return letters === letters.toUpperCase() && /[A-Za-zÀ-ÿ]/.test(letters);
+}
+
+// Nenhuma prova tem questão acima deste número; serve para não confundir "página 322" com questão 322
+const MAX_QUESTION_NUMBER = 200;
+
+// A linha começa mesmo uma questão? Descarta números altos demais e intervalos como "322-323."
+// (fim de uma citação "p. 322-323."), que casam com o padrão "número + traço" mas não são questão.
+function isPlausibleQuestionStart(line: string, match: RegExpExecArray): boolean {
+  if (parseInt(match[1], 10) > MAX_QUESTION_NUMBER) return false;
+  if (/^\s*(?:quest(?:a|ã)o\s*)?0*\d{1,3}\s*[\-–]\s*\d/i.test(line)) return false;
+  return true;
 }
 
 function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
@@ -393,6 +478,7 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   };
 
   const startSection = (name: string) => {
+    inLooseText = false;
     pushQuestion();
     currentSection = { name: name.trim() || `Seção ${sections.length + 1}`, description: '', questions: [] };
     sections.push(currentSection);
@@ -400,10 +486,16 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
   };
 
   let anyRedMarked = false;
+  // Avisos sobre a numeração do próprio arquivo (ex: o mesmo número digitado duas vezes)
+  const numberingNotes: string[] = [];
   // Questões com letras de alternativa mas sem texto nelas (conteúdo em imagem): ficam objetivas
   const bareOptionQuestions = new Set<ImportedQuestion>();
 
-  for (const { text: line, heading, redMarked, listItem } of lines) {
+  // Depois das alternativas, um parágrafo novo e solto (texto de apoio da próxima questão, título como
+  // "TEXTO I", "Boa prova!") não é continuação da última alternativa: fica de fora até a próxima questão
+  let inLooseText = false;
+
+  for (const { text: line, heading, redMarked, listItem, startsParagraph } of lines) {
     const explicitHeading = heading || SECTION_RE.test(line) || looksLikeSectionHeading(line);
 
     if (explicitHeading && !QUESTION_RE.test(line) && !OPTION_RE.test(line) && !ANSWER_RE.test(line)) {
@@ -420,10 +512,17 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     }
 
     let questionMatch = QUESTION_RE.exec(line);
-    // Dentro de uma seção já numerada, um número igual ou menor que o último é quebra de linha
-    // do enunciado (ex: "...pontos P(2," + "4) e Q(10, 12)?"), não uma nova questão
+    if (questionMatch && !isPlausibleQuestionStart(line, questionMatch)) questionMatch = null;
+    // Dentro de uma seção já numerada, um número igual ou menor que o último costuma ser quebra de linha
+    // do enunciado (ex: "...pontos P(2," + "4) e Q(10, 12)?"), não uma nova questão. Exceções, que são
+    // questão nova de verdade: (a) a questão anterior já tem as alternativas e a linha parece um
+    // enunciado (o arquivo repetiu o número, ex: dois "18."); (b) volta ao "1" com cara de enunciado.
     if (questionMatch && currentQuestion && anyExplicitHeading && parseInt(questionMatch[1], 10) <= lastQuestionNumber) {
-      questionMatch = null;
+      const statement = (questionMatch[2] || '').trim();
+      const looksLikeStatement = statement.length >= 15 && /^[("“'0-9A-ZÀ-Ý]/.test(statement);
+      const optionsSoFar = currentQuestion.options.filter(o => (o || '').trim()).length;
+      const isNewQuestion = looksLikeStatement && (optionsSoFar >= 2 || parseInt(questionMatch[1], 10) === 1);
+      if (!isNewQuestion) questionMatch = null;
     }
     let optionMatch = !questionMatch ? OPTION_RE.exec(line) : null;
     if (!optionMatch && !questionMatch && currentQuestion) {
@@ -437,8 +536,16 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     const isImplicitListOption = !optionMatch && !questionMatch && listItem && !!currentQuestion && lastOptionIndex < 4;
     const bareMatch = !optionMatch && !questionMatch ? BARE_OPTION_RE.exec(line) : null;
 
+    if (inLooseText && !questionMatch) continue;
+
     if (questionMatch) {
-      const number = parseInt(questionMatch[1], 10);
+      inLooseText = false;
+      let number = parseInt(questionMatch[1], 10);
+      // O mesmo número digitado duas vezes na prova (ex: dois "18."): a segunda é lida como a seguinte (19)
+      if (anyExplicitHeading && currentQuestion && number === lastQuestionNumber) {
+        numberingNotes.push(`Em ${currentSection?.name || 'uma seção'}: o número ${number} aparece duas vezes no arquivo; li a segunda questão como ${number + 1}. Confira a numeração da prova.`);
+        number = lastQuestionNumber + 1;
+      }
       // Sem nenhum título explícito encontrado até agora: a numeração voltar pra trás
       // (ex: da questão 10 pra "1)" de novo) é o único sinal de que começou outra seção.
       if (!anyExplicitHeading && currentSection && number <= lastQuestionNumber && currentSection.questions.length > 0) {
@@ -492,6 +599,14 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
 
     // Linha de continuação: acrescenta ao enunciado ou à última alternativa
     if (currentQuestion) {
+      const lastOption = lastOptionIndex >= 0 ? currentQuestion.options[lastOptionIndex] || '' : '';
+      const startsNewBlock = !!startsParagraph && lastOptionIndex >= 1
+        && (/[.!?:;…"”)]\s*$/.test(lastOption) || /^[^a-zà-ÿ]{3,45}$/.test(line))
+        && /^[A-ZÀ-Ý0-9"“'(\[]/.test(line);
+      if (startsNewBlock) {
+        inLooseText = true;
+        continue;
+      }
       if (lastOptionIndex >= 0 && currentQuestion.options[lastOptionIndex] !== undefined) {
         currentQuestion.options[lastOptionIndex] += ' ' + line;
         if (redMarked) { currentQuestion.correctAnswer = lastOptionIndex; anyRedMarked = true; }
@@ -540,11 +655,15 @@ function parseLinesIntoSections(docLines: DocLine[]): ImportResult {
     if (essayCount > 0) {
       warnings.push(`${essayCount} questão(ões) ficaram como dissertativa porque não achei ao menos 2 alternativas nela(s) — confira a formatação das alternativas dessas questões.`);
     }
+    warnings.push(...numberingNotes);
     warnings.push(...checkNumbering(nonEmptySections));
   }
 
   return { sections: nonEmptySections, warnings };
 }
+
+// Saltos maiores que isso (ex: de 20 para 150) quase sempre são um número lido errado, não questões que faltam
+const MAX_LISTED_GAP = 12;
 
 // "17", "17 e 20", "17, 18 e 20"
 const joinNumbers = (nums: number[]) =>
@@ -563,7 +682,9 @@ function checkNumbering(sections: ImportedSection[]): string[] {
       if (n === undefined) return;
       if (!prev && si === 0 && n > 1) {
         const missing = Array.from({ length: n - 1 }, (_, i) => i + 1);
-        warnings.push(`A prova começa na questão ${n}: ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} não ${missing.length === 1 ? 'foi lida' : 'foram lidas'}. Confira e adicione.`);
+        warnings.push(missing.length > MAX_LISTED_GAP
+          ? `A primeira questão lida tem o número ${n}. Confira se esse número está certo ou se faltam questões no começo.`
+          : `A prova começa na questão ${n}: ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} não ${missing.length === 1 ? 'foi lida' : 'foram lidas'}. Confira e adicione.`);
         gapSections.add(section.name);
       }
       // Número menor ou igual ao anterior = a numeração recomeçou (prova que numera por matéria)
@@ -572,7 +693,9 @@ function checkNumbering(sections: ImportedSection[]): string[] {
         const where = prev.section === section.name
           ? `Em ${section.name}`
           : `Entre ${prev.section} e ${section.name}`;
-        warnings.push(`${where}: a numeração da prova pula de ${prev.n} para ${n}, então ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} ${missing.length === 1 ? 'não foi lida' : 'não foram lidas'}. Adicione ${missing.length === 1 ? 'ela' : 'elas'} na seção e ajuste a posição.`);
+        warnings.push(missing.length > MAX_LISTED_GAP
+          ? `${where}: a numeração pula de ${prev.n} para ${n}. Confira se algum número foi lido errado ou se faltam questões.`
+          : `${where}: a numeração da prova pula de ${prev.n} para ${n}, então ${missing.length === 1 ? 'a questão' : 'as questões'} ${joinNumbers(missing)} ${missing.length === 1 ? 'não foi lida' : 'não foram lidas'}. Adicione ${missing.length === 1 ? 'ela' : 'elas'} na seção e ajuste a posição.`);
         gapSections.add(prev.section);
         gapSections.add(section.name);
       }
