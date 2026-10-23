@@ -198,6 +198,24 @@ function buildSimuladoDataFromExam(exam: any): SimuladoData {
   };
 }
 
+// Enquanto arrasta perto da borda de cima ou de baixo da tela, rola a página sozinha para dar para
+// alcançar o destino (os cartões das questões são compridos e a lista não cabe na tela).
+function autoScrollNearEdge(e: React.DragEvent) {
+  const EDGE = 110;
+  const STEP = 22;
+  const dir = e.clientY < EDGE ? -1 : e.clientY > window.innerHeight - EDGE ? 1 : 0;
+  if (!dir) return;
+  let el: HTMLElement | null = e.currentTarget as HTMLElement;
+  while (el) {
+    if (/(auto|scroll)/.test(getComputedStyle(el).overflowY) && el.scrollHeight > el.clientHeight) {
+      el.scrollTop += dir * STEP;
+      return;
+    }
+    el = el.parentElement;
+  }
+  window.scrollBy(0, dir * STEP);
+}
+
 // Posição da questão na seção: setas para subir/descer e o número digitável ("Q7"). Digitar outro
 // número e apertar Enter leva a questão direto para essa posição; as demais se ajustam.
 function QuestionPosition({ position, total, onMove }: { position: number; total: number; onMove: (to: number) => void }) {
@@ -317,6 +335,11 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
   const orderChangeAccepted = useRef(false);
   // Resumo da última importação de arquivo (fica na tela até ser fechado)
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  // Arrastar questões para mudar a ordem (dentro da mesma seção). A questão só fica "arrastável"
+  // enquanto a alça está pressionada, para não atrapalhar selecionar texto e digitar nos campos.
+  const [armedDragId, setArmedDragId] = useState<string | null>(null);
+  const [dragging, setDragging] = useState<{ sectionId: string; questionId: string } | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ questionId: string; before: boolean } | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
@@ -604,6 +627,26 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
         return { ...section, questions: next };
       })
     }));
+  };
+
+  const finishDrag = () => {
+    setDragging(null);
+    setDropTarget(null);
+    setArmedDragId(null);
+  };
+
+  // Soltou a questão sobre outra: ela vai para o lugar indicado pela linha amarela
+  const dropQuestionOn = (section: Section) => {
+    const active = dragging;
+    const target = dropTarget;
+    finishDrag();
+    if (!active || !target || active.sectionId !== section.id) return;
+    const from = section.questions.findIndex(q => q.id === active.questionId);
+    const targetIndex = section.questions.findIndex(q => q.id === target.questionId);
+    if (from < 0 || targetIndex < 0) return;
+    const insertAt = targetIndex + (target.before ? 0 : 1);
+    const to = insertAt > from ? insertAt - 1 : insertAt; // posição depois de tirar a questão do lugar antigo
+    if (to !== from) moveQuestion(section.id, active.questionId, to + 1);
   };
 
   const handleAddQuestion = (sectionId: string) => {
@@ -1517,7 +1560,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
               )}
 
               <p className="mt-3 text-xs text-slate-600">
-                Faltou ou ficou fora de ordem? Use <strong>Criar Questão</strong> na seção e depois as setas <strong>▲ ▼</strong> (ou digite o número no “Q”) para colocar cada questão no lugar certo.
+                Faltou ou ficou fora de ordem? Use <strong>Criar Questão</strong> na seção e depois <strong>arraste a questão pela alça ⠿</strong> até o lugar certo (ou use as setas <strong>▲ ▼</strong> / digite o número no “Q”).
               </p>
             </div>
           )}
@@ -1639,10 +1682,45 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                     ) : (
                       <div className="space-y-3">
                         {section.questions.map((question, qIndex) => (
-                          <Card key={question.id} className="border">
+                          <Card
+                            key={question.id}
+                            draggable={armedDragId === question.id}
+                            onDragStart={(e) => {
+                              setDragging({ sectionId: section.id, questionId: question.id });
+                              e.dataTransfer.effectAllowed = 'move';
+                              e.dataTransfer.setData('text/plain', question.id);
+                            }}
+                            onDragEnd={finishDrag}
+                            onDragOver={(e) => {
+                              if (!dragging || dragging.sectionId !== section.id) return;
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                              autoScrollNearEdge(e);
+                              const rect = e.currentTarget.getBoundingClientRect();
+                              const before = e.clientY < rect.top + rect.height / 2;
+                              setDropTarget(prev => (prev && prev.questionId === question.id && prev.before === before ? prev : { questionId: question.id, before }));
+                            }}
+                            onDrop={(e) => { e.preventDefault(); dropQuestionOn(section); }}
+                            className={`relative border transition-opacity ${dragging?.questionId === question.id ? 'opacity-40' : ''}`}
+                          >
+                            {dropTarget?.questionId === question.id && dragging && dragging.questionId !== question.id && (
+                              <div
+                                className={`pointer-events-none absolute left-0 right-0 z-10 h-1 rounded-full bg-amber-500 shadow ${dropTarget.before ? '-top-2' : '-bottom-2'}`}
+                              />
+                            )}
                             <CardContent className="p-4">
                               <div className="flex items-start justify-between gap-3 mb-2">
                                 <div className="flex items-center space-x-2 flex-wrap gap-1 min-w-0">
+                                  <button
+                                    type="button"
+                                    aria-label="Arrastar para mudar a ordem"
+                                    title="Segure e arraste para mudar a ordem da questão"
+                                    onMouseDown={() => setArmedDragId(question.id)}
+                                    onMouseUp={() => setArmedDragId(null)}
+                                    className="cursor-grab rounded p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 active:cursor-grabbing"
+                                  >
+                                    <GripVertical className="h-5 w-5" />
+                                  </button>
                                   <QuestionPosition
                                     position={qIndex + 1}
                                     total={section.questions.length}
