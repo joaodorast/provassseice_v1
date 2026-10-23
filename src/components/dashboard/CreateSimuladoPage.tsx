@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -29,7 +29,11 @@ import {
   Users,
   ListChecks,
   PenLine,
-  Shuffle
+  Shuffle,
+  ChevronUp,
+  ChevronDown,
+  AlertTriangle,
+  X
 } from 'lucide-react';
 import { toast } from '../../utils/toast';
 import { confirmAction } from '../../utils/confirm';
@@ -48,6 +52,15 @@ interface Question {
   tags: string[];
   points: number;
   fromBank?: boolean;
+  // Número que a questão tinha na prova importada (ex: 18), só como referência ao reordenar
+  printedNumber?: number;
+}
+
+// Resumo mostrado depois de importar um arquivo: quantas questões vieram em cada seção e o que conferir
+interface ImportReport {
+  total: number;
+  sections: { name: string; count: number }[];
+  warnings: string[];
 }
 
 interface Section {
@@ -185,6 +198,63 @@ function buildSimuladoDataFromExam(exam: any): SimuladoData {
   };
 }
 
+// Posição da questão na seção: setas para subir/descer e o número digitável ("Q7"). Digitar outro
+// número e apertar Enter leva a questão direto para essa posição; as demais se ajustam.
+function QuestionPosition({ position, total, onMove }: { position: number; total: number; onMove: (to: number) => void }) {
+  const [draft, setDraft] = useState(String(position));
+  useEffect(() => { setDraft(String(position)); }, [position]);
+
+  const commit = () => {
+    const wanted = Math.round(Number(draft));
+    if (!Number.isFinite(wanted) || wanted < 1) { setDraft(String(position)); return; }
+    const to = Math.min(wanted, total);
+    setDraft(String(to));
+    if (to !== position) onMove(to);
+  };
+
+  return (
+    <div
+      className="inline-flex items-stretch overflow-hidden rounded-md border border-slate-300 bg-white shadow-sm"
+      title="Mudar a ordem: use as setas ou digite o número da questão"
+    >
+      <button
+        type="button"
+        aria-label="Subir questão"
+        disabled={position <= 1}
+        onClick={() => onMove(position - 1)}
+        className="px-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <ChevronUp className="h-4 w-4" />
+      </button>
+      <label className="flex items-center gap-0.5 border-x border-slate-200 px-1.5 focus-within:bg-amber-50">
+        <span className="text-xs font-semibold text-slate-500">Q</span>
+        <input
+          value={draft}
+          inputMode="numeric"
+          aria-label="Número da questão"
+          onChange={(e) => setDraft(e.target.value.replace(/\D/g, '').slice(0, 3))}
+          onFocus={(e) => e.target.select()}
+          onBlur={commit}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
+            if (e.key === 'Escape') { setDraft(String(position)); (e.target as HTMLInputElement).blur(); }
+          }}
+          className="w-7 bg-transparent py-1 text-center text-sm font-semibold text-slate-800 outline-none"
+        />
+      </label>
+      <button
+        type="button"
+        aria-label="Descer questão"
+        disabled={position >= total}
+        onClick={() => onMove(position + 1)}
+        className="px-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent"
+      >
+        <ChevronDown className="h-4 w-4" />
+      </button>
+    </div>
+  );
+}
+
 type CreateSimuladoPageProps = {
   onBack: () => void;
   examToEdit?: any;
@@ -241,6 +311,12 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     points: 1
   });
   const [editingQuestionId, setEditingQuestionId] = useState<string | null>(null);
+  // Posição (nº da questão na seção) escolhida no diálogo de criar/editar questão
+  const [questionPosition, setQuestionPosition] = useState('');
+  // Aviso sobre mudar a ordem de simulado com cartões já gerados: perguntado uma vez por visita
+  const orderChangeAccepted = useRef(false);
+  // Resumo da última importação de arquivo (fica na tela até ser fechado)
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterDifficulty, setFilterDifficulty] = useState('all');
   const [filterSubject, setFilterSubject] = useState('all');
@@ -498,8 +574,42 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     }
   };
 
+  // Muda a ordem das questões muda o número de cada uma no gabarito. Se o simulado já teve cartões
+  // gerados, avisa uma vez antes de mexer (os cartões já impressos seguem a ordem antiga).
+  const confirmOrderChange = async (): Promise<boolean> => {
+    if (!examToEdit?.answerSheetsGeneratedAt || orderChangeAccepted.current) return true;
+    const ok = await confirmAction({
+      title: 'Mudar a ordem das questões?',
+      description: 'Os cartões-resposta deste simulado já foram gerados. Mudar a ordem muda o número de cada questão no gabarito, e os cartões já impressos podem ficar errados.',
+      confirmLabel: 'Mudar mesmo assim',
+      tone: 'warning'
+    });
+    if (ok) orderChangeAccepted.current = true;
+    return ok;
+  };
+
+  // Leva a questão para a posição `toPosition` (1 = primeira) dentro da própria seção
+  const moveQuestion = async (sectionId: string, questionId: string, toPosition: number) => {
+    if (!(await confirmOrderChange())) return;
+    setSimuladoData(prev => ({
+      ...prev,
+      sections: prev.sections.map(section => {
+        if (section.id !== sectionId) return section;
+        const from = section.questions.findIndex(q => q.id === questionId);
+        const to = Math.max(0, Math.min(toPosition - 1, section.questions.length - 1));
+        if (from < 0 || from === to) return section;
+        const next = [...section.questions];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return { ...section, questions: next };
+      })
+    }));
+  };
+
   const handleAddQuestion = (sectionId: string) => {
     setCurrentSectionId(sectionId);
+    // Questão nova entra no fim por padrão; o número pode ser mudado no diálogo
+    setQuestionPosition(String((simuladoData.sections.find(s => s.id === sectionId)?.questions.length ?? 0) + 1));
     setNewQuestion({
       question: '',
       subject: '',
@@ -517,6 +627,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
 
   const handleEditQuestion = (sectionId: string, question: Question) => {
     setCurrentSectionId(sectionId);
+    setQuestionPosition(String((simuladoData.sections.find(s => s.id === sectionId)?.questions.findIndex(q => q.id === question.id) ?? 0) + 1));
     setAlsoSaveToBank(true);
     setNewQuestion({
       question: question.question,
@@ -532,11 +643,20 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     setShowQuestionDialog(true);
   };
 
-  const handleSaveQuestion = () => {
+  const handleSaveQuestion = async () => {
     if (!newQuestion.question.trim()) {
       toast.error('Digite o enunciado da questão');
       return;
     }
+
+    // Número escolhido para a questão (1 = primeira da seção). Vazio/inválido = mantém a posição atual
+    const targetSection = simuladoData.sections.find(s => s.id === currentSectionId);
+    const currentIndex = targetSection?.questions.findIndex(q => q.id === editingQuestionId) ?? -1;
+    const wantedPosition = Math.round(Number(questionPosition));
+    const positionChanged = editingQuestionId
+      && Number.isFinite(wantedPosition) && wantedPosition >= 1
+      && Math.min(wantedPosition, targetSection?.questions.length ?? 1) !== currentIndex + 1;
+    if (positionChanged && !(await confirmOrderChange())) return;
     
     if (newQuestion.type === 'multiple-choice') {
       const limited = fitOptions(newQuestion.options, simuladoData.optionsCount);
@@ -569,22 +689,21 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     setSimuladoData(prev => ({
       ...prev,
       sections: prev.sections.map(section => {
-        if (section.id === currentSectionId) {
-          if (editingQuestionId) {
-            return {
-              ...section,
-              questions: section.questions.map(q => 
-                q.id === editingQuestionId ? questionData : q
-              )
-            };
-          } else {
-            return {
-              ...section,
-              questions: [...section.questions, questionData]
-            };
-          }
-        }
-        return section;
+        if (section.id !== currentSectionId) return section;
+        // Editar mantém a questão onde está (e o número impresso da prova); criar põe no fim
+        const list = editingQuestionId
+          ? section.questions.map(q => (q.id === editingQuestionId ? { ...questionData, printedNumber: q.printedNumber } : q))
+          : [...section.questions, questionData];
+        // Depois leva para o número pedido no diálogo, e as demais se ajustam
+        const from = list.findIndex(q => q.id === questionData.id);
+        const to = Number.isFinite(wantedPosition) && wantedPosition >= 1
+          ? Math.min(wantedPosition, list.length) - 1
+          : from;
+        if (to === from) return { ...section, questions: list };
+        const next = [...list];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return { ...section, questions: next };
       })
     }));
 
@@ -818,22 +937,35 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
             options: q.type === 'essay' ? q.options : fitOptions(q.options, limit),
             correctAnswer: q.correctAnswer,
             tags: [],
-            points: q.points
+            points: q.points,
+            printedNumber: q.number
           }))
       }));
 
+      // Tudo que o usuário precisa conferir vai para o resumo fixo (aviso que some é aviso perdido)
+      const warnings: string[] = [];
       if (wrongType > 0) {
-        toast.warning(`${wrongType} questão(ões) ${mode === 'essay' ? 'objetiva(s)' : 'dissertativa(s)'} ignorada(s): este simulado é só de questões ${mode === 'essay' ? 'dissertativas' : 'objetivas'}.`);
+        warnings.push(`${wrongType} questão(ões) ${mode === 'essay' ? 'objetiva(s)' : 'dissertativa(s)'} não ${wrongType === 1 ? 'entrou' : 'entraram'}: este simulado é só de questões ${mode === 'essay' ? 'dissertativas' : 'objetivas'}.`);
       }
       if (skipped > 0) {
-        toast.warning(`${skipped} questão(ões) ignorada(s): têm alternativas além de ${String.fromCharCode(64 + limit)} (limite deste simulado: ${optionLetters(limit)}).`);
+        warnings.push(`${skipped} questão(ões) não ${skipped === 1 ? 'entrou' : 'entraram'}: ${skipped === 1 ? 'tem' : 'têm'} alternativas além de ${String.fromCharCode(64 + limit)} (limite deste simulado: ${optionLetters(limit)}).`);
       }
+      warnings.push(...result.warnings);
 
       setSimuladoData(prev => ({ ...prev, sections: [...prev.sections, ...importedSections] }));
 
       const totalQuestions = importedSections.reduce((sum, s) => sum + s.questions.length, 0);
-      toast.success(`${importedSections.length} seção(ões) e ${totalQuestions} questão(ões) importadas! Revise antes de salvar.`);
-      result.warnings.forEach(w => toast.warning(w));
+      setImportReport({
+        total: totalQuestions,
+        sections: importedSections.map(s => ({ name: s.name, count: s.questions.length })),
+        warnings
+      });
+      // Um aviso só (cada um abre um pop-up); os detalhes ficam no resumo fixo na tela
+      if (warnings.length > 0) {
+        toast.warning(`${totalQuestions} questão(ões) importadas, mas confira o resumo abaixo: ${warnings.length} ponto(s) de atenção.`);
+      } else {
+        toast.success(`${importedSections.length} seção(ões) e ${totalQuestions} questão(ões) importadas! Revise antes de salvar.`);
+      }
     } catch (error) {
       console.error('Error importing file:', error);
       toast.error('Erro ao importar arquivo');
@@ -1327,8 +1459,68 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
             </div>
           </div>
           <p className="text-xs text-slate-500 -mt-4">
-            Word, PDF e fotos da prova (pode escolher várias fotos, na ordem das páginas) são lidos com IA e separados em seções e questões. O gabarito é puxado quando está marcado na prova (em vermelho, circulado ou numa tabela de gabarito). Sempre revise o resultado antes de salvar.
+            Word e PDF são lidos direto do arquivo, sem IA e em poucos segundos, e separados em seções e questões; o gabarito vem das alternativas em vermelho. Fotos da prova (pode escolher várias, na ordem das páginas) são lidas com IA. Sempre revise o resultado antes de salvar.
           </p>
+
+          {importReport && (
+            <div
+              className={`rounded-xl border-2 p-4 ${
+                importReport.warnings.length > 0 ? 'border-amber-300 bg-amber-50' : 'border-emerald-300 bg-emerald-50'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  {importReport.warnings.length > 0 ? (
+                    <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                  ) : (
+                    <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
+                  )}
+                  <div>
+                    <p className="font-semibold text-slate-900">
+                      Importação concluída: {importReport.total} questões em {importReport.sections.length} {importReport.sections.length === 1 ? 'seção' : 'seções'}
+                    </p>
+                    <p className="text-sm text-slate-600">
+                      {importReport.warnings.length > 0
+                        ? 'Confira os pontos abaixo antes de salvar o simulado.'
+                        : 'Tudo certo: nenhuma questão pulada. Revise o conteúdo e salve.'}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setImportReport(null)}
+                  aria-label="Fechar resumo da importação"
+                  className="rounded-full p-1.5 text-slate-500 hover:bg-black/5 hover:text-slate-800"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                {importReport.sections.map((s, i) => (
+                  <span key={`${s.name}-${i}`} className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700">
+                    {s.name}
+                    <span className="rounded-full bg-slate-100 px-1.5 py-0.5 font-semibold tabular-nums text-slate-900">{s.count}</span>
+                  </span>
+                ))}
+              </div>
+
+              {importReport.warnings.length > 0 && (
+                <ul className="mt-3 space-y-1.5 text-sm text-amber-900">
+                  {importReport.warnings.map((w, i) => (
+                    <li key={i} className="flex gap-2">
+                      <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                      <span>{w}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              <p className="mt-3 text-xs text-slate-600">
+                Faltou ou ficou fora de ordem? Use <strong>Criar Questão</strong> na seção e depois as setas <strong>▲ ▼</strong> (ou digite o número no “Q”) para colocar cada questão no lugar certo.
+              </p>
+            </div>
+          )}
 
           {isImportingFile && (
             <Card className="border-2">
@@ -1451,9 +1643,16 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                             <CardContent className="p-4">
                               <div className="flex items-start justify-between gap-3 mb-2">
                                 <div className="flex items-center space-x-2 flex-wrap gap-1 min-w-0">
-                                  <Badge variant="outline">
-                                    Q{qIndex + 1}
-                                  </Badge>
+                                  <QuestionPosition
+                                    position={qIndex + 1}
+                                    total={section.questions.length}
+                                    onMove={(to) => moveQuestion(section.id, question.id, to)}
+                                  />
+                                  {question.printedNumber !== undefined && (
+                                    <span className="text-xs text-slate-500" title="Número que a questão tinha na prova importada">
+                                      nº {question.printedNumber} na prova
+                                    </span>
+                                  )}
                                   <Badge className="bg-teal-100 text-teal-800">
                                     {formatPoints(question.points)}pt{question.points !== 1 && 's'}
                                   </Badge>
@@ -1823,6 +2022,30 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
                   </div>
                 </div>
               </div>
+
+              {(() => {
+                const sectionSize = simuladoData.sections.find(s => s.id === currentSectionId)?.questions.length ?? 0;
+                const maxPosition = editingQuestionId ? sectionSize : sectionSize + 1;
+                return (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5">
+                    <label htmlFor="question-position" className="text-sm font-medium text-slate-700">
+                      Número da questão na seção
+                    </label>
+                    <Input
+                      id="question-position"
+                      type="number"
+                      min={1}
+                      max={maxPosition}
+                      value={questionPosition}
+                      onChange={(e) => setQuestionPosition(e.target.value)}
+                      className="w-20 bg-white text-center"
+                    />
+                    <span className="text-xs text-slate-500">
+                      de 1 a {maxPosition}. As outras questões se ajustam sozinhas.
+                    </span>
+                  </div>
+                );
+              })()}
 
               {newQuestion.type === 'multiple-choice' && (
                 <div>
