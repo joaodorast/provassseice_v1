@@ -1099,12 +1099,19 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
     const where = Array.from(bySection.entries()).map(([name, labels]) => `${labels.join(', ')} em ${name}`).join('; ');
 
     const notes: string[] = [];
+    const warnings = [...pending.warnings];
     if (merged.added.length > 0) {
       notes.push(`Adicionei ${merged.added.length} ${merged.added.length === 1 ? 'questão que faltava' : 'questões que faltavam'}: ${where}.`);
       notes.push(`As outras ${merged.matched} questões do arquivo já estavam no simulado e não foram mexidas.`);
     } else {
       notes.push(`As ${merged.matched} questões do arquivo já estão todas no simulado: nada precisou ser adicionado.`);
     }
+    merged.skipped.forEach(k => {
+      warnings.push(`${k.section}: só reconheci ${k.matched} das ${k.inFile} questões do arquivo neste simulado (que tem ${k.inExam}). Parece ser outra versão da prova (ex: A ou B), então não adicionei nada nessa matéria. Use o arquivo certo deste simulado.`);
+    });
+    merged.cleaned.forEach(c => {
+      notes.push(`Na Q${c.position} de ${c.section}, tirei da alternativa ${String.fromCharCode(65 + c.option)} o texto da questão seguinte, que tinha ficado grudado nela.`);
+    });
     if (merged.notInFile > 0) {
       notes.push(`${merged.notInFile} ${merged.notInFile === 1 ? 'questão do simulado não aparece' : 'questões do simulado não aparecem'} neste arquivo e ${merged.notInFile === 1 ? 'foi mantida' : 'foram mantidas'} onde estavam.`);
     }
@@ -1116,7 +1123,7 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
       total: merged.sections.reduce((sum, s) => sum + s.questions.length, 0),
       sections: merged.sections.map(s => ({ name: s.name, count: s.questions.length })),
       notes,
-      warnings: pending.warnings
+      warnings
     });
     toast.success(merged.added.length > 0
       ? `${merged.added.length} ${merged.added.length === 1 ? 'questão adicionada' : 'questões adicionadas'}. Confira o resumo e salve o simulado.`
@@ -1191,7 +1198,11 @@ export function CreateSimuladoPage({ onBack, examToEdit, onGoToQuestionBank, onG
       addImportedSections(importedSections, warnings);
     } catch (error) {
       console.error('Error importing file:', error);
-      toast.error('Erro ao importar arquivo');
+      const reason = (error as Error)?.message || '';
+      // Depois de uma atualização do sistema, uma página que já estava aberta pede arquivos que não existem mais
+      toast.error(/dynamically imported module|importing a module script|loading chunk/i.test(reason)
+        ? 'O sistema foi atualizado enquanto esta página estava aberta. Atualize a página (Ctrl + F5) e importe o arquivo de novo.'
+        : `Erro ao importar arquivo${reason ? `: ${reason.slice(0, 140)}` : ''}`);
     } finally {
       setIsImportingFile(false);
       setImportProgress('');
