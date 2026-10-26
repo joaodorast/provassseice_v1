@@ -114,6 +114,12 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
     loadData();
   }, []);
 
+  // A lista é agrupada por ano: rola até o card destacado, que pode ter caído no meio de um grupo
+  useEffect(() => {
+    if (!highlightedExamId) return;
+    document.getElementById(`exam-card-${highlightedExamId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlightedExamId]);
+
   const loadData = async () => {
     try {
       setLoading(true);
@@ -1132,6 +1138,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               return (
                 <div
                   key={exam.id}
+                  id={`exam-card-${exam.id}`}
                   className={`flex flex-col rounded-xl border bg-white shadow-sm hover:shadow-md transition-all duration-500 ${
                     exam.hidden ? 'opacity-75 hover:opacity-100 border-dashed ' : ''
                   }${
