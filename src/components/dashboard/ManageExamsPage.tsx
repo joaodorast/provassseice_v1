@@ -37,6 +37,21 @@ import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 const sameClass = (a: any, b: any) =>
   String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
+// Ano do simulado: pelo título ("5º ANO") ou pelo código da turma ("5002-CE" -> 5º)
+const UNKNOWN_YEAR = 99;
+function examYear(exam: any): number {
+  const fromTitle = String(exam.title || '').match(/(\d{1,2})\s*[º°ªo]?\s*ano\b/i);
+  if (fromTitle) return parseInt(fromTitle[1], 10);
+  const fromClass = String(exam.selectedClass || '').trim().match(/^(\d)\d{3}\b/);
+  return fromClass ? parseInt(fromClass[1], 10) : UNKNOWN_YEAR;
+}
+
+// Bimestre pelo título ("4º BIMESTRE"); sem bimestre vai para o fim
+function examBimester(exam: any): number {
+  const match = String(exam.title || '').match(/(\d)\s*[º°ªo]?\s*bimestre/i);
+  return match ? parseInt(match[1], 10) : 9;
+}
+
 type ManageExamsPageProps = {
   onCreateExam?: () => void;
   onEditExam?: (exam: any) => void;
@@ -925,6 +940,26 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
     return matchesSearch && matchesSubject && matchesType;
   });
 
+  // Organiza a lista por ano (5º, 6º... 9º) e, dentro do ano, pela turma (5001, 5002...) e pelo bimestre
+  const examGroups = (() => {
+    const groups = new Map<number, any[]>();
+    filteredExams.forEach(exam => {
+      const year = examYear(exam);
+      groups.set(year, [...(groups.get(year) || []), exam]);
+    });
+    return Array.from(groups.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([year, list]) => ({
+        year,
+        label: year === UNKNOWN_YEAR ? 'Outros' : `${year}º Ano`,
+        exams: [...list].sort((a, b) =>
+          String(a.selectedClass || '').localeCompare(String(b.selectedClass || ''), 'pt-BR', { numeric: true })
+          || examBimester(a) - examBimester(b)
+          || String(a.title || '').localeCompare(String(b.title || ''), 'pt-BR', { numeric: true })
+        )
+      }));
+  })();
+
   const uniqueSubjects = Array.from(new Set(
     exams.flatMap(e => {
       if (e.subjects && Array.isArray(e.subjects)) {
@@ -1076,8 +1111,18 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
             </div>
           )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
-            {filteredExams.map((exam) => {
+          <div className="space-y-8">
+          {examGroups.map(group => (
+            <section key={group.year}>
+              <div className="mb-3 flex items-center gap-3">
+                <h2 className="text-lg font-semibold text-slate-800">{group.label}</h2>
+                <span className="text-sm text-slate-500">
+                  {group.exams.length} {group.exams.length === 1 ? 'simulado' : 'simulados'}
+                </span>
+                <div className="h-px flex-1 bg-slate-200" />
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3 gap-4">
+            {group.exams.map((exam) => {
               const stats = getExamStats(exam.id);
               const classStudentsCount = students.filter(s => sameClass(s.class, exam.selectedClass)).length;
               const subjectCount = getExamSubjectBreakdown(exam).length;
@@ -1278,6 +1323,9 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                 </div>
               );
             })}
+              </div>
+            </section>
+          ))}
           </div>
 
           {filteredExams.length === 0 && (
