@@ -37,19 +37,52 @@ import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 const sameClass = (a: any, b: any) =>
   String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
-// Ano do simulado: pelo título ("5º ANO") ou pelo código da turma ("5002-CE" -> 5º)
-const UNKNOWN_YEAR = 99;
-function examYear(exam: any): number {
-  const fromTitle = String(exam.title || '').match(/(\d{1,2})\s*[º°ªo]?\s*ano\b/i);
-  if (fromTitle) return parseInt(fromTitle[1], 10);
-  const fromClass = String(exam.selectedClass || '').trim().match(/^(\d)\d{3}\b/);
-  return fromClass ? parseInt(fromClass[1], 10) : UNKNOWN_YEAR;
+// Número do ano escolar num texto: "8º Ano", "8° ANO", "8 ano" -> 8
+function seriesNumber(text: unknown): number | null {
+  const match = String(text || '').match(/(\d{1,2})\s*[º°ªo]?\s*ano\b/i);
+  return match ? parseInt(match[1], 10) : null;
 }
 
-// Bimestre pelo título ("4º BIMESTRE"); sem bimestre vai para o fim
+// Ano escolar do simulado. Quem manda é a turma escolhida: o curso cadastrado dela, depois o curso salvo
+// no simulado e o código da turma ("8001-JP" -> 8º). O título fica por último, porque pode ter sido digitado errado.
+const UNKNOWN_SERIES = 99;
+function examSeries(exam: any, classGrade?: string): number {
+  const fromClassCode = String(exam.selectedClass || '').trim().match(/^(\d)\d{3}\b/);
+  return seriesNumber(classGrade)
+    ?? seriesNumber(exam.grade)
+    ?? (fromClassCode ? parseInt(fromClassCode[1], 10) : null)
+    ?? seriesNumber(exam.title)
+    ?? UNKNOWN_SERIES;
+}
+
+// Ano letivo: o que estiver escrito no título ("1º BIMESTRE 2027"); senão, o ano em que o simulado foi criado
+function examSchoolYear(exam: any): number {
+  const fromTitle = String(exam.title || '').match(/\b(20\d{2})\b/);
+  if (fromTitle) return parseInt(fromTitle[1], 10);
+  const created = new Date(exam.createdAt);
+  return isNaN(created.getTime()) ? new Date().getFullYear() : created.getFullYear();
+}
+
+// Bimestre pelo título ("4º BIMESTRE"); sem bimestre no título, pela data de criação
 function examBimester(exam: any): number {
-  const match = String(exam.title || '').match(/(\d)\s*[º°ªo]?\s*bimestre/i);
-  return match ? parseInt(match[1], 10) : 9;
+  const match = String(exam.title || '').match(/([1-4])\s*[º°ªo]?\s*bimestre/i);
+  if (match) return parseInt(match[1], 10);
+  const created = new Date(exam.createdAt);
+  return isNaN(created.getTime()) ? 9 : Math.min(4, Math.floor(created.getMonth() / 3) + 1);
+}
+
+// Título que não bate com a turma escolhida (ex: "7º ANO" numa turma do 8º, ou "9001-CE" numa turma 9001-JP)
+function titleMismatch(exam: any, series: number): string | null {
+  const title = String(exam.title || '');
+  const titleSeries = seriesNumber(title);
+  if (titleSeries !== null && series !== UNKNOWN_SERIES && titleSeries !== series) {
+    return `O título diz ${titleSeries}º ano, mas a turma ${exam.selectedClass} é do ${series}º ano`;
+  }
+  const titleClass = title.match(/\b\d{4}\s*-\s*[A-Za-z]{1,4}\b/)?.[0].replace(/\s+/g, '');
+  if (titleClass && exam.selectedClass && !sameClass(titleClass, exam.selectedClass)) {
+    return `O título diz turma ${titleClass.toUpperCase()}, mas a turma escolhida é ${exam.selectedClass}`;
+  }
+  return null;
 }
 
 type ManageExamsPageProps = {
@@ -61,6 +94,10 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
   const [searchTerm, setSearchTerm] = useState('');
   const [filterSubject, setFilterSubject] = useState('all');
   const [filterType, setFilterType] = useState('all');
+  // Ano letivo exibido ('latest' = o mais recente que tem simulado)
+  const [filterSchoolYear, setFilterSchoolYear] = useState('latest');
+  // Curso cadastrado de cada turma (nome da turma em minúsculas -> "8º Ano")
+  const [classGrades, setClassGrades] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(false);
   const [exams, setExams] = useState<any[]>([]);
   const [submissions, setSubmissions] = useState<any[]>([]);
@@ -125,11 +162,17 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
       setLoading(true);
       console.log('=== ManageExamsPage: Loading data ===');
       
-      const [examsResponse, submissionsResponse, studentsResponse] = await Promise.all([
+      const [examsResponse, submissionsResponse, studentsResponse, registeredClassesResponse] = await Promise.all([
         apiService.getExams(),
         apiService.getSubmissions(),
-        apiService.getStudents()
+        apiService.getStudents(),
+        apiService.getClasses().catch(() => null)
       ]);
+      setClassGrades(new Map(
+        (registeredClassesResponse?.classes || [])
+          .filter((cls: any) => cls?.name && cls?.grade)
+          .map((cls: any) => [String(cls.name).trim().toLowerCase(), String(cls.grade)])
+      ));
       
       console.log('ManageExamsPage: Exams response:', examsResponse);
       console.log('ManageExamsPage: Submissions response:', submissionsResponse);
@@ -929,6 +972,13 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
 
   const hiddenCount = exams.filter(exam => exam.hidden).length;
 
+  // Anos letivos que têm simulado; por padrão mostra só o mais recente, para não misturar 2026 com 2027
+  const schoolYears = Array.from(new Set(exams.map(examSchoolYear))).sort((a, b) => b - a);
+  const selectedSchoolYear: number | 'all' =
+    filterSchoolYear === 'all' ? 'all'
+    : filterSchoolYear === 'latest' ? (schoolYears[0] ?? 'all')
+    : schoolYears.includes(Number(filterSchoolYear)) ? Number(filterSchoolYear) : (schoolYears[0] ?? 'all');
+
   const filteredExams = exams.filter(exam => {
     if (!!exam.hidden !== showHidden) return false;
 
@@ -943,27 +993,41 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                        (filterType === 'simulado' && exam.type === 'simulado') ||
                        (filterType === 'avaliacao' && exam.type !== 'simulado');
     
-    return matchesSearch && matchesSubject && matchesType;
+    const matchesSchoolYear = selectedSchoolYear === 'all' || examSchoolYear(exam) === selectedSchoolYear;
+
+    return matchesSearch && matchesSubject && matchesType && matchesSchoolYear;
   });
 
-  // Organiza a lista por ano (5º, 6º... 9º) e, dentro do ano, pela turma (5001, 5002...) e pelo bimestre
+  const seriesOf = (exam: any) =>
+    examSeries(exam, classGrades.get(String(exam.selectedClass || '').trim().toLowerCase()));
+
+  // Organiza a lista por ano letivo (mais recente primeiro) e ano escolar (5º, 6º... 9º); dentro de cada grupo,
+  // pela turma (5001, 5002...), pelo bimestre e pela data de criação
   const examGroups = (() => {
-    const groups = new Map<number, any[]>();
+    const groups = new Map<string, { schoolYear: number; series: number; exams: any[] }>();
     filteredExams.forEach(exam => {
-      const year = examYear(exam);
-      groups.set(year, [...(groups.get(year) || []), exam]);
+      const schoolYear = examSchoolYear(exam);
+      const series = seriesOf(exam);
+      const key = `${schoolYear}-${series}`;
+      const group = groups.get(key) || { schoolYear, series, exams: [] };
+      group.exams.push(exam);
+      groups.set(key, group);
     });
+    const showSchoolYear = new Set(Array.from(groups.values()).map(g => g.schoolYear)).size > 1;
     return Array.from(groups.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([year, list]) => ({
-        year,
-        label: year === UNKNOWN_YEAR ? 'Outros' : `${year}º Ano`,
-        exams: [...list].sort((a, b) =>
-          String(a.selectedClass || '').localeCompare(String(b.selectedClass || ''), 'pt-BR', { numeric: true })
-          || examBimester(a) - examBimester(b)
-          || String(a.title || '').localeCompare(String(b.title || ''), 'pt-BR', { numeric: true })
-        )
-      }));
+      .sort(([, a], [, b]) => b.schoolYear - a.schoolYear || a.series - b.series)
+      .map(([key, group]) => {
+        const seriesLabel = group.series === UNKNOWN_SERIES ? 'Sem ano definido' : `${group.series}º Ano`;
+        return {
+          key,
+          label: showSchoolYear ? `${seriesLabel} · ${group.schoolYear}` : seriesLabel,
+          exams: [...group.exams].sort((a, b) =>
+            String(a.selectedClass || '').localeCompare(String(b.selectedClass || ''), 'pt-BR', { numeric: true })
+            || examBimester(a) - examBimester(b)
+            || String(a.createdAt || '').localeCompare(String(b.createdAt || ''))
+          )
+        };
+      });
   })();
 
   const uniqueSubjects = Array.from(new Set(
@@ -1098,6 +1162,22 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                 <SelectItem value="avaliacao">Avaliações</SelectItem>
               </SelectContent>
             </Select>
+            {schoolYears.length > 1 && (
+              <Select
+                value={selectedSchoolYear === 'all' ? 'all' : String(selectedSchoolYear)}
+                onValueChange={setFilterSchoolYear}
+              >
+                <SelectTrigger className="w-full md:w-44">
+                  <SelectValue placeholder="Ano letivo" />
+                </SelectTrigger>
+                <SelectContent>
+                  {schoolYears.map(year => (
+                    <SelectItem key={year} value={String(year)}>Ano letivo {year}</SelectItem>
+                  ))}
+                  <SelectItem value="all">Todos os anos letivos</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
             {(hiddenCount > 0 || showHidden) && (
               <Button
                 variant="outline"
@@ -1119,7 +1199,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
 
           <div className="space-y-8">
           {examGroups.map(group => (
-            <section key={group.year}>
+            <section key={group.key}>
               <div className="mb-3 flex items-center gap-3">
                 <h2 className="text-lg font-semibold text-slate-800">{group.label}</h2>
                 <span className="text-sm text-slate-500">
@@ -1133,6 +1213,7 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
               const classStudentsCount = students.filter(s => sameClass(s.class, exam.selectedClass)).length;
               const subjectCount = getExamSubjectBreakdown(exam).length;
               const isApplied = !!exam.answerSheetsGeneratedAt || stats.submissions > 0;
+              const mismatch = titleMismatch(exam, seriesOf(exam));
               const actionClass = 'flex-col h-auto py-2 gap-1 transition-all duration-150 hover:-translate-y-0.5 hover:shadow-sm hover:bg-white';
 
               return (
@@ -1175,6 +1256,17 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
                         <p className="text-sm text-slate-500 mt-1 line-clamp-2">{exam.description}</p>
                       )}
                       <p className="text-xs text-slate-400 mt-2">Criado em {formatDate(exam.createdAt)}</p>
+                      {mismatch && (
+                        <button
+                          type="button"
+                          onClick={() => handleEditClassClick(exam)}
+                          className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-left text-xs text-amber-800 hover:bg-amber-100"
+                          title="Clique para corrigir o título ou a turma"
+                        >
+                          <AlertCircle className="w-3.5 h-3.5 mt-px flex-shrink-0" />
+                          <span>{mismatch}. Ele está organizado pela turma. Clique para corrigir.</span>
+                        </button>
+                      )}
                     </div>
                     <Button
                       variant="outline"
