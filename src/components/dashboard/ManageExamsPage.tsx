@@ -556,7 +556,10 @@ export function ManageExamsPage({ onCreateExam, onEditExam }: ManageExamsPagePro
         return;
       }
 
-      const classStudents = students.filter(student => sameClass(student.class, selectedClass));
+      // Cartões em ordem alfabética pelo nome (aluno recém-cadastrado entra no lugar certo, não no fim)
+      const classStudents = students
+        .filter(student => sameClass(student.class, selectedClass))
+        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }));
       
       if (classStudents.length === 0) {
         showToast(`Nenhum aluno encontrado na turma ${selectedClass}`, 'error');
