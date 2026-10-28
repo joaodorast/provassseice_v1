@@ -641,7 +641,10 @@ export function ManageStudentsPage() {
     const matchesClass = filterClass === 'all'
       || (filterClass === NO_CLASS_FILTER ? !student.class?.trim() : normalize(student.class) === normalize(filterClass));
     return matchesName && matchesRegistration && matchesCourse && matchesClass;
-  });
+  }).sort((a, b) =>
+    // Ordem alfabética pelo nome (aluno recém-cadastrado entra no lugar certo, não no fim)
+    String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' })
+  );
 
   // Só conta como selecionado o que está visível com os filtros atuais
   const selectedFiltered = filteredStudents.filter(s => selectedIds.has(s.id));
