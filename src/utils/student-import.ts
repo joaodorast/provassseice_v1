@@ -136,11 +136,16 @@ export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Im
   let cCourse = header.findIndex((h, i) => i !== cGrade && (h === 'ano' || /curso|serie|etapa/.test(h)));
   let cRegistration = findCol('matricula', 'registro', 'ra');
 
-  const dataRows = rows.slice(1);
+  let dataRows = rows.slice(1);
 
   if (cName < 0) {
     // Nenhum cabeçalho reconhecido: tenta adivinhar pelo conteúdo dos dados
     const guessed = guessColumnsFromData(dataRows, colCount);
+    // Sem cabeçalho, a primeira linha já é um aluno (ex: exportação do sistema da escola, que começa
+    // direto em "2025912860 | Alice Soares Garcez"). Antes ela era descartada como se fosse o cabeçalho
+    // e o primeiro aluno da lista sumia da importação.
+    const firstName = guessed.cName >= 0 ? String(rows[0]?.[guessed.cName] ?? '').trim() : '';
+    if (firstName.split(/\s+/).length >= 2) dataRows = rows;
     if (guessed.cName >= 0) {
       cName = guessed.cName;
       cEmail = guessed.cEmail;
@@ -190,17 +195,32 @@ export async function readStudentsFromFile(file: File): Promise<ImportedStudent[
 
   const XLSX = await import('xlsx');
   const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-  const firstSheetName = workbook.SheetNames[0];
-  const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[firstSheetName], { header: 1, defval: '' }) as any[][];
-  // Se a planilha não tem coluna de turma, o nome da aba às vezes já é o código da turma
-  // (ex: aba "9001"). Nome padrão de aba ("Planilha2", "Sheet1"...) não é turma; aí tenta o
-  // nome do arquivo (ex: "9001 - CE.xlsx"), desde que pareça um código de turma
-  const sheetName = firstSheetName.trim();
   const fileBaseName = file.name.replace(/\.[^.]+$/, '').trim();
-  let sheetNameHint = '';
-  if (!isDefaultSheetName(sheetName)) sheetNameHint = sheetName;
-  else if (looksLikeClassName(fileBaseName)) sheetNameHint = fileBaseName;
-  return rowsToStudents(jsonData, sheetNameHint);
+
+  // Lê todas as abas, não só a primeira: a escola às vezes deixa na frente a exportação crua do sistema
+  // dela e, numa aba de trás, a lista arrumada (NOME, TURMA, TURNO, MATRÍCULA). Fica com a aba que tem
+  // cabeçalho reconhecido; empatando (ou sem cabeçalho em nenhuma), a que tem mais alunos.
+  let best: { students: ImportedStudent[]; hasHeader: boolean } | null = null;
+  for (const name of workbook.SheetNames) {
+    const rows = (XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }) as any[][])
+      .filter(r => r.some(c => String(c ?? '').trim()));
+    if (rows.length === 0) continue;
+    // Se a planilha não tem coluna de turma, o nome da aba às vezes já é o código da turma
+    // (ex: aba "9001"). Nome padrão de aba ("Planilha2", "Sheet1"...) não é turma; aí tenta o
+    // nome do arquivo (ex: "9001 - CE.xlsx"), desde que pareça um código de turma
+    const sheetName = name.trim();
+    let sheetNameHint = '';
+    if (!isDefaultSheetName(sheetName)) sheetNameHint = sheetName;
+    else if (looksLikeClassName(fileBaseName)) sheetNameHint = fileBaseName;
+    const students = rowsToStudents(rows, sheetNameHint);
+    const hasHeader = rows[0].map(normalizeHeaderCell).some(h => /nome|aluno|estudante/.test(h));
+    if (!best
+      || (hasHeader && !best.hasHeader)
+      || (hasHeader === best.hasHeader && students.length > best.students.length)) {
+      best = { students, hasHeader };
+    }
+  }
+  return best?.students || [];
 }
 
 export type PlannedClass = { name: string; grade: string; shift: string };
