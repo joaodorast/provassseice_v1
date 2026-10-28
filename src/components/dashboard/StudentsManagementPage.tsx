@@ -202,7 +202,7 @@ export function StudentsManagementPage() {
                          student.registration.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesClass = selectedClass === 'all' || student.classId === selectedClass;
     return matchesSearch && matchesClass;
-  });
+  }).sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'pt-BR', { sensitivity: 'base' }));
 
   const getClassStats = () => {
     return classes.map(cls => ({
