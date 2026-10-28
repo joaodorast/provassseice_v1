@@ -42,7 +42,7 @@ import { User, Exam, Submission } from '../../App';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 import { apiService } from '../../utils/api';
 import { ExcelExporter, ExcelColumn } from '../../utils/excel-utils';
-import { readStudentsFromFile, isStudentSpreadsheet, ensureClassesExist, stripAccents, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
+import { readStudentsFromFileDetailed, isStudentSpreadsheet, ensureClassesExist, stripAccents, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { ActionResultDialog, ActionResult } from './ActionResultDialog';
 
 // Funções ainda sem efeito real no sistema (as opções são salvas mas nada as usa):
@@ -592,7 +592,8 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
 
     setImporting('students');
     try {
-      const students = await readStudentsFromFile(file);
+      const reading = await readStudentsFromFileDetailed(file);
+      const students = reading.students;
       if (students.length === 0) {
         setActionResult({
           type: 'error',
@@ -603,7 +604,7 @@ export function ConfigurationPage({ user }: ConfigurationPageProps) {
       }
 
       const summary = await saveImportedStudents(students);
-      setActionResult(describeStudentImport(summary));
+      setActionResult(describeStudentImport(summary, reading));
     } catch (error: any) {
       console.error('Error importing students:', error);
       setActionResult({ type: 'error', title: 'Falha na importação', message: 'Erro ao processar arquivo: ' + (error?.message || 'Erro desconhecido') });
