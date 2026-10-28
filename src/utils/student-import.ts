@@ -120,7 +120,7 @@ const looksLikeClassName = (name: string) => name.length <= 20 && /^\d/.test(nam
 // nenhum, adivinhar pelo conteúdo das células (guessColumnsFromData); (3) por último, assume o
 // modelo fixo antigo (Nome, Email, Turma, Série, Matrícula, nessa ordem). Assim, mesmo uma
 // planilha "de qualquer jeito" — sem os campos certos — tem uma chance boa de ser importada.
-export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): ImportedStudent[] {
+export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = '', skippedRows?: string[]): ImportedStudent[] {
   if (rows.length === 0) return [];
 
   const colCount = Math.max(...rows.map(r => r?.length || 0), 1);
@@ -166,7 +166,12 @@ export function rowsToStudents(rows: any[][], sheetNameAsClassFallback = ''): Im
     if (!row || row.length === 0) continue;
 
     const name = cell(row, cName);
-    if (!name) continue;
+    if (!name) {
+      // Linha com dados mas sem nome não vira aluno; fica anotada para o aviso da importação
+      const content = row.map(c => String(c ?? '').trim()).filter(Boolean);
+      if (content.length > 0 && skippedRows) skippedRows.push(content.slice(0, 3).join(' | '));
+      continue;
+    }
 
     students.push({
       name,
@@ -186,11 +191,32 @@ export const isStudentSpreadsheet = (file: File) =>
   /\.(csv|xlsx|xls)$/i.test(file.name) ||
   ['text/csv', 'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'].includes(file.type);
 
+// Resultado da leitura do arquivo, com o que precisa ser avisado na importação
+export type StudentFileReading = {
+  students: ImportedStudent[];
+  /** Linhas com dados mas sem nome de aluno (não viraram aluno) */
+  skippedRows: string[];
+  /** Alunos que estavam só numa aba secundária e foram incluídos (aba -> quantidade) */
+  fromOtherSheets: { sheet: string; count: number }[];
+};
+
 // Lê um arquivo CSV/Excel e devolve os alunos encontrados
 export async function readStudentsFromFile(file: File): Promise<ImportedStudent[]> {
+  return (await readStudentsFromFileDetailed(file)).students;
+}
+
+const nameKey = (name: string) => stripAccents(String(name || '')).toLowerCase().replace(/\s+/g, ' ').trim();
+
+// Parece nome de pessoa: duas palavras ou mais, sem números nem e-mail
+const looksLikePersonName = (name: string) =>
+  name.trim().split(/\s+/).length >= 2 && !/\d|@|https?:|javascript:/i.test(name);
+
+export async function readStudentsFromFileDetailed(file: File): Promise<StudentFileReading> {
+  const skippedRows: string[] = [];
   if (/\.csv$/i.test(file.name) || file.type === 'text/csv') {
     // Aceita ";", "," ou tabulação, em UTF-8 ou na codificação do Excel
-    return rowsToStudents(parseCsv(decodeCsvBytes(await file.arrayBuffer())));
+    const students = rowsToStudents(parseCsv(decodeCsvBytes(await file.arrayBuffer())), '', skippedRows);
+    return { students, skippedRows, fromOtherSheets: [] };
   }
 
   const XLSX = await import('xlsx');
@@ -198,9 +224,11 @@ export async function readStudentsFromFile(file: File): Promise<ImportedStudent[
   const fileBaseName = file.name.replace(/\.[^.]+$/, '').trim();
 
   // Lê todas as abas, não só a primeira: a escola às vezes deixa na frente a exportação crua do sistema
-  // dela e, numa aba de trás, a lista arrumada (NOME, TURMA, TURNO, MATRÍCULA). Fica com a aba que tem
+  // dela e, numa aba de trás, a lista arrumada (NOME, TURMA, TURNO, MATRÍCULA). A principal é a que tem
   // cabeçalho reconhecido; empatando (ou sem cabeçalho em nenhuma), a que tem mais alunos.
-  let best: { students: ImportedStudent[]; hasHeader: boolean } | null = null;
+  type SheetReading = { sheet: string; students: ImportedStudent[]; hasHeader: boolean; skipped: string[] };
+  const sheets: SheetReading[] = [];
+  let best: SheetReading | null = null;
   for (const name of workbook.SheetNames) {
     const rows = (XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '' }) as any[][])
       .filter(r => r.some(c => String(c ?? '').trim()));
@@ -212,15 +240,38 @@ export async function readStudentsFromFile(file: File): Promise<ImportedStudent[
     let sheetNameHint = '';
     if (!isDefaultSheetName(sheetName)) sheetNameHint = sheetName;
     else if (looksLikeClassName(fileBaseName)) sheetNameHint = fileBaseName;
-    const students = rowsToStudents(rows, sheetNameHint);
+    const skipped: string[] = [];
+    const students = rowsToStudents(rows, sheetNameHint, skipped);
     const hasHeader = rows[0].map(normalizeHeaderCell).some(h => /nome|aluno|estudante/.test(h));
+    const reading = { sheet: sheetName, students, hasHeader, skipped };
+    sheets.push(reading);
     if (!best
       || (hasHeader && !best.hasHeader)
       || (hasHeader === best.hasHeader && students.length > best.students.length)) {
-      best = { students, hasHeader };
+      best = reading;
     }
   }
-  return best?.students || [];
+  if (!best) return { students: [], skippedRows, fromOtherSheets: [] };
+
+  // Nenhum aluno fica de fora: quem aparece em outra aba e não está na principal também entra
+  // (só nomes de pessoa, para não importar títulos ou totais de uma aba de resumo)
+  const students = [...best.students];
+  skippedRows.push(...best.skipped);
+  const known = new Set(students.map(s => nameKey(s.name)));
+  const fromOtherSheets: { sheet: string; count: number }[] = [];
+  for (const reading of sheets) {
+    if (reading === best) continue;
+    let count = 0;
+    for (const student of reading.students) {
+      const key = nameKey(student.name);
+      if (known.has(key) || !looksLikePersonName(student.name)) continue;
+      known.add(key);
+      students.push(student);
+      count++;
+    }
+    if (count > 0) fromOtherSheets.push({ sheet: reading.sheet, count });
+  }
+  return { students, skippedRows, fromOtherSheets };
 }
 
 export type PlannedClass = { name: string; grade: string; shift: string };
@@ -333,15 +384,23 @@ export type StudentImportSummary = {
   createdClasses: number;
   // Turmas criadas sem curso: a planilha não tem a coluna CURSO e o código da turma não segue o padrão (8001)
   classesWithoutCourse: string[];
+  /** Alunos salvos cuja matrícula já estava com outro nome (confira qual está certo) */
+  registrationConflicts: string[];
+  /** Alunos do arquivo que não aparecem no sistema depois da importação */
+  missing: string[];
+  /** Conferência por turma: alunos no arquivo x alunos dessa turma no sistema depois da importação */
+  perClass: { name: string; inFile: number; inSystem: number }[];
   error?: string;
 };
 
-// Chave para reconhecer um aluno que já está cadastrado: a matrícula, quando existe; senão, nome + turma
-const studentKey = (s: { name?: string; class?: string; registration?: string }) => {
-  const registration = String(s.registration || '').trim();
-  if (registration) return `r:${registration}`;
-  const norm = (t?: string) => stripAccents(String(t || '')).toLowerCase().replace(/\s+/g, ' ').trim();
-  return `n:${norm(s.name)}|${norm(s.class)}`;
+// Um aluno já está cadastrado quando é a MESMA pessoa: mesmo nome e mesma turma, ou mesmo nome e mesma
+// matrícula. Matrícula igual com nome diferente NÃO é o mesmo aluno: antes esse aluno era descartado como
+// "já cadastrado" e sumia da importação sem aviso.
+const norm = (t?: string) => stripAccents(String(t || '')).toLowerCase().replace(/\s+/g, ' ').trim();
+const nameClassKey = (s: { name?: string; class?: string }) => `${norm(s.name)}|${norm(s.class)}`;
+const nameRegistrationKey = (s: { name?: string; registration?: string }) => {
+  const registration = String(s.registration || '').trim().replace(/^0+/, '');
+  return registration ? `${norm(s.name)}|${registration}` : '';
 };
 
 // Salva os alunos importados no servidor: pula quem já está cadastrado, envia em lotes (um lote
@@ -349,7 +408,8 @@ const studentKey = (s: { name?: string; class?: string; registration?: string })
 // falha apareça como erro em vez de "importado com sucesso".
 export async function saveImportedStudents(students: ImportedStudent[]): Promise<StudentImportSummary> {
   const summary: StudentImportSummary = {
-    total: students.length, saved: 0, duplicates: 0, failed: 0, withoutClass: 0, createdClasses: 0, classesWithoutCourse: []
+    total: students.length, saved: 0, duplicates: 0, failed: 0, withoutClass: 0, createdClasses: 0, classesWithoutCourse: [],
+    registrationConflicts: [], missing: [], perClass: []
   };
 
   const existingResponse = await apiService.getStudents();
@@ -358,13 +418,28 @@ export async function saveImportedStudents(students: ImportedStudent[]): Promise
     summary.error = existingResponse.error || 'Não foi possível consultar os alunos já cadastrados';
     return summary;
   }
-  const seen = new Set<string>((existingResponse?.students || []).map(studentKey));
+  const existing: any[] = existingResponse?.students || [];
+  const seen = new Set<string>();
+  const nameOfRegistration = new Map<string, string>();
+  const remember = (s: { name?: string; class?: string; registration?: string }) => {
+    seen.add(nameClassKey(s));
+    const byRegistration = nameRegistrationKey(s);
+    if (byRegistration) seen.add(byRegistration);
+    const registration = String(s.registration || '').trim().replace(/^0+/, '');
+    if (registration && !nameOfRegistration.has(registration)) nameOfRegistration.set(registration, String(s.name || '').trim());
+  };
+  existing.forEach(remember);
 
   const toSave: ImportedStudent[] = [];
   for (const student of students) {
-    const key = studentKey(student);
-    if (seen.has(key)) { summary.duplicates++; continue; }
-    seen.add(key);
+    const byRegistration = nameRegistrationKey(student);
+    if (seen.has(nameClassKey(student)) || (byRegistration && seen.has(byRegistration))) { summary.duplicates++; continue; }
+    const registration = String(student.registration || '').trim().replace(/^0+/, '');
+    const owner = registration ? nameOfRegistration.get(registration) : undefined;
+    if (owner && norm(owner) !== norm(student.name)) {
+      summary.registrationConflicts.push(`${student.name} (matrícula ${student.registration} também está com ${owner})`);
+    }
+    remember(student);
     toSave.push(student);
   }
 
@@ -388,13 +463,57 @@ export async function saveImportedStudents(students: ImportedStudent[]): Promise
   const registration = await registerClassesFromStudents(savedStudents);
   summary.createdClasses = registration.created;
   summary.classesWithoutCourse = registration.withoutCourse;
+
+  // Conferência final: busca de novo os alunos no sistema e confere, um por um, se cada aluno do arquivo
+  // está lá. Qualquer aluno que não aparecer é listado pelo nome no aviso da importação.
+  const after = await apiService.getStudents().catch(() => null);
+  if (after?.students) {
+    const inSystem = new Set<string>((after.students as any[]).map(nameClassKey));
+    const inSystemByRegistration = new Set<string>((after.students as any[]).map(nameRegistrationKey).filter(Boolean));
+    summary.missing = students
+      .filter(s => !inSystem.has(nameClassKey(s)) && !(nameRegistrationKey(s) && inSystemByRegistration.has(nameRegistrationKey(s))))
+      .map(s => `${s.name}${s.class ? ` (${s.class})` : ''}`);
+    const classCount = new Map<string, { name: string; inFile: number }>();
+    students.forEach(s => {
+      const key = norm(s.class);
+      if (!key) return;
+      const entry = classCount.get(key) || { name: String(s.class).trim(), inFile: 0 };
+      entry.inFile++;
+      classCount.set(key, entry);
+    });
+    summary.perClass = Array.from(classCount.entries())
+      .map(([key, entry]) => ({
+        name: entry.name,
+        inFile: entry.inFile,
+        inSystem: (after.students as any[]).filter(s => norm(s.class) === key).length
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { numeric: true }));
+  } else {
+    summary.error = summary.error || 'Não foi possível conferir os alunos depois da importação';
+  }
   return summary;
 }
 
 // Monta o conteúdo do modal de resultado a partir do resumo da importação
-export function describeStudentImport(summary: StudentImportSummary) {
+export function describeStudentImport(summary: StudentImportSummary, reading?: StudentFileReading) {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  const list = (items: string[], max = 8) => items.slice(0, max).join('; ') + (items.length > max ? `; e mais ${items.length - max}` : '');
   const details: string[] = [];
+  if (summary.missing.length > 0) {
+    details.push(`ATENÇÃO: ${plural(summary.missing.length, 'aluno do arquivo não está no sistema', 'alunos do arquivo não estão no sistema')}: ${list(summary.missing)}. Importe o arquivo de novo ou cadastre manualmente.`);
+  }
+  if (summary.registrationConflicts.length > 0) {
+    details.push(`${plural(summary.registrationConflicts.length, 'aluno foi salvo', 'alunos foram salvos')} com matrícula repetida, confira qual está certo: ${list(summary.registrationConflicts)}`);
+  }
+  if (reading?.skippedRows.length) {
+    details.push(`${plural(reading.skippedRows.length, 'linha da planilha ficou de fora por não ter nome de aluno', 'linhas da planilha ficaram de fora por não terem nome de aluno')}: ${list(reading.skippedRows, 5)}`);
+  }
+  if (reading?.fromOtherSheets.length) {
+    details.push(`Também entraram alunos que estavam só em outra aba: ${reading.fromOtherSheets.map(s => `${s.count} da aba "${s.sheet}"`).join(', ')}`);
+  }
+  if (summary.perClass.length > 0) {
+    details.push(`Conferência por turma (no arquivo → no sistema): ${summary.perClass.map(c => `${c.name}: ${c.inFile} → ${c.inSystem}`).join(' · ')}`);
+  }
   if (summary.saved > 0 && summary.failed > 0) details.push(plural(summary.saved, 'aluno foi salvo', 'alunos foram salvos'));
   if (summary.failed > 0) details.push(`${plural(summary.failed, 'aluno não foi salvo', 'alunos não foram salvos')}${summary.error ? ` (${summary.error})` : ''}`);
   if (summary.duplicates > 0) details.push(`${plural(summary.duplicates, 'aluno já estava cadastrado e foi ignorado', 'alunos já estavam cadastrados e foram ignorados')}`);
@@ -405,6 +524,14 @@ export function describeStudentImport(summary: StudentImportSummary) {
     details.push(`${plural(summary.classesWithoutCourse.length, 'turma ficou sem curso', 'turmas ficaram sem curso')} (${list}): a planilha não tem a coluna CURSO e o código não indica o ano. Defina em Gerenciar Turmas.`);
   }
 
+  if (summary.missing.length > 0 && summary.failed === 0) {
+    return {
+      type: 'error' as const,
+      title: 'Importação incompleta',
+      message: `${plural(summary.missing.length, 'aluno do arquivo não entrou', 'alunos do arquivo não entraram')} no sistema. Veja os nomes abaixo e importe o arquivo de novo: quem já foi salvo não será duplicado.`,
+      details
+    };
+  }
   if (summary.failed > 0) {
     return {
       type: 'error' as const,
