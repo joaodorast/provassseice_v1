@@ -38,7 +38,7 @@ import { ConfirmDeleteDialog } from './ConfirmDeleteDialog';
 import { PopupHeader, POPUP_BUTTON } from './PopupHeader';
 import { SearchPickerDialog, PickerField, PickerItem } from './SearchPicker';
 import { confirmAction } from '../../utils/confirm';
-import { readStudentsFromFile, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
+import { readStudentsFromFileDetailed, isStudentSpreadsheet, stripAccents, ensureClassesExist, ImportedStudent, saveImportedStudents, describeStudentImport } from '../../utils/student-import';
 import { apiService } from '../../utils/api';
 import { projectId, publicAnonKey } from '../../utils/supabase/info';
 
@@ -211,7 +211,8 @@ export function ManageStudentsPage() {
 
     try {
       setLoading(true);
-      const newStudents: ImportedStudent[] = await readStudentsFromFile(file);
+      const reading = await readStudentsFromFileDetailed(file);
+      const newStudents: ImportedStudent[] = reading.students;
 
       if (newStudents.length === 0) {
         setImportResult({
@@ -226,7 +227,7 @@ export function ManageStudentsPage() {
 
       const summary = await saveImportedStudents(newStudents);
       await Promise.all([loadStudents(), loadCoursesAndClasses()]);
-      setImportResult(describeStudentImport(summary));
+      setImportResult(describeStudentImport(summary, reading));
     } catch (error) {
       console.error('Error processing file:', error);
       setImportResult({
